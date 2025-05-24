@@ -17,6 +17,7 @@ pyarrow>=14.0.0          # Parquetファイル処理
 statsmodels>=0.14.0      # 統計分析
 scipy>=1.11.0            # 科学計算
 scikit-learn>=1.3.0      # 機械学習
+pmdarima==2.0.4
 
 # 日本固有機能
 jpholiday>=0.1.8         # 日本の祝日判定
