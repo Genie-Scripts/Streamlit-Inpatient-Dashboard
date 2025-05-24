@@ -74,6 +74,14 @@ def check_forecast_dependencies():
     
     return len(missing_libs) == 0
 
+# ページ設定
+st.set_page_config(
+    page_title="入退院分析ダッシュボード",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 def check_forecast_dependencies():
     """予測機能に必要な依存関係をチェック"""
     missing_libs = []
@@ -153,13 +161,6 @@ def load_and_process_files(files):
         }
         return None, error_info
 
-# ページ設定
-st.set_page_config(
-    page_title="入退院分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # カスタムCSS（フォントサイズ拡大版）
 st.markdown("""
