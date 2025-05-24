@@ -1,16 +1,22 @@
 streamlit
-numpy  # pmdarima より前に移動
-cython # pmdarima のビルドに必要なため追加
-pandas
+setuptools>=38.6.0,!=50.0.0
+Cython>=0.29,!=0.29.18,!=0.29.31
+numpy>=1.21.2  # pmdarima の要件に合わせる
+pandas>=0.19     # pmdarima の要件に合わせる
+scipy>=1.3.2     # pmdarima の要件に合わせる
+joblib>=0.11     # pmdarima の要件に合わせる
+scikit-learn>=0.22 # pmdarima の要件に合わせる
+statsmodels>=0.13.2 # pmdarima の要件に合わせる
+urllib3          # pmdarima の要件
+packaging>=17.1  # pmdarima の要件
 plotly
 matplotlib
 openpyxl
 python-dateutil
 psutil
-scipy
 pillow
 reportlab
 jpholiday
 xlsxwriter>=3.0.0
-statsmodels
-pmdarima
+# pytz==2025.2 # zoneinfo の使用を推奨するためコメントアウト、必要なら戻す
+pmdarima==2.0.4
