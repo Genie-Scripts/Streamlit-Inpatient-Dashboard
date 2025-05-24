@@ -14,13 +14,20 @@ import io
 import zipfile
 import tempfile
 import os
+
+# ページ設定
+st.set_page_config(
+    page_title="入退院分析ダッシュボード",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import psutil
 import time
 from pdf_output_tab import create_pdf_output_tab
 from scipy import stats # display_trend_analysis で使用 (pip install scipy が必要)
-
-
 
 # カスタムモジュールのインポート
 try:
@@ -45,14 +52,6 @@ except ImportError as e:
     st.error("- forecast_analysis_tab.py (予測機能)")  # 追加
     FORECAST_AVAILABLE = False
     st.stop()
-
-# ページ設定
-st.set_page_config(
-    page_title="入退院分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # 必要なライブラリの確認と警告
 def check_forecast_dependencies():
