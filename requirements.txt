@@ -1,7 +1,7 @@
 streamlit
 setuptools>=38.6.0,!=50.0.0
 Cython>=0.29,!=0.29.18,!=0.29.31
-numpy==1.26.4 # <-- numpyのバージョンを固定 (例として1.26.4、適宜調整)
+numpy==1.24.3  # Python 3.11 と pmdarima 2.0.4 との互換性が期待できるバージョン例
 pandas>=0.19
 scipy>=1.3.2
 joblib>=0.11
@@ -18,5 +18,5 @@ pillow
 reportlab
 jpholiday
 xlsxwriter>=3.0.0
-# pytz==2025.2 # zoneinfo の使用を推奨
+# pytz は zoneinfo を推奨
 pmdarima==2.0.4
