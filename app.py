@@ -46,6 +46,14 @@ except ImportError as e:
     FORECAST_AVAILABLE = False
     st.stop()
 
+# ページ設定
+st.set_page_config(
+    page_title="入退院分析ダッシュボード",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # 必要なライブラリの確認と警告
 def check_forecast_dependencies():
     """予測機能に必要な依存関係をチェック"""
@@ -75,14 +83,6 @@ def check_forecast_dependencies():
         )
     
     return len(missing_libs) == 0
-
-# ページ設定
-st.set_page_config(
-    page_title="入退院分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 def display_trend_analysis(monthly_data):
     """トレンド分析の詳細表示"""
