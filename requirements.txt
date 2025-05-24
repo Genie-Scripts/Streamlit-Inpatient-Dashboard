@@ -1,6 +1,7 @@
 streamlit
+numpy  # pmdarima より前に移動
+cython # pmdarima のビルドに必要なため追加
 pandas
-numpy
 plotly
 matplotlib
 openpyxl
@@ -11,6 +12,5 @@ pillow
 reportlab
 jpholiday
 xlsxwriter>=3.0.0
-pytz==2025.2
 statsmodels
 pmdarima
