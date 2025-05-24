@@ -13,3 +13,4 @@ jpholiday
 xlsxwriter>=3.0.0
 pytz==2025.2
 statsmodels
+pmdarima
