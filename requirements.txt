@@ -63,6 +63,7 @@ flake8>=6.1.0           # リンター
 xgboost>=1.7.6          # 勾配ブースティング
 lightgbm>=4.1.0         # 軽量勾配ブースティング
 prophet>=1.1.4          # 時系列予測（Facebook Prophet）
+pmdarima==2.0.4
 
 # ===== データベース接続（将来の拡張用） =====
 sqlalchemy>=2.0.23      # データベースORM
