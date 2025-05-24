@@ -1,33 +1,34 @@
 import streamlit as st
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# st.set_page_config はここ（他のstコマンドより前）に記述します
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-st.set_page_config(
-    page_title="入退院分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
-try:
-    import jpholiday
-    JPHOLIDAY_AVAILABLE = True
-except ImportError:
-    JPHOLIDAY_AVAILABLE = False
-    st.sidebar.warning("⚠️ 祝日機能は簡易版を使用")
 import io
 import zipfile
 import tempfile
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import psutil
 import time
-from pdf_output_tab import create_pdf_output_tab
+
+# オプショナルライブラリの条件付きインポート
+JPHOLIDAY_AVAILABLE = False
+PSUTIL_AVAILABLE = False
+
+try:
+    import jpholiday
+    JPHOLIDAY_AVAILABLE = True
+    st.sidebar.success("✅ 日本祝日機能が利用可能です")
+except ImportError:
+    st.sidebar.warning("⚠️ jpholiday未インストール: 祝日判定機能は簡易版を使用します")
+    JPHOLIDAY_AVAILABLE = False
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 # カスタムモジュールのインポート
 try:
