@@ -11,6 +11,7 @@ import tempfile
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+from pdf_output_tab import create_pdf_output_tab
 
 # オプショナルライブラリの条件付きインポート
 JPHOLIDAY_AVAILABLE = False
