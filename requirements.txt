@@ -8,10 +8,7 @@ packaging>=17.1          # pmdarimaの要件から
 streamlit==1.34.0 # 例 (ローカルバージョンに合わせる)
 pandas==2.0.3     # 例
 plotly            # バージョン指定推奨
-statsmodels       # バージョン指定推奨
-
-# pmdarima (バージョンを固定)
-pmdarima==2.0.4   # 例 (新しい安定バージョン)
+statsmodels==0.14.1
 
 # ===== 必須ライブラリ（最小限版） =====
 
