@@ -1,15 +1,15 @@
-# ビルド依存関係を先に
-numpy==1.26.4    # ローカル環境で動作確認の取れた最新安定版に近いもの
-Cython==3.0.10   # 同上
-setuptools>=38.6.0,!=50.0.0 # pmdarimaの要件から
-packaging>=17.1          # pmdarimaの要件から
+numpy==1.26.4
+pandas==2.0.3  # pandasのバージョンも指定
+cython==3.0.10
+setuptools>=38.6.0,!=50.0.0
+packaging>=17.1
 
-# Streamlitと主要ライブラリ
-streamlit==1.34.0 # 例 (ローカルバージョンに合わせる)
-pandas==2.0.3     # 例
-plotly            # バージョン指定推奨
+streamlit==1.34.0
+plotly
 statsmodels==0.14.1
 
+# pmdarima は一旦コメントアウトして、pandasのビルドが通るか確認する
+# pmdarima==2.0.4
 # ===== 必須ライブラリ（最小限版） =====
 
 # データ可視化
@@ -22,7 +22,6 @@ pyarrow>=14.0.0          # Parquetファイル処理
 statsmodels>=0.14.0      # 統計分析
 scipy>=1.11.0            # 科学計算
 scikit-learn>=1.3.0      # 機械学習
-pmdarima==2.0.4
 
 # 日本固有機能
 jpholiday>=0.1.8         # 日本の祝日判定
