@@ -2,3 +2,8 @@ streamlit
 pandas
 numpy
 plotly
+jpholiday
+matplotlib
+openpyxl
+python-dateutil
+psutil
