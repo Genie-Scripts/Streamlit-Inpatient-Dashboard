@@ -1,4 +1,13 @@
 import streamlit as st
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# st.set_page_config はここ（他のstコマンドより前）に記述します
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+st.set_page_config(
+    page_title="入退院分析ダッシュボード",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -81,14 +90,6 @@ def load_and_process_files(files):
             "files_processed": 0
         }
         return None, error_info
-
-# ページ設定
-st.set_page_config(
-    page_title="入退院分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # カスタムCSS（フォントサイズ拡大版）
 st.markdown("""
