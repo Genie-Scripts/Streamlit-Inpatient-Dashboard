@@ -1,0 +1,2 @@
+# streamlit-hospital-dashboard
+病院の入退院分析を行うStreamlitアプリケーション
