@@ -6,3 +6,6 @@ matplotlib
 openpyxl
 python-dateutil
 psutil
+pillow
+reportlab
+jpholiday
