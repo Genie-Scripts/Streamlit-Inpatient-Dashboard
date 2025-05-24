@@ -5,7 +5,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
-import jpholiday
+try
+    import jpholiday
+    JPHOLIDAY_AVAILABLE = True
+except ImportError:
+    JPHOLIDAY_AVAILABLE = False
 import io
 import zipfile
 import tempfile
