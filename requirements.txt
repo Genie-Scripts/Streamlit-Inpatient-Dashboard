@@ -14,6 +14,7 @@ xlrd>=2.0.1              # 古いExcelファイル形式(.xls)の読み込み
 xlsxwriter>=3.1.9        # Excel書き込み（データ出力用）
 pyarrow>=14.0.0          # Parquetファイル処理（高速データキャッシュ）
 fastparquet>=2023.10.1   # Parquet処理の最適化
+pmdarima==2.0.4
 
 # ===== 時系列・統計分析 =====
 statsmodels>=0.14.0
