@@ -1,7 +1,7 @@
+setuptools>=60.0.0  # setuptools を先頭にし、比較的新しいバージョンを指定
 streamlit
-setuptools>=38.6.0,!=50.0.0
 Cython>=0.29,!=0.29.18,!=0.29.31
-numpy==1.24.3  # Python 3.11 と pmdarima 2.0.4 との互換性が期待できるバージョン例
+numpy==1.24.3 # 引き続きバージョン固定を試す
 pandas>=0.19
 scipy>=1.3.2
 joblib>=0.11
