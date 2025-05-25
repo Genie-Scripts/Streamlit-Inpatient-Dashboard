@@ -466,64 +466,60 @@ st.markdown("""
         margin-bottom: 0.6rem !important;
     }
 
-    /* 一般的なメトリクスコンテナのスタイル */
-    /* これが経営ダッシュボードのKPIカードとサイドバーの目標値サマリーの両方に影響していた可能性 */
-    /* より具体的なセレクタで上書きするため、ここのフォントサイズ指定は調整または削除も検討 */
+    /* メトリクス (st.metric) の一般的なスタイル */
+    /* これが多くのメトリック表示に影響する */
     [data-testid="metric-container"] {
         background-color: white;
         border: 1px solid #e1e5e9;
-        padding: 1rem 1.2rem !important;
+        padding: 0.8rem 1rem !important; /* パディングを少し調整 */
         border-radius: 8px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
-    [data-testid="metric-container"] > label { /* 一般的なメトリックラベル */
-        font-size: 1.1rem !important; /* 元の指定に近い値（以前は16pxや1.1remだった） */
+    [data-testid="metric-container"] label[data-testid="stMetricLabel"] { /* st.metric のラベル */
+        font-size: 1.0rem !important; /* やや大きめ */
         font-weight: 600 !important;
         color: #262730 !important;
+        margin-bottom: 0.1rem !important; /* 値との間隔を調整 */
     }
 
-    [data-testid="metric-container"] > div:not(:has(div)) { /* 一般的なメトリック値 (単独の値) */
-        font-size: 2.5rem !important; /* 元の指定に近い値（以前は2remや2.5remだった） */
+    [data-testid="metric-container"] div[data-testid="stMetricValue"] { /* st.metric の値 */
+        font-size: 2.2rem !important; /* やや大きめ */
         font-weight: 600 !important;
         color: #262730 !important;
+        line-height: 1.2 !important;
     }
 
-    [data-testid="metric-container"] > div > div { /* 一般的なメトリックデルタ */
-        font-size: 1rem !important;
-        margin-top: 0.2rem !important;
+    [data-testid="metric-container"] div[data-testid="stMetricDelta"] { /* st.metric のデルタ */
+        font-size: 0.9rem !important; /* やや大きめ */
+        margin-top: 0.1rem !important;
     }
 
-
-    /* KPIカード (display_kpi_cards で使用される汎用的なもの) */
-    .kpi-card { /* これは dashboard_overview_tab.py などでも使われている可能性 */
+    /* KPIカードの一般的なスタイル (dashboard_overview_tab.py などで使われるカスタムHTMLカード用) */
+    .kpi-card {
         background-color: white;
         padding: 1.5rem !important;
         border-radius: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         border-left: 4px solid #1f77b4;
         margin-bottom: 1rem;
-        font-size: 18px !important; /* カード全体のベースフォント */
+        font-size: 18px !important;
     }
 
-    .kpi-card h2 { /* dashboard_overview_tab.py の display_kpi_card 内の h2 (値) */
-        font-size: 1.7em !important; /* 元のCSSにあった指定に近い値 */
-        margin: 0.1rem 0 0.3rem 0 !important;
-        line-height: 1.2 !important;
+    .kpi-card h2 {
+        font-size: 2.2rem !important;
+        margin: 0.5rem 0 !important;
     }
 
-    .kpi-card h4 { /* dashboard_overview_tab.py の display_kpi_card 内の h4 (タイトル) */
-        font-size: 0.95em !important; /* 元のCSSにあった指定に近い値 */
-        margin: 0 0 0.3rem 0 !important;
-        font-weight: 600 !important;
-    }
-
-    .kpi-card p { /* dashboard_overview_tab.py の display_kpi_card 内の p (サブタイトル) */
-        font-size: 0.85em !important; /* 元のCSSにあった指定に近い値 */
+    .kpi-card h4 {
+        font-size: 1.2rem !important;
         margin: 0 !important;
-        font-weight: bold !important;
     }
 
+    .kpi-card p {
+        font-size: 1rem !important;
+        margin: 0 !important;
+    }
 
     /* チャートコンテナ */
     .chart-container {
@@ -536,7 +532,8 @@ st.markdown("""
     }
 
     /* サイドバー全体 */
-    .css-1d391kg {  /* サイドバーのセレクタ (Streamlitのバージョンで変わりうるので注意) */
+    /* .css-1d391kg はStreamlitのバージョンで変わりうるため、より安定な [data-testid="stSidebar"] を推奨 */
+    [data-testid="stSidebar"] {
         font-size: 16px !important;
     }
 
@@ -545,7 +542,7 @@ st.markdown("""
     [data-testid="stSidebar"] .stNumberInput label,
     [data-testid="stSidebar"] .stSlider label,
     [data-testid="stSidebar"] .stDateInput label {
-        font-size: 15px !important; /* 少し小さく */
+        font-size: 15px !important;
         font-weight: 600 !important;
     }
 
@@ -595,17 +592,20 @@ st.markdown("""
     }
 
     /* セレクトボックス、入力フィールド */
-    .stSelectbox > div > div > div {
+    .stSelectbox > div > div > div { /* 選択された値の表示部分 */
         font-size: 16px !important;
     }
 
-    .stNumberInput > div > div > input {
+    .stNumberInput input, /* Streamlit 1.23以降のセレクタ */
+    .stTextInput input {
         font-size: 16px !important;
     }
-
+    /* 古いStreamlitバージョンのためのセレクタも残す場合 */
+    .stNumberInput > div > div > input,
     .stTextInput > div > div > input {
         font-size: 16px !important;
     }
+
 
     /* アラート・情報ボックス */
     .stAlert {
@@ -656,7 +656,7 @@ st.markdown("""
 
     /* ダークモード対応（オプション） */
     @media (prefers-color-scheme: dark) {
-        .kpi-card { /* .kpi-card は dashboard_overview_tab.py で使われている可能性を考慮 */
+        .kpi-card {
             background-color: #262730 !important;
             color: #fafafa !important;
         }
@@ -665,68 +665,81 @@ st.markdown("""
             background-color: #262730 !important;
             color: #fafafa !important;
         }
-        [data-testid="metric-container"] { /* 一般的なメトリックもダークモード対応 */
-            background-color: #2E3138 !important; /* より適切な背景色 */
+        [data-testid="metric-container"] {
+            background-color: #2E3138 !important;
             border: 1px solid #4A4D55 !important;
         }
-        [data-testid="metric-container"] > label,
-        [data-testid="metric-container"] > div {
+        [data-testid="metric-container"] label[data-testid="stMetricLabel"],
+        [data-testid="metric-container"] div[data-testid="stMetricValue"],
+        [data-testid="metric-container"] div[data-testid="stMetricDelta"] {
             color: #FAFAFA !important;
         }
     }
 
-    /* ▼▼▼▼▼ ここからが今回の追加・修正箇所 ▼▼▼▼▼ */
+    /* ▼▼▼▼▼ ここからが経営ダッシュボードとサイドバー目標値サマリーの調整 ▼▼▼▼▼ */
 
     /* 経営ダッシュボードタブのKPIカードのフォントサイズ調整 */
     /* (display_kpi_cards 関数内で <div class="management-dashboard-kpi-card"> で囲まれた st.metric を対象) */
     .management-dashboard-kpi-card [data-testid="stMetricValue"] {
-        font-size: 1.8rem !important; /* 例: 2.5rem や 2.0rem から縮小 */
-        line-height: 1.2 !important;
-        padding-top: 2px !important; /* 値が見切れないように微調整 */
-        padding-bottom: 2px !important;
+        font-size: 1.6rem !important; /* さらに縮小 */
+        line-height: 1.1 !important;  /* 行間を詰める */
+        padding-top: 1px !important;
+        padding-bottom: 1px !important;
     }
 
     .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
-        font-size: 0.85rem !important; /* 例: 1.1rem や 1.0rem から縮小 */
-        margin-bottom: 0px !important; /* ラベルと値の間隔を詰める */
+        font-size: 0.8rem !important; /* さらに縮小 */
+        margin-bottom: -2px !important; /* ラベルと値の間隔をさらに詰める */
     }
 
     .management-dashboard-kpi-card [data-testid="stMetricDelta"] {
-        font-size: 0.75rem !important; /* デルタ値も縮小 */
-        margin-top: -2px !important; /* デルタと値の間隔を詰める */
+        font-size: 0.7rem !important; /* デルタ値も縮小 */
+        margin-top: -3px !important; /* デルタと値の間隔を詰める */
     }
 
     .management-dashboard-kpi-card .stCaption { /* KPIカード内の st.caption のフォントサイズ */
-        font-size: 0.7rem !important;
-        margin-top: -4px !important; /* 上の要素との間隔を詰める */
+        font-size: 0.65rem !important; /* さらに縮小 */
+        margin-top: -5px !important; /* 上の要素との間隔を詰める */
+        line-height: 1.2 !important;
     }
+    /* 経営ダッシュボードKPIカード全体の高さを調整する場合 (オプション) */
+    /* .management-dashboard-kpi-card > div[data-testid="stVerticalBlock"] > div[data-testid="stMetric"] {
+        min-height: 100px; /* または適切な高さ */
+    /* } */
+
 
     /* サイドバーの目標値サマリーのフォントサイズ調整 */
     /* (create_sidebar 関数内で <div class="sidebar-target-summary-metrics"> で囲まれた st.metric を対象) */
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricLabel"] {
-        font-size: 13px !important;  /* ラベルのフォントサイズを小さく */
-        font-weight: normal !important; /* 通常の太さに */
-        margin-bottom: 1px !important; /* ラベルと値の間隔を詰める */
+        font-size: 12px !important;  /* さらに縮小 */
+        font-weight: normal !important;
+        margin-bottom: 0px !important;
     }
 
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricValue"] {
-        font-size: 1.3rem !important; /* 値のフォントサイズを小さく */
-        line-height: 1.1 !important;
+        font-size: 1.2rem !important; /* さらに縮小 */
+        line-height: 1.0 !important;  /* 行間を詰める */
         padding-top: 0px !important;
-        padding-bottom: 2px !important; /* 値の下の余白を調整 */
+        padding-bottom: 1px !important;
     }
 
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricDelta"] {
-        font-size: 0.75rem !important; /* デルタ値も調整 */
+        font-size: 0.7rem !important; /* デルタ値も縮小 */
         margin-top: -2px !important;
     }
 
-    /* サイドバーの「目標値サマリー」という見出し自体の調整 (st.markdown("### 📈 目標値サマリー") で生成されるh3) */
-    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] h3 {
-        font-size: 1.1rem !important; /* 少し小さく */
-        margin-bottom: 0.3rem !important; /* 下の要素との間隔を詰める */
+    /* サイドバーの「目標値サマリー」という見出し自体の調整 */
+    /* create_sidebar内の st.markdown("### 📈 目標値サマリー") が生成するh3を特定 */
+    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] div.sidebar-target-summary-metrics + h3, /* もしクラスの直後なら */
+    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] h3:contains("目標値サマリー") { /* 確実性を高めるが、ブラウザ依存の可能性 */
+        font-size: 1.0rem !important; /* さらに縮小 */
+        margin-bottom: 0.2rem !important;
     }
-    /* ▲▲▲▲▲ ここまでが今回の追加・修正箇所 ▲▲▲▲▲ */
+    /* 古いStreamlitのst.metricは div > div > label + div > div > div のような構造だったが、
+       最近は label[data-testid="stMetricLabel"] + div[data-testid="stMetricValue"] になっている。
+       上記は data-testid を使っているため、比較的安定しているはず。
+    */
+    /* ▲▲▲▲▲ ここまでが経営ダッシュボードとサイドバー目標値サマリーの調整 ▲▲▲▲▲ */
 
 </style>
 """, unsafe_allow_html=True)
