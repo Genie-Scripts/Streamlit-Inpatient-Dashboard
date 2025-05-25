@@ -1166,7 +1166,7 @@ def create_management_dashboard_tab():
         st.warning("選択された期間にデータがありません。")
         return
     
-    # 各セクションの表示（修正版）
+ # 各セクションの表示（修正版）
     if dashboard_section == "概要ダッシュボード":
         display_overview_dashboard_modified(
             df_kpi_filtered, kpi_period_dates, selected_kpi_period,
@@ -1174,21 +1174,18 @@ def create_management_dashboard_tab():
             targets_df
         )
     elif dashboard_section == "収益管理":
-        display_revenue_management_modified(
-            df_kpi_filtered, kpi_period_dates, selected_kpi_period,
-            df_graph_filtered, graph_period_dates, selected_graph_period,
+        display_revenue_management( # <--- _modified を削除
+            df_kpi_filtered, kpi_period_dates, selected_kpi_period, # display_revenue_management 関数の引数に合わせて調整が必要な場合があります
             targets_df
         )
     elif dashboard_section == "運営指標":
-        display_operations_metrics_modified(
-            df_kpi_filtered, kpi_period_dates, selected_kpi_period,
-            df_graph_filtered, graph_period_dates, selected_graph_period,
+        display_operations_metrics( # <--- _modified を削除
+            df_kpi_filtered, kpi_period_dates, selected_kpi_period, # display_operations_metrics 関数の引数に合わせて調整が必要な場合があります
             targets_df
         )
     else:  # 統合ビュー
-        display_integrated_view_modified(
-            df_kpi_filtered, kpi_period_dates, selected_kpi_period,
-            df_graph_filtered, graph_period_dates, selected_graph_period,
+        display_integrated_view( # <--- _modified を削除
+            df_kpi_filtered, kpi_period_dates, selected_kpi_period, # display_integrated_view 関数の引数に合わせて調整が必要な場合があります
             targets_df
         )
 
