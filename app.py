@@ -279,129 +279,217 @@ st.markdown("""
         }
     }
 
-    /* ▼▼▼▼▼ ここからが経営ダッシュボードとサイドバー目標値サマリーの調整 ▼▼▼▼▼ */
+/* ▼▼▼▼▼ 経営ダッシュボードとサイドバー目標値サマリーの調整（修正版） ▼▼▼▼▼ */
 
     /* 経営ダッシュボードタブのKPIカードのフォントサイズ調整 */
     /* (display_kpi_cards 関数内で <div class="management-dashboard-kpi-card"> で囲まれた st.metric を対象) */
     .management-dashboard-kpi-card [data-testid="stMetricValue"] {
-        font-size: 1.6rem !important; /* さらに縮小 */
-        line-height: 1.1 !important;  /* 行間を詰める */
+        font-size: 1.1rem !important; /* 1.6rem から縮小 */
+        line-height: 1.0 !important;  /* 行間を詰める */
         padding-top: 1px !important;
         padding-bottom: 1px !important;
+        word-break: break-all !important; /* 長い数値を強制改行 */
+        overflow-wrap: break-word !important;
+        white-space: normal !important; /* 改行を許可 */
     }
 
     .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
-        font-size: 0.8rem !important; /* さらに縮小 */
-        margin-bottom: -2px !important; /* ラベルと値の間隔をさらに詰める */
+        font-size: 0.65rem !important; /* 0.8rem から縮小 */
+        margin-bottom: -3px !important; /* ラベルと値の間隔をさらに詰める */
+        white-space: nowrap !important; /* ラベルは改行しない */
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
 
     .management-dashboard-kpi-card [data-testid="stMetricDelta"] {
-        font-size: 0.7rem !important; /* デルタ値も縮小 */
+        font-size: 0.6rem !important; /* 0.7rem から縮小 */
         margin-top: -3px !important; /* デルタと値の間隔を詰める */
+        word-break: break-all !important;
+        overflow-wrap: break-word !important;
     }
 
     .management-dashboard-kpi-card .stCaption { /* KPIカード内の st.caption のフォントサイズ */
-        font-size: 0.65rem !important; /* さらに縮小 */
+        font-size: 0.55rem !important; /* 0.65rem から縮小 */
         margin-top: -5px !important; /* 上の要素との間隔を詰める */
-        line-height: 1.2 !important;
+        line-height: 1.1 !important;
+        word-break: break-all !important;
+        overflow-wrap: break-word !important;
     }
-    /* 経営ダッシュボードKPIカード全体の高さを調整する場合 (オプション) */
-    /* .management-dashboard-kpi-card > div[data-testid="stVerticalBlock"] > div[data-testid="stMetric"] {
-        min-height: 100px; /* または適切な高さ */
-    /* } */
 
+    /* KPIカードコンテナの幅と高さを調整 */
+    .management-dashboard-kpi-card [data-testid="metric-container"] {
+        min-height: 120px !important; /* 高さを確保 */
+        padding: 0.6rem 0.8rem !important; /* パディング調整 */
+        width: 100% !important;
+        overflow: hidden !important;
+    }
+
+    /* div指定での追加調整（より具体的なセレクタ） */
+    div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-size: 1.0rem !important; /* さらに縮小 */
+        line-height: 1.0 !important;  /* 行間を詰める */
+        padding-top: 1px !important;
+        padding-bottom: 1px !important;
+        word-break: break-all !important;
+        overflow-wrap: break-word !important;
+        max-width: 100% !important;
+    }
+
+    div.management-dashboard-kpi-card div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+        font-size: 0.6rem !important; /* さらに縮小 */
+        margin-bottom: -3px !important; /* ラベルと値の間隔をさらに詰める */
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+
+    div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        font-size: 0.55rem !important; /* さらに縮小 */
+        margin-top: -3px !important; /* デルタと値の間隔を詰める */
+        word-break: break-all !important;
+        overflow-wrap: break-word !important;
+    }
+
+    /* カラム幅の均等化 */
+    .management-dashboard-kpi-card .stColumns > div {
+        padding-left: 0.2rem !important;
+        padding-right: 0.2rem !important;
+        min-width: 0 !important; /* フレックスボックスでの幅調整 */
+    }
 
     /* サイドバーの目標値サマリーのフォントサイズ調整 */
     /* (create_sidebar 関数内で <div class="sidebar-target-summary-metrics"> で囲まれた st.metric を対象) */
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricLabel"] {
-        font-size: 12px !important;  /* さらに縮小 */
+        font-size: 10px !important;  /* 12px から縮小 */
         font-weight: normal !important;
-        margin-bottom: 0px !important;
+        margin-bottom: -2px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
 
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricValue"] {
-        font-size: 1.2rem !important; /* さらに縮小 */
+        font-size: 0.9rem !important; /* 1.2rem から縮小 */
         line-height: 1.0 !important;  /* 行間を詰める */
         padding-top: 0px !important;
         padding-bottom: 1px !important;
+        word-break: break-all !important;
+        overflow-wrap: break-word !important;
     }
 
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricDelta"] {
-        font-size: 0.7rem !important; /* デルタ値も縮小 */
+        font-size: 0.6rem !important; /* 0.7rem から縮小 */
         margin-top: -2px !important;
+        word-break: break-all !important;
     }
 
-    /* サイドバーの「目標値サマリー」という見出し自体の調整 */
-    /* create_sidebar内の st.markdown("### 📈 目標値サマリー") が生成するh3を特定 */
-    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] div.sidebar-target-summary-metrics + h3, /* もしクラスの直後なら */
-    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] h3:contains("目標値サマリー") { /* 確実性を高めるが、ブラウザ依存の可能性 */
-        font-size: 1.0rem !important; /* さらに縮小 */
-        margin-bottom: 0.2rem !important;
-    }
-    /* 古いStreamlitのst.metricは div > div > label + div > div > div のような構造だったが、
-       最近は label[data-testid="stMetricLabel"] + div[data-testid="stMetricValue"] になっている。
-       上記は data-testid を使っているため、比較的安定しているはず。
-    */
-    /* ▲▲▲▲▲ ここまでが経営ダッシュボードとサイドバー目標値サマリーの調整 ▲▲▲▲▲ */
-    /* ▼▼▼▼▼ ここからが経営ダッシュボードとサイドバー目標値サマリーの調整 ▼▼▼▼▼ */
-
-    /* 経営ダッシュボードタブのKPIカードのフォントサイズ調整 */
-    /* (display_kpi_cards 関数内で <div class="management-dashboard-kpi-card"> で囲まれた st.metric を対象) */
-    div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 1.2rem !important; /* デバッグ設定から反映: さらに縮小 */
-        line-height: 1.0 !important;  /* デバッグ設定から反映: 行間を詰める */
-        padding-top: 1px !important;
-        padding-bottom: 1px !important;
-    }
-
-    div.management-dashboard-kpi-card div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-        font-size: 0.7rem !important; /* デバッグ設定から反映: さらに縮小 */
-        margin-bottom: -3px !important; /* デバッグ設定から反映: ラベルと値の間隔をさらに詰める */
-    }
-
-    /* 経営ダッシュボードのstMetricDeltaは元のサイズに戻すか、またはデバッグブロックに定義があればそれに合わせる */
-    /* デバッグブロックにDeltaの指定がなかったので、元の定義のままとするか、必要なら追加 */
-    div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
-        font-size: 0.7rem !important; /* 元の指定、または必要に応じて調整 */
-        margin-top: -3px !important; /* 元の指定、または必要に応じて調整 */
-    }
-
-    div.management-dashboard-kpi-card .stCaption { /* KPIカード内の st.caption のフォントサイズ */
-        font-size: 0.65rem !important; /* さらに縮小 */
-        margin-top: -5px !important; /* 上の要素との間隔を詰める */
-        line-height: 1.2 !important;
-    }
-
-    /* サイドバーの目標値サマリーのフォントサイズ調整 */
-    /* (create_sidebar 関数内で <div class="sidebar-target-summary-metrics"> で囲まれた st.metric を対象) */
+    /* より具体的なサイドバー指定 */
     section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-        font-size: 11px !important;  /* デバッグ設定から反映: さらに縮小 */
+        font-size: 9px !important;  /* さらに縮小 */
         font-weight: normal !important;
-        margin-bottom: -2px !important; /* デバッグ設定から反映 */
+        margin-bottom: -2px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
 
     section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 1.0rem !important; /* デバッグ設定から反映: さらに縮小 */
+        font-size: 0.8rem !important; /* さらに縮小 */
         line-height: 1.0 !important;  /* 行間を詰める */
         padding-top: 0px !important;
         padding-bottom: 1px !important;
+        word-break: break-all !important;
+        overflow-wrap: break-word !important;
     }
 
-    /* サイドバーのstMetricDeltaは元のサイズに戻すか、またはデバッグブロックに定義があればそれに合わせる */
-    /* デバッグブロックにDeltaの指定がなかったので、元の定義のままとするか、必要なら追加 */
     section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
-        font-size: 0.7rem !important; /* 元の指定、または必要に応じて調整 */
-        margin-top: -2px !important; /* 元の指定、または必要に応じて調整 */
+        font-size: 0.55rem !important; /* さらに縮小 */
+        margin-top: -2px !important;
+        word-break: break-all !important;
     }
 
-    /* サイドバーの「目標値サマリー」という見出し自体の調整 */
-    /* create_sidebar内の st.markdown("### 📈 目標値サマリー") が生成するh3を特定 */
-    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] div.sidebar-target-summary-metrics + h3,
+    /* サイドバーの「目標値サマリー」見出しの調整 */
     [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] h3:contains("目標値サマリー") { 
-        font-size: 1.0rem !important; 
+        font-size: 0.9rem !important; /* さらに縮小 */
         margin-bottom: 0.2rem !important;
     }
-    /* ▲▲▲▲▲ ここまでが経営ダッシュボードとサイドバー目標値サマリーの調整 ▲▲▲▲▲ */
+
+    /* レスポンシブ対応: 画面幅に応じた調整 */
+    @media (max-width: 1400px) {
+        .management-dashboard-kpi-card [data-testid="stMetricValue"] {
+            font-size: 0.9rem !important;
+        }
+        
+        .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
+            font-size: 0.55rem !important;
+        }
+
+        div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+            font-size: 0.85rem !important;
+        }
+    }
+
+    @media (max-width: 1200px) {
+        .management-dashboard-kpi-card [data-testid="stMetricValue"] {
+            font-size: 0.8rem !important;
+        }
+        
+        .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
+            font-size: 0.5rem !important;
+        }
+
+        div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+            font-size: 0.75rem !important;
+        }
+
+        .management-dashboard-kpi-card [data-testid="metric-container"] {
+            min-height: 100px !important;
+            padding: 0.4rem 0.6rem !important;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .management-dashboard-kpi-card [data-testid="stMetricValue"] {
+            font-size: 0.7rem !important;
+        }
+        
+        .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
+            font-size: 0.45rem !important;
+        }
+
+        div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+            font-size: 0.65rem !important;
+        }
+
+        .management-dashboard-kpi-card [data-testid="metric-container"] {
+            min-height: 80px !important;
+            padding: 0.3rem 0.4rem !important;
+        }
+
+        /* モバイル時はサイドバーも調整 */
+        section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+            font-size: 0.7rem !important;
+        }
+
+        section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+            font-size: 8px !important;
+        }
+    }
+
+    /* 数値が非常に長い場合の緊急対応 */
+    .management-dashboard-kpi-card [data-testid="stMetricValue"]:has-text("000,000") {
+        font-size: 0.7rem !important;
+        transform: scale(0.8) !important;
+        transform-origin: left center !important;
+    }
+
+    /* テキストが溢れた場合の最終手段 */
+    .management-dashboard-kpi-card [data-testid="metric-container"] {
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+
+    /* ▲▲▲▲▲ ここまでが経営ダッシュボードとサイドバー目標値サマリーの調整（修正版） ▲▲▲▲▲ */
 
 </style>
 """, unsafe_allow_html=True)
