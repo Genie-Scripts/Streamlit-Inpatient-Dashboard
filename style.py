@@ -7,7 +7,7 @@ def inject_global_css(font_scale=1.5):
     """
     base_px = 16  # ブラウザ標準の基本フォントサイズ
     font_px = int(base_px * font_scale)
-    header_px = int(font_px * 1.5)
+    header_px = int(font_px * 1.0)
     st.markdown(
         f"""
         <style>
