@@ -1720,6 +1720,399 @@ def create_operations_dashboard_section(df, targets_df=None):
         st.error(f"運営指標の計算中にエラーが発生しました: {str(e)}")
         st.info("データの形式を確認してください。必要な列（日付、在院患者数、入院患者数など）が存在することを確認してください。")
 
+def display_operational_insights(metrics, selected_period):
+    """運営インサイトの表示"""
+    try:
+        insights = []
+        
+        # 平均在院日数の評価
+        alos = metrics.get('avg_los', 0)
+        if alos > 0:
+            if alos < 10:
+                insights.append("⚠️ 平均在院日数が10日未満と短く、早期退院が適切に行われているか確認が必要です。")
+            elif alos < 14:
+                insights.append("✅ 平均在院日数が14日未満で良好な水準です。")
+            elif alos < 18:
+                insights.append("⚠️ 平均在院日数が14-18日の範囲にあり、改善の余地があります。")
+            else:
+                insights.append("🚨 平均在院日数が18日以上と長期化しています。退院支援の強化が必要です。")
+        
+        # 病床利用率の評価
+        bed_occupancy = metrics.get('bed_occupancy', 0)
+        if bed_occupancy > 0:
+            if bed_occupancy < 70:
+                insights.append("🚨 病床利用率が70%未満と低く、収益性に影響しています。")
+            elif bed_occupancy < 80:
+                insights.append("⚠️ 病床利用率が70-80%の範囲にあり、改善の余地があります。")
+            elif bed_occupancy < 90:
+                insights.append("✅ 病床利用率が80-90%で適正な水準です。")
+            else:
+                insights.append("⚠️ 病床利用率が90%以上と高く、患者受入に影響する可能性があります。")
+        
+        # 緊急入院率の評価
+        emergency_rate = metrics.get('emergency_rate', 0)
+        if emergency_rate > 30:
+            insights.append("⚠️ 緊急入院率が30%を超えており、計画的な入院管理が困難になっています。")
+        elif emergency_rate > 20:
+            insights.append("ℹ️ 緊急入院率が20-30%の範囲にあり、適度なバランスが保たれています。")
+        
+        # 月途中の場合の注意点
+        if selected_period in ["当月実績（月途中）", "当月予測（実績+予測）"]:
+            if metrics.get('is_partial_month', False):
+                adjustment_factor = metrics.get('month_adjustment_factor', 1)
+                insights.append(f"ℹ️ 月途中のデータのため、月次換算値（{adjustment_factor:.1f}倍）で評価しています。")
+        
+        # インサイトの表示
+        if insights:
+            st.markdown("##### 🔍 運営インサイト")
+            for insight in insights:
+                if "🚨" in insight:
+                    st.error(insight)
+                elif "⚠️" in insight:
+                    st.warning(insight)
+                elif "✅" in insight:
+                    st.success(insight)
+                else:
+                    st.info(insight)
+        else:
+            st.info("十分なデータが蓄積されると、詳細な運営インサイトが表示されます。")
+            
+    except Exception as e:
+        st.error(f"インサイト生成エラー: {e}")
+
+
+def display_prediction_confidence(df_actual, period_dates):
+    """予測の信頼性情報を表示"""
+    try:
+        days_elapsed = (period_dates['end_date'] - period_dates['start_date']).days + 1
+        days_in_month = pd.Timestamp(period_dates['end_date'].year, period_dates['end_date'].month, 1).days_in_month
+        completion_rate = (days_elapsed / days_in_month) * 100
+        
+        st.info(f"📊 予測の信頼性情報: 月の{completion_rate:.1f}%が経過済み。残り{days_in_month - days_elapsed}日の予測を含みます。")
+        
+        if completion_rate < 30:
+            st.warning("⚠️ 月初のため予測の不確実性が高くなっています。")
+        elif completion_rate > 80:
+            st.success("✅ 月末に近いため予測の信頼性が高くなっています。")
+            
+    except Exception as e:
+        st.error(f"予測信頼性情報表示エラー: {e}")
+
+
+def display_revenue_summary(df_filtered, period_dates, selected_period):
+    """収益指標のサマリー表示"""
+    try:
+        # 利用可能な列名を確認
+        census_col = None
+        for col in ['在院患者数', '入院患者数（在院）', '現在患者数']:
+            if col in df_filtered.columns:
+                census_col = col
+                break
+        
+        if not census_col:
+            st.warning("在院患者数データが見つかりません。")
+            return
+        
+        # 基本メトリクスの計算
+        total_patient_days = df_filtered[census_col].sum()
+        period_days = (period_dates['end_date'] - period_dates['start_date']).days + 1
+        avg_daily_census = total_patient_days / period_days if period_days > 0 else 0
+        
+        # 収益推計
+        avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
+        estimated_revenue = total_patient_days * avg_admission_fee
+        
+        # 目標比較
+        monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', 17000)
+        target_revenue = monthly_target_patient_days * avg_admission_fee
+        
+        # 月次換算（月途中の場合）
+        if selected_period in ["当月実績（月途中）", "当月予測（実績+予測）"]:
+            days_in_month = pd.Timestamp(period_dates['end_date'].year, period_dates['end_date'].month, 1).days_in_month
+            monthly_projected_revenue = estimated_revenue * (days_in_month / period_days) if period_days > 0 else 0
+            
+            st.metric(
+                "月次換算収益", 
+                f"¥{monthly_projected_revenue:,.0f}",
+                delta=f"実績: ¥{estimated_revenue:,.0f}"
+            )
+        else:
+            st.metric("推計収益", f"¥{estimated_revenue:,.0f}")
+        
+        # 目標達成率
+        if monthly_target_patient_days > 0:
+            if selected_period in ["当月実績（月途中）", "当月予測（実績+予測）"]:
+                achievement_rate = (monthly_projected_revenue / target_revenue) * 100 if 'monthly_projected_revenue' in locals() else 0
+            else:
+                achievement_rate = (estimated_revenue / target_revenue) * 100
+            
+            st.metric("目標達成率", f"{achievement_rate:.1f}%")
+        
+    except Exception as e:
+        st.error(f"収益サマリー計算エラー: {e}")
+
+
+def display_operations_summary(df_filtered, period_dates, selected_period):
+    """運営指標のサマリー表示"""
+    try:
+        # 利用可能な列名を確認
+        census_col = None
+        for col in ['在院患者数', '入院患者数（在院）', '現在患者数']:
+            if col in df_filtered.columns:
+                census_col = col
+                break
+        
+        if not census_col:
+            st.warning("在院患者数データが見つかりません。")
+            return
+        
+        # 基本メトリクスの計算
+        total_patient_days = df_filtered[census_col].sum()
+        period_days = (period_dates['end_date'] - period_dates['start_date']).days + 1
+        avg_daily_census = total_patient_days / period_days if period_days > 0 else 0
+        
+        # 病床利用率
+        total_beds = st.session_state.get('total_beds', 612)
+        bed_occupancy = (avg_daily_census / total_beds) * 100 if total_beds > 0 else 0
+        
+        # 入退院数
+        admission_col = None
+        discharge_col = None
+        for col in ['総入院患者数', '入院患者数']:
+            if col in df_filtered.columns:
+                admission_col = col
+                break
+        for col in ['総退院患者数', '退院患者数']:
+            if col in df_filtered.columns:
+                discharge_col = col
+                break
+        
+        # 平均在院日数
+        if admission_col and discharge_col:
+            total_admissions = df_filtered[admission_col].sum()
+            total_discharges = df_filtered[discharge_col].sum()
+            alos = total_patient_days / ((total_admissions + total_discharges) / 2) if (total_admissions + total_discharges) > 0 else 0
+            st.metric("平均在院日数", f"{alos:.1f}日")
+        
+        st.metric("病床利用率", f"{bed_occupancy:.1f}%")
+        st.metric("日平均在院患者数", f"{avg_daily_census:.1f}人")
+        
+    except Exception as e:
+        st.error(f"運営サマリー計算エラー: {e}")
+
+
+def display_integrated_charts(df_graph, graph_dates, graph_period):
+    """統合チャートの表示"""
+    try:
+        # 長期間データを使用した統合チャート
+        if df_graph.empty:
+            st.warning("グラフ用データがありません。")
+            return
+        
+        # 月別集計
+        df_graph_copy = df_graph.copy()
+        df_graph_copy['年月'] = df_graph_copy['日付'].dt.to_period('M')
+        
+        # 利用可能な列名を確認
+        census_col = None
+        for col in ['在院患者数', '入院患者数（在院）', '現在患者数']:
+            if col in df_graph_copy.columns:
+                census_col = col
+                break
+        
+        if not census_col:
+            st.warning("在院患者数データが見つかりません。")
+            return
+        
+        monthly_data = df_graph_copy.groupby('年月').agg({
+            census_col: ['sum', 'mean'],
+            '総入院患者数': 'sum' if '総入院患者数' in df_graph_copy.columns else lambda x: 0,
+            '総退院患者数': 'sum' if '総退院患者数' in df_graph_copy.columns else lambda x: 0
+        }).reset_index()
+        
+        # 列名を整理
+        monthly_data.columns = ['年月', '延べ在院日数', '日平均在院患者数', '総入院患者数', '総退院患者数']
+        monthly_data['年月str'] = monthly_data['年月'].astype(str)
+        
+        # 収益計算
+        avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
+        monthly_data['推計収益'] = monthly_data['延べ在院日数'] * avg_admission_fee
+        
+        # 複合グラフの作成
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=('延べ在院日数推移', '日平均在院患者数推移', '推計収益推移', '入退院バランス'),
+            specs=[[{"secondary_y": False}, {"secondary_y": False}],
+                   [{"secondary_y": False}, {"secondary_y": False}]]
+        )
+        
+        # 延べ在院日数
+        fig.add_trace(
+            go.Scatter(x=monthly_data['年月str'], y=monthly_data['延べ在院日数'], 
+                      mode='lines+markers', name='延べ在院日数'),
+            row=1, col=1
+        )
+        
+        # 日平均在院患者数
+        fig.add_trace(
+            go.Scatter(x=monthly_data['年月str'], y=monthly_data['日平均在院患者数'], 
+                      mode='lines+markers', name='日平均在院患者数'),
+            row=1, col=2
+        )
+        
+        # 推計収益
+        fig.add_trace(
+            go.Scatter(x=monthly_data['年月str'], y=monthly_data['推計収益'], 
+                      mode='lines+markers', name='推計収益'),
+            row=2, col=1
+        )
+        
+        # 入退院バランス
+        fig.add_trace(
+            go.Scatter(x=monthly_data['年月str'], y=monthly_data['総入院患者数'], 
+                      mode='lines+markers', name='総入院患者数'),
+            row=2, col=2
+        )
+        fig.add_trace(
+            go.Scatter(x=monthly_data['年月str'], y=monthly_data['総退院患者数'], 
+                      mode='lines+markers', name='総退院患者数'),
+            row=2, col=2
+        )
+        
+        fig.update_layout(
+            height=600,
+            title_text=f"統合トレンド分析（{graph_period}）",
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"統合チャート作成エラー: {e}")
+
+
+def display_fallback_revenue(df_filtered, period_dates, selected_period):
+    """収益管理のフォールバック表示"""
+    st.info("簡易版の収益管理を表示しています。")
+    
+    try:
+        # 基本的な収益メトリクス
+        census_col = None
+        for col in ['在院患者数', '入院患者数（在院）', '現在患者数']:
+            if col in df_filtered.columns:
+                census_col = col
+                break
+        
+        if census_col:
+            total_patient_days = df_filtered[census_col].sum()
+            avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
+            estimated_revenue = total_patient_days * avg_admission_fee
+            
+            st.metric("推計収益", f"¥{estimated_revenue:,.0f}")
+            st.metric("延べ在院日数", f"{total_patient_days:,.0f}人日")
+        else:
+            st.warning("収益計算に必要なデータが見つかりません。")
+            
+    except Exception as e:
+        st.error(f"フォールバック収益表示エラー: {e}")
+
+
+def normalize_column_names(df):
+    """
+    データフレームのカラム名を正規化する
+    """
+    # カラム名マッピング
+    column_mapping = {
+        # 既存のカラム名 -> 期待されるカラム名
+        '在院患者数': '日在院患者数',
+        '入院患者数（在院）': '日在院患者数',
+        '現在患者数': '日在院患者数',
+        
+        '入院患者数': '日入院患者数',
+        '新入院患者数': '日入院患者数',
+        
+        '総入院患者数': '日総入院患者数',
+        '総退院患者数': '日総退院患者数',
+        
+        '退院患者数': '日退院患者数',
+        
+        '緊急入院患者数': '日緊急入院患者数',
+        
+        '死亡患者数': '日死亡患者数',
+        '死亡退院数': '日死亡患者数',
+    }
+    
+    # カラム名を変更
+    df_normalized = df.copy()
+    for old_name, new_name in column_mapping.items():
+        if old_name in df_normalized.columns and new_name not in df_normalized.columns:
+            df_normalized = df_normalized.rename(columns={old_name: new_name})
+    
+    # 必須カラムがない場合は0で埋める
+    required_columns = [
+        '日入院患者数', '日在院患者数', '日死亡患者数', 
+        '日緊急入院患者数', '日総入院患者数', '日総退院患者数', '日退院患者数'
+    ]
+    
+    for col in required_columns:
+        if col not in df_normalized.columns:
+            # 代替ロジック
+            if col == '日総入院患者数' and '日入院患者数' in df_normalized.columns:
+                df_normalized[col] = df_normalized['日入院患者数']
+            elif col == '日総退院患者数' and '日退院患者数' in df_normalized.columns:
+                df_normalized[col] = df_normalized['日退院患者数']
+            elif col == '日死亡患者数':
+                df_normalized[col] = 0  # デフォルト値
+            else:
+                df_normalized[col] = 0
+    
+    return df_normalized
+
+
+def predict_monthly_completion(df_actual, period_dates):
+    """月末までの予測（簡易版）"""
+    try:
+        # 現在の日数と月の総日数
+        days_elapsed = (period_dates['end_date'] - period_dates['start_date']).days + 1
+        days_in_month = pd.Timestamp(period_dates['end_date'].year, period_dates['end_date'].month, 1).days_in_month
+        remaining_days = days_in_month - days_elapsed
+        
+        if remaining_days <= 0:
+            return pd.DataFrame()  # 既に月末
+        
+        # 直近7日間の平均を使用して予測
+        recent_data = df_actual.tail(7)
+        daily_averages = recent_data.groupby('日付')[['在院患者数', '入院患者数', '退院患者数', '緊急入院患者数']].sum().mean()
+        
+        # 残り日数分の予測データを生成
+        predicted_dates = pd.date_range(
+            start=period_dates['end_date'] + pd.Timedelta(days=1),
+            periods=remaining_days,
+            freq='D'
+        )
+        
+        predicted_data = []
+        for date in predicted_dates:
+            # 曜日効果を考慮（簡易版）
+            day_of_week = date.dayofweek
+            weekend_factor = 0.7 if day_of_week >= 5 else 1.0  # 土日は70%
+            
+            predicted_data.append({
+                '日付': date,
+                '在院患者数': daily_averages['在院患者数'] * weekend_factor,
+                '入院患者数': daily_averages['入院患者数'] * weekend_factor,
+                '退院患者数': daily_averages['退院患者数'] * weekend_factor,
+                '緊急入院患者数': daily_averages['緊急入院患者数'] * weekend_factor,
+                '病棟コード': '予測',
+                '診療科名': '予測'
+            })
+        
+        return pd.DataFrame(predicted_data)
+        
+    except Exception as e:
+        print(f"予測データ生成エラー: {e}")
+        return pd.DataFrame()
+
 def main():
     """メイン関数"""
     # セッション状態の初期化
