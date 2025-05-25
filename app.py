@@ -741,6 +741,36 @@ st.markdown("""
     */
     /* ▲▲▲▲▲ ここまでが経営ダッシュボードとサイドバー目標値サマリーの調整 ▲▲▲▲▲ */
 
+/* ▼▼▼▼▼ CSS調整デバッグ用 ▼▼▼▼▼ */
+
+/* 経営ダッシュボードタブのKPIカードのフォントサイズ調整 */
+div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+    font-size: 1.2rem !important; /* さらに小さく、セレクタをより具体的に */
+    line-height: 1.0 !important;
+    color: blue !important; /* 色を変えて効果を確認 */
+}
+
+div.management-dashboard-kpi-card div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+    font-size: 0.7rem !important; /* さらに小さく */
+    color: green !important; /* 色を変えて効果を確認 */
+    margin-bottom: -3px !important;
+}
+
+/* サイドバーの目標値サマリーのフォントサイズ調整 */
+section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+    font-size: 11px !important;  /* さらに小さく */
+    font-weight: normal !important;
+    color: purple !important; /* 色を変えて効果を確認 */
+    margin-bottom: -2px !important;
+}
+
+section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+    font-size: 1.0rem !important; /* さらに小さく */
+    line-height: 1.0 !important;
+    color: orange !important; /* 色を変えて効果を確認 */
+}
+
+/* ▲▲▲▲▲ CSS調整デバッグ用 ▲▲▲▲▲ */
 </style>
 """, unsafe_allow_html=True)
 
