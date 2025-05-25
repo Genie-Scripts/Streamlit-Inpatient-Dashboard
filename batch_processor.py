@@ -77,12 +77,43 @@ def process_pdf_in_worker_revised(
             return {"task_id": task_id, "name": display_name, "data": None, "error": "Filtered data is empty", "success": False}
 
         summaries = generate_filtered_summaries(current_chart_data, current_filter_column, filter_value if filter_type != "all" else None)
-        if not summaries or not isinstance(summaries, dict) or not summaries.get("weekday") or not summaries.get("holiday"):
-            logger.error(f"PID {pid}, タスクID {task_id}: サマリー生成に失敗または必要なキーが不足 for {display_name}.")
-            return {"task_id": task_id, "name": display_name, "data": None, "error": "Failed to generate summaries or missing keys", "success": False}
+        
+        # 修正箇所: summaries の内容をより安全にチェック
+        summaries_valid = False
+        if isinstance(summaries, dict):
+            weekday_summary = summaries.get("weekday")
+            holiday_summary = summaries.get("holiday")
+            # "weekday" と "holiday" が存在し、かつDataFrameであり、空でないことを確認
+            if (weekday_summary is not None and isinstance(weekday_summary, pd.DataFrame) and not weekday_summary.empty and
+                holiday_summary is not None and isinstance(holiday_summary, pd.DataFrame) and not holiday_summary.empty):
+                summaries_valid = True
+            # もし Series の場合も考慮するなら (forecast.py の実装による)
+            elif (weekday_summary is not None and isinstance(weekday_summary, pd.Series) and not weekday_summary.empty and
+                  holiday_summary is not None and isinstance(holiday_summary, pd.Series) and not holiday_summary.empty and
+                  "入院患者数（在院）" in weekday_summary and "入院患者数（在院）" in holiday_summary): # Seriesの場合、必要なキーが存在するか確認
+                   summaries_valid = True
+
+
+        if not summaries_valid: # 修正後の判定
+            logger.error(f"PID {pid}, タスクID {task_id}: サマリー生成に失敗または必要なキー/データが不足 for {display_name}. Summaries content: {type(summaries)}")
+            if isinstance(summaries, dict):
+                logger.debug(f"Summaries keys: {summaries.keys()}")
+                if "weekday" in summaries:
+                    logger.debug(f"Type of summaries['weekday']: {type(summaries.get('weekday'))}, Empty: {summaries.get('weekday').empty if isinstance(summaries.get('weekday'), (pd.DataFrame, pd.Series)) else 'N/A'}")
+                if "holiday" in summaries:
+                    logger.debug(f"Type of summaries['holiday']: {type(summaries.get('holiday'))}, Empty: {summaries.get('holiday').empty if isinstance(summaries.get('holiday'), (pd.DataFrame, pd.Series)) else 'N/A'}")
+            return {"task_id": task_id, "name": display_name, "data": None, "error": "Failed to generate summaries or essential summary data is missing/empty", "success": False}
+
+        # create_forecast_dataframe の呼び出しとエラーチェックも同様に強化
+        # forecast_df_worker = create_forecast_dataframe(summaries["weekday"], summaries["holiday"], latest_date)
+        # の前に summaries["weekday"] と summaries["holiday"] が適切なDataFrameであることを確認
+        if not (isinstance(summaries.get("weekday"), (pd.DataFrame, pd.Series)) and not summaries.get("weekday").empty and
+                isinstance(summaries.get("holiday"), (pd.DataFrame, pd.Series)) and not summaries.get("holiday").empty):
+            logger.error(f"PID {pid}, タスクID {task_id}: forecast_df生成に必要なweekday/holidayデータが不適切 for {display_name}.")
+            return {"task_id": task_id, "name": display_name, "data": None, "error": "Weekday/holiday summary data for forecast is invalid or empty", "success": False}
 
         forecast_df_worker = create_forecast_dataframe(summaries["weekday"], summaries["holiday"], latest_date)
-        graph_days_worker = [90] if reduced_graphs else [90, 180]
+        # graph_days_worker = [90] if reduced_graphs else [90, 180] # これは問題なさそう
 
         alos_chart_buffers = {}
         try:
