@@ -740,37 +740,66 @@ st.markdown("""
        上記は data-testid を使っているため、比較的安定しているはず。
     */
     /* ▲▲▲▲▲ ここまでが経営ダッシュボードとサイドバー目標値サマリーの調整 ▲▲▲▲▲ */
+    /* ▼▼▼▼▼ ここからが経営ダッシュボードとサイドバー目標値サマリーの調整 ▼▼▼▼▼ */
 
-/* ▼▼▼▼▼ CSS調整デバッグ用 ▼▼▼▼▼ */
+    /* 経営ダッシュボードタブのKPIカードのフォントサイズ調整 */
+    /* (display_kpi_cards 関数内で <div class="management-dashboard-kpi-card"> で囲まれた st.metric を対象) */
+    div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-size: 1.2rem !important; /* デバッグ設定から反映: さらに縮小 */
+        line-height: 1.0 !important;  /* デバッグ設定から反映: 行間を詰める */
+        padding-top: 1px !important;
+        padding-bottom: 1px !important;
+    }
 
-/* 経営ダッシュボードタブのKPIカードのフォントサイズ調整 */
-div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-    font-size: 1.2rem !important; /* さらに小さく、セレクタをより具体的に */
-    line-height: 1.0 !important;
-    color: blue !important; /* 色を変えて効果を確認 */
-}
+    div.management-dashboard-kpi-card div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+        font-size: 0.7rem !important; /* デバッグ設定から反映: さらに縮小 */
+        margin-bottom: -3px !important; /* デバッグ設定から反映: ラベルと値の間隔をさらに詰める */
+    }
 
-div.management-dashboard-kpi-card div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-    font-size: 0.7rem !important; /* さらに小さく */
-    color: green !important; /* 色を変えて効果を確認 */
-    margin-bottom: -3px !important;
-}
+    /* 経営ダッシュボードのstMetricDeltaは元のサイズに戻すか、またはデバッグブロックに定義があればそれに合わせる */
+    /* デバッグブロックにDeltaの指定がなかったので、元の定義のままとするか、必要なら追加 */
+    div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        font-size: 0.7rem !important; /* 元の指定、または必要に応じて調整 */
+        margin-top: -3px !important; /* 元の指定、または必要に応じて調整 */
+    }
 
-/* サイドバーの目標値サマリーのフォントサイズ調整 */
-section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-    font-size: 11px !important;  /* さらに小さく */
-    font-weight: normal !important;
-    color: purple !important; /* 色を変えて効果を確認 */
-    margin-bottom: -2px !important;
-}
+    div.management-dashboard-kpi-card .stCaption { /* KPIカード内の st.caption のフォントサイズ */
+        font-size: 0.65rem !important; /* さらに縮小 */
+        margin-top: -5px !important; /* 上の要素との間隔を詰める */
+        line-height: 1.2 !important;
+    }
 
-section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-    font-size: 1.0rem !important; /* さらに小さく */
-    line-height: 1.0 !important;
-    color: orange !important; /* 色を変えて効果を確認 */
-}
+    /* サイドバーの目標値サマリーのフォントサイズ調整 */
+    /* (create_sidebar 関数内で <div class="sidebar-target-summary-metrics"> で囲まれた st.metric を対象) */
+    section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+        font-size: 11px !important;  /* デバッグ設定から反映: さらに縮小 */
+        font-weight: normal !important;
+        margin-bottom: -2px !important; /* デバッグ設定から反映 */
+    }
 
-/* ▲▲▲▲▲ CSS調整デバッグ用 ▲▲▲▲▲ */
+    section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-size: 1.0rem !important; /* デバッグ設定から反映: さらに縮小 */
+        line-height: 1.0 !important;  /* 行間を詰める */
+        padding-top: 0px !important;
+        padding-bottom: 1px !important;
+    }
+
+    /* サイドバーのstMetricDeltaは元のサイズに戻すか、またはデバッグブロックに定義があればそれに合わせる */
+    /* デバッグブロックにDeltaの指定がなかったので、元の定義のままとするか、必要なら追加 */
+    section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        font-size: 0.7rem !important; /* 元の指定、または必要に応じて調整 */
+        margin-top: -2px !important; /* 元の指定、または必要に応じて調整 */
+    }
+
+    /* サイドバーの「目標値サマリー」という見出し自体の調整 */
+    /* create_sidebar内の st.markdown("### 📈 目標値サマリー") が生成するh3を特定 */
+    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] div.sidebar-target-summary-metrics + h3,
+    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] h3:contains("目標値サマリー") { 
+        font-size: 1.0rem !important; 
+        margin-bottom: 0.2rem !important;
+    }
+    /* ▲▲▲▲▲ ここまでが経営ダッシュボードとサイドバー目標値サマリーの調整 ▲▲▲▲▲ */
+
 </style>
 """, unsafe_allow_html=True)
 
