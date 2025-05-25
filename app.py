@@ -1391,30 +1391,52 @@ def display_integrated_view(df_filtered, period_dates, selected_period, targets_
     st.markdown("#### 📈 統合トレンド")
     display_integrated_charts(df_filtered, period_dates, selected_period)
 
+import traceback # エラー表示用にインポート (既にあれば不要)
+# from kpi_calculator import calculate_kpis, analyze_kpi_insights, get_kpi_status # この関数のスコープでは不要
+
 def add_monthly_prediction(df_filtered, period_dates):
     """月末までの予測データを追加"""
     try:
-        from forecast import predict_monthly_completion
-        
-        # 現在の実績から月末までを予測
+        # from forecast import predict_monthly_completion # ← この行を削除またはコメントアウト
+
+        # 同じファイル内で定義されている predict_monthly_completion を直接呼び出す
         predicted_data = predict_monthly_completion(df_filtered, period_dates)
-        
+
         if predicted_data is not None and not predicted_data.empty:
-            # 実績データに予測フラグを追加
-            df_filtered['データ種別'] = '実績'
+            df_actual_copy = df_filtered.copy()
+            df_actual_copy['データ種別'] = '実績'
             predicted_data['データ種別'] = '予測'
+
+            all_cols = df_actual_copy.columns.union(predicted_data.columns)
+            df_actual_aligned = df_actual_copy.reindex(columns=all_cols)
+            predicted_data_aligned = predicted_data.reindex(columns=all_cols)
             
-            # 実績と予測を結合
-            df_combined = pd.concat([df_filtered, predicted_data], ignore_index=True)
+            df_combined = pd.concat([df_actual_aligned, predicted_data_aligned], ignore_index=True)
+            
+            if '日付' in df_combined.columns:
+                df_combined['日付'] = pd.to_datetime(df_combined['日付'])
+                df_combined = df_combined.sort_values(by='日付').reset_index(drop=True)
+            
+            st.info(f"実績データに{len(predicted_data)}日分の予測を追加しました。")
             return df_combined
         else:
-            df_filtered['データ種別'] = '実績'
-            return df_filtered
-            
-    except ImportError:
-        st.warning("予測機能が利用できません。実績データのみ表示します。")
-        df_filtered['データ種別'] = '実績'
-        return df_filtered
+            st.info("予測データが生成されませんでした（または予測対象期間なし）。実績データのみ表示します。")
+            df_actual_copy = df_filtered.copy()
+            df_actual_copy['データ種別'] = '実績'
+            return df_actual_copy
+
+    except NameError as ne: # predict_monthly_completion が見つからない場合のエラーをキャッチ
+        st.error(f"予測機能の呼び出しに失敗しました (NameError): {ne}。app.py内に predict_monthly_completion 関数が定義されているか確認してください。")
+        st.error(traceback.format_exc())
+        df_actual_copy = df_filtered.copy()
+        df_actual_copy['データ種別'] = '実績'
+        return df_actual_copy
+    except Exception as e:
+        st.error(f"月次予測データの追加中に予期せぬエラーが発生しました: {e}")
+        st.error(traceback.format_exc())
+        df_actual_copy = df_filtered.copy()
+        df_actual_copy['データ種別'] = '実績'
+        return df_actual_copy
 
 def calculate_period_metrics(df_filtered, selected_period, period_dates):
     """期間別メトリクスの計算"""
@@ -2070,47 +2092,89 @@ def normalize_column_names(df):
 
 
 def predict_monthly_completion(df_actual, period_dates):
-    """月末までの予測（簡易版）"""
+    """月末までの予測（簡易版）- 列名をintegrated_preprocessingに合わせる"""
     try:
-        # 現在の日数と月の総日数
         days_elapsed = (period_dates['end_date'] - period_dates['start_date']).days + 1
         days_in_month = pd.Timestamp(period_dates['end_date'].year, period_dates['end_date'].month, 1).days_in_month
         remaining_days = days_in_month - days_elapsed
-        
+
         if remaining_days <= 0:
-            return pd.DataFrame()  # 既に月末
+            return pd.DataFrame()
+
+        # integrated_preprocessing.py の出力に存在するであろう主要な列名
+        # '在院患者数' の役割は '入院患者数（在院）' が担う
+        census_col_actual = '入院患者数（在院）' # 実績の在院患者数
+        admission_col_actual = '入院患者数'
+        emergency_col_actual = '緊急入院患者数'
+        discharge_col_actual = '総退院患者数' # 死亡を含む退院数
         
-        # 直近7日間の平均を使用して予測
+        # 予測に使用する列リスト
+        cols_for_avg = [census_col_actual, admission_col_actual, emergency_col_actual, discharge_col_actual]
+
+        missing_cols = [col for col in cols_for_avg if col not in df_actual.columns]
+        if missing_cols:
+            st.warning(f"predict_monthly_completion: 予測に必要な列が実績データに不足: {', '.join(missing_cols)}")
+            return pd.DataFrame()
+
         recent_data = df_actual.tail(7)
-        daily_averages = recent_data.groupby('日付')[['在院患者数', '入院患者数', '退院患者数', '緊急入院患者数']].sum().mean()
+        if recent_data.empty:
+            st.warning("predict_monthly_completion: 予測のための直近データが不足。")
+            return pd.DataFrame()
         
-        # 残り日数分の予測データを生成
+        # 日付ごとの合計の平均を計算 (df_actual が日次・病棟・診療科別の場合、まず日次に集計する必要があるかもしれない)
+        # ここでは df_actual が既に日次の集計済みデータ、あるいはそれに近いと仮定
+        if not recent_data.index.name == '日付' and '日付' in recent_data.columns: # 必要に応じて日付で集計
+            daily_sum_recent = recent_data.groupby(pd.to_datetime(recent_data['日付']).dt.date)[cols_for_avg].sum()
+            daily_averages = daily_sum_recent.mean()
+        else: # 既に日次データと仮定
+            daily_averages = recent_data[cols_for_avg].mean()
+
+
         predicted_dates = pd.date_range(
             start=period_dates['end_date'] + pd.Timedelta(days=1),
             periods=remaining_days,
             freq='D'
         )
-        
-        predicted_data = []
-        for date in predicted_dates:
-            # 曜日効果を考慮（簡易版）
-            day_of_week = date.dayofweek
-            weekend_factor = 0.7 if day_of_week >= 5 else 1.0  # 土日は70%
+
+        predicted_data_list = []
+        common_ward = df_actual['病棟コード'].mode()[0] if not df_actual['病棟コード'].empty else '予測病棟'
+        common_dept = df_actual['診療科名'].mode()[0] if not df_actual['診療科名'].empty else '予測診療科'
+
+        for date_val in predicted_dates:
+            day_of_week = date_val.dayofweek
+            is_holiday_flag = (day_of_week >= 5)
+            if JPHOLIDAY_AVAILABLE and jpholiday.is_holiday(date_val): # JPHOLIDAY_AVAILABLE を参照
+                is_holiday_flag = True
             
-            predicted_data.append({
-                '日付': date,
-                '在院患者数': daily_averages['在院患者数'] * weekend_factor,
-                '入院患者数': daily_averages['入院患者数'] * weekend_factor,
-                '退院患者数': daily_averages['退院患者数'] * weekend_factor,
-                '緊急入院患者数': daily_averages['緊急入院患者数'] * weekend_factor,
-                '病棟コード': '予測',
-                '診療科名': '予測'
-            })
+            weekend_factor = 0.85 if is_holiday_flag else 1.0
+
+            pred_row = {'日付': date_val}
+            pred_row[census_col_actual] = daily_averages.get(census_col_actual, 0) * weekend_factor
+            pred_row[admission_col_actual] = daily_averages.get(admission_col_actual, 0) * weekend_factor
+            pred_row[emergency_col_actual] = daily_averages.get(emergency_col_actual, 0) * weekend_factor
+            pred_row[discharge_col_actual] = daily_averages.get(discharge_col_actual, 0) * weekend_factor
+            
+            # integrated_preprocessing.py の出力に合わせて他の列も生成
+            pred_row['在院患者数'] = pred_row[census_col_actual] # '入院患者数（在院）'と同じ
+            pred_row['総入院患者数'] = pred_row[admission_col_actual] + pred_row[emergency_col_actual]
+            # pred_row['総退院患者数'] は discharge_col_actual が既に総退院患者数を指す想定
+            pred_row['退院患者数'] = pred_row[discharge_col_actual] # 死亡を含まない退院患者数が必要な場合は別途計算
+            pred_row['死亡患者数'] = 0 # 予測では死亡を0と仮定（または別途予測モデルが必要）
+            
+            pred_row['病棟コード'] = common_ward
+            pred_row['診療科名'] = common_dept
+            pred_row['平日判定'] = "休日" if is_holiday_flag else "平日"
+            
+            predicted_data_list.append(pred_row)
         
-        return pd.DataFrame(predicted_data)
-        
+        if not predicted_data_list:
+            return pd.DataFrame()
+
+        return pd.DataFrame(predicted_data_list)
+
     except Exception as e:
-        print(f"予測データ生成エラー: {e}")
+        st.error(f"予測データ生成エラー (predict_monthly_completion): {e}")
+        st.error(traceback.format_exc())
         return pd.DataFrame()
 
 def main():
