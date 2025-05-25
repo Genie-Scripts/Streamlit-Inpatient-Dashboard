@@ -113,18 +113,20 @@ def process_pdf_in_worker_revised(
             return {"task_id": task_id, "name": display_name, "data": None, "error": "Weekday/holiday summary data for forecast is invalid or empty", "success": False}
 
         forecast_df_worker = create_forecast_dataframe(summaries["weekday"], summaries["holiday"], latest_date)
-        # graph_days_worker = [90] if reduced_graphs else [90, 180] # これは問題なさそう
+        graph_days_worker = [90] if reduced_graphs else [90, 180]
+        logger.info(f"PID {pid}, タスクID {task_id}: graph_days_worker set to {graph_days_worker} based on reduced_graphs={reduced_graphs}")
 
         alos_chart_buffers = {}
         try:
             from pdf_generator import create_alos_chart_for_pdf # 念のため再インポート
+            # graph_days_worker が上で定義されているので、ここで NameError は起きないはず
             for days_val in graph_days_worker:
                 alos_buffer = create_alos_chart_for_pdf(
                     current_chart_data,
                     title_prefix_worker,
                     latest_date,
                     30,
-                    MATPLOTLIB_FONT_NAME, # pdf_generatorからインポートした定数
+                    MATPLOTLIB_FONT_NAME,
                     days_to_show=days_val
                 )
                 if alos_buffer:
@@ -132,12 +134,11 @@ def process_pdf_in_worker_revised(
                     logger.info(f"PID {pid}, タスクID {task_id}: ALOSチャート ({days_val}日) 生成完了 for {display_name}")
         except Exception as chart_exc:
             logger.error(f"PID {pid}, タスクID {task_id}: ALOSチャート生成中にエラー for {display_name}: {chart_exc}", exc_info=True)
-            # ALOSチャートがなくてもPDF生成は試みるかもしれないので、ここではバッファをNoneのままにする
 
+        # landscape や create_pdf/create_landscape_pdf の呼び出し時にも graph_days=graph_days_worker となっていることを確認
         if landscape:
-            pdf_bytes_io = create_landscape_pdf( # BytesIOオブジェクトを期待
+            pdf_bytes_io = create_landscape_pdf(
                 forecast_df=forecast_df_worker,
-                # ... (他の引数は前回と同様) ...
                 df_weekday=summaries["weekday"],
                 df_holiday=summaries["holiday"],
                 df_all_avg=summaries.get("summary"),
@@ -146,13 +147,12 @@ def process_pdf_in_worker_revised(
                 latest_date=latest_date,
                 target_data=target_data,
                 filter_code=current_filter_code,
-                graph_days=graph_days_worker,
+                graph_days=graph_days_worker, # 正しく参照
                 alos_chart_buffer=alos_chart_buffers if alos_chart_buffers else None
             )
         else:
-            pdf_bytes_io = create_pdf( # BytesIOオブジェクトを期待
+            pdf_bytes_io = create_pdf(
                 forecast_df=forecast_df_worker,
-                # ... (他の引数は前回と同様) ...
                 df_weekday=summaries["weekday"],
                 df_holiday=summaries["holiday"],
                 df_all_avg=summaries.get("summary"),
@@ -161,7 +161,7 @@ def process_pdf_in_worker_revised(
                 latest_date=latest_date,
                 target_data=target_data,
                 filter_code=current_filter_code,
-                graph_days=graph_days_worker,
+                graph_days=graph_days_worker, # 正しく参照
                 alos_chart_buffer=alos_chart_buffers if alos_chart_buffers else None
             )
 
