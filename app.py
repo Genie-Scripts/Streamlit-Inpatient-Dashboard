@@ -1612,50 +1612,149 @@ def calculate_period_metrics(df_filtered, selected_period, period_dates):
             'is_partial_month': False
         }
 
-def display_kpi_cards(metrics, selected_period):
-    """KPIカードの表示"""
-    # このKPIカード群を特定のクラス名で囲む
+def display_kpi_cards_responsive(metrics, selected_period):
+    """レスポンシブ対応のKPIカード表示"""
+    
+    # 画面幅に応じて列数を調整
     st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True)
-    col1, col2, col3, col4 = st.columns(4)
-
+    
+    # 上段: 主要指標（3列）
+    st.markdown("#### 📊 主要運営指標")
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        if metrics.get('is_partial_month'):
-            st.metric(
-                "平均在院日数",
-                f"{metrics['avg_los']:.1f}日",
-                help="現在の実績値"
-            )
-            st.caption(f"期間実績: {metrics['period_days']}日分")
-        else:
-            st.metric("平均在院日数", f"{metrics['avg_los']:.1f}日")
+        alos = metrics.get('avg_los', 0)
+        st.metric(
+            "平均在院日数",
+            f"{alos:.1f}日",
+            help="患者の平均滞在期間"
+        )
 
     with col2:
+        patient_days = metrics.get('total_patient_days', 0)
         if metrics.get('is_partial_month'):
+            projected_days = metrics.get('monthly_projected_patient_days', 0)
+            # 表示形式を改善
+            if projected_days >= 10000:
+                display_value = f"{projected_days/10000:.1f}万人日"
+            else:
+                display_value = f"{projected_days:,.0f}人日"
+            
             st.metric(
                 "月次換算患者数",
-                f"{metrics['monthly_projected_patient_days']:,.0f}人日",
-                help="月末まで同じペースが続いた場合の予測値"
+                display_value,
+                help="月末までの予測延べ在院日数"
             )
-            st.caption(f"実績: {metrics['total_patient_days']:,.0f}人日")
         else:
-            st.metric("延べ在院患者数", f"{metrics['total_patient_days']:,.0f}人日")
+            if patient_days >= 10000:
+                display_value = f"{patient_days/10000:.1f}万人日"
+            else:
+                display_value = f"{patient_days:,.0f}人日"
+            st.metric("延べ在院日数", display_value)
 
     with col3:
-        st.metric("病床利用率", f"{metrics['bed_occupancy']:.1f}%")
-        if metrics.get('is_partial_month'):
-            st.caption("現在のペース")
-
+        bed_occupancy = metrics.get('bed_occupancy', 0)
+        target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
+        delta = bed_occupancy - target_occupancy
+        st.metric(
+            "病床利用率", 
+            f"{bed_occupancy:.1f}%",
+            delta=f"{delta:+.1f}% (vs目標)",
+            help=f"目標: {target_occupancy:.1f}%"
+        )
+    
+    # 下段: 患者数・収益指標（2列）
+    st.markdown("#### 💰 患者数・収益指標")
+    col4, col5 = st.columns(2)
+    
     with col4:
+        admissions = metrics.get('total_admissions', 0)
         if metrics.get('is_partial_month'):
+            projected_admissions = metrics.get('monthly_projected_admissions', 0)
+            if projected_admissions >= 1000:
+                display_value = f"{projected_admissions/1000:.1f}千人"
+            else:
+                display_value = f"{projected_admissions:,.0f}人"
+            
             st.metric(
-                "月次換算入院数",
-                f"{metrics['monthly_projected_admissions']:,.0f}人",
-                help="月末まで同じペースが続いた場合の予測値"
+                "月次換算新入院",
+                display_value,
+                help="月末までの予測新入院患者数"
             )
-            st.caption(f"実績: {metrics['total_admissions']:,.0f}人")
         else:
-            st.metric("総入院患者数", f"{metrics['total_admissions']:,.0f}人")
+            if admissions >= 1000:
+                display_value = f"{admissions/1000:.1f}千人"
+            else:
+                display_value = f"{admissions:,.0f}人"
+            st.metric("総入院患者数", display_value)
+
+    with col5:
+        # 推計収益の計算と表示
+        avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
+        if metrics.get('is_partial_month'):
+            projected_revenue = metrics.get('monthly_projected_patient_days', 0) * avg_admission_fee
+        else:
+            projected_revenue = patient_days * avg_admission_fee
+        
+        # 収益の短縮表示
+        if projected_revenue >= 100000000:  # 1億以上
+            display_value = f"{projected_revenue/100000000:.1f}億円"
+        elif projected_revenue >= 10000000:  # 1000万以上
+            display_value = f"{projected_revenue/10000000:.0f}千万円"
+        elif projected_revenue >= 1000000:   # 100万以上
+            display_value = f"{projected_revenue/1000000:.0f}百万円"
+        else:
+            display_value = f"{projected_revenue:,.0f}円"
+        
+        target_revenue = st.session_state.get('monthly_target_patient_days', 17000) * avg_admission_fee
+        achievement_rate = (projected_revenue / target_revenue) * 100 if target_revenue > 0 else 0
+        
+        st.metric(
+            "推計収益",
+            display_value,
+            delta=f"{achievement_rate:.1f}% (目標達成率)",
+            help="延べ在院日数 × 平均入院料で算出"
+        )
+    
     st.markdown('</div>', unsafe_allow_html=True)
+
+# 緊急入院比率も表示したい場合（オプション）
+def display_additional_metrics(metrics):
+    """追加メトリクスの表示"""
+    st.markdown("#### 📋 追加指標")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        emergency_rate = metrics.get('emergency_rate', 0)
+        st.metric(
+            "緊急入院比率",
+            f"{emergency_rate:.1f}%",
+            help="全入院に占める緊急入院の割合"
+        )
+    
+    with col2:
+        # 病床回転率（退院患者数÷平均在院患者数）
+        avg_census = metrics.get('total_patient_days', 0) / metrics.get('period_days', 1)
+        discharges = metrics.get('total_discharges', 0)
+        turnover_rate = (discharges / avg_census) if avg_census > 0 else 0
+        st.metric(
+            "病床回転率",
+            f"{turnover_rate:.2f}回",
+            help="期間中の病床回転数"
+        )
+    
+    with col3:
+        # 稼働率変動係数（安定性指標）
+        if hasattr(metrics, 'occupancy_cv'):
+            cv = metrics.get('occupancy_cv', 0)
+            stability = "安定" if cv < 5 else "変動大" if cv > 10 else "普通"
+            st.metric(
+                "稼働率安定性",
+                f"{cv:.1f}%",
+                delta=stability,
+                help="変動係数（小さいほど安定）"
+            )
 
 def display_period_specific_notes(selected_period, period_dates):
     """期間別の特別な注意事項"""
