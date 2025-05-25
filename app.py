@@ -1168,7 +1168,7 @@ def create_management_dashboard_tab():
     
  # 各セクションの表示（修正版）
     if dashboard_section == "概要ダッシュボード":
-        display_overview_dashboard_modified(
+        display_overview_dashboard(
             df_kpi_filtered, kpi_period_dates, selected_kpi_period,
             df_graph_filtered, graph_period_dates, selected_graph_period,
             targets_df
@@ -1290,7 +1290,7 @@ def filter_data_by_graph_period(df, selected_graph_period):
         'period_type': selected_graph_period
     }
     
-def display_overview_dashboard_modified(df_kpi, kpi_dates, kpi_period,
+def display_overview_dashboard(df_kpi, kpi_dates, kpi_period,
                                        df_graph, graph_dates, graph_period, targets_df):
     """修正版：概要ダッシュボードの表示（KPIとグラフで異なる期間を使用）"""
     try:
@@ -1326,26 +1326,34 @@ def display_overview_dashboard_modified(df_kpi, kpi_dates, kpi_period,
         st.error("dashboard_overview_tab.pyに必要な関数 (display_kpi_cards_only, display_trend_graphs_only) が存在するか確認してください。")
         # display_fallback_overview(df_kpi, kpi_dates, kpi_period) # フォールバック処理
 
-def display_revenue_management(df_filtered, period_dates, selected_period, targets_df):
+def display_revenue_management(df_filtered, period_dates_dict, selected_period_str, targets_df): # 引数名変更
     """収益管理セクションの表示"""
     try:
         from revenue_dashboard_tab import create_revenue_dashboard_section
-        
-        # 期間情報を含めて収益管理を表示
-        st.subheader(f"💰 収益管理 - {selected_period}")
-        
-        if selected_period == "当月予測（実績+予測）":
-            df_with_prediction = add_monthly_prediction(df_filtered, period_dates)
-            create_revenue_dashboard_section(df_with_prediction, targets_df)
-            
-            # 予測の信頼性情報
-            display_prediction_confidence(df_filtered, period_dates)
-        else:
-            create_revenue_dashboard_section(df_filtered, targets_df)
-            
+
+        st.subheader(f"💰 収益管理 - {selected_period_str}") # selected_period_str を使用
+
+        # period_info を period_dates_dict と selected_period_str から作成
+        period_info_for_revenue = {
+            'start_date': period_dates_dict.get('start_date'),
+            'end_date': period_dates_dict.get('end_date'),
+            'period_type': selected_period_str
+        }
+
+        # 当月予測の場合の処理 (もしあれば)
+        # if selected_period_str == "当月予測（実績+予測）":
+        #     df_with_prediction = add_monthly_prediction(df_filtered, period_dates_dict)
+        #     create_revenue_dashboard_section(df_with_prediction, targets_df, period_info=period_info_for_revenue)
+        #     display_prediction_confidence(df_filtered, period_dates_dict)
+        # else:
+        create_revenue_dashboard_section(df_filtered, targets_df, period_info=period_info_for_revenue)
+
     except ImportError:
         st.error("収益管理機能が利用できません。")
-        display_fallback_revenue(df_filtered, period_dates, selected_period)
+        # display_fallback_revenue(df_filtered, period_dates_dict, selected_period_str) # フォールバックも引数名合わせる
+    except Exception as e:
+        st.error(f"収益管理セクション表示中にエラー: {e}")
+        st.error(traceback.format_exc())
 
 def display_operations_metrics(df_filtered, period_dates, selected_period, targets_df):
     """運営指標セクションの表示"""
