@@ -1,6 +1,6 @@
 import streamlit as st
 
-def inject_global_css(font_scale=1.5):
+def inject_global_css(font_scale=1.0):
     """
     アプリ全体のフォントサイズとフォントファミリ、テーブルや画像等の基本カスタムCSSを一括適用します。
     font_scale: 倍率（既定値1.5＝5割増し）
