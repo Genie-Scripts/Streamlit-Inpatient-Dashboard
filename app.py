@@ -2413,6 +2413,50 @@ def main():
     # ヘッダー
     st.markdown('<h1 class="main-header">🏥 入退院分析ダッシュボード</h1>', unsafe_allow_html=True)
     
+    # app.py のメインヘッダーの直後に一時的に追加してください
+    
+    # CSSデバッグ用テストコード
+    st.markdown("### 🔍 CSS動作テスト")
+    
+    # 基本的なCSS動作確認
+    st.markdown("""
+    <style>
+    .test-css-working {
+        background-color: red !important;
+        color: white !important;
+        padding: 10px !important;
+        border-radius: 5px !important;
+    }
+    </style>
+    <div class="test-css-working">
+    このテキストが白字に赤背景で表示されていれば、CSSは動作しています
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # KPIカード用のクラスが実際に適用されているかテスト
+    st.markdown("""
+    <div class="management-dashboard-kpi-card">
+        <div style="border: 2px solid blue; padding: 10px; margin: 10px;">
+            management-dashboard-kpi-card クラステスト
+            <div data-testid="stMetricValue" style="border: 1px solid green;">
+                stMetricValue テスト
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 実際のst.metricでテスト
+    st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("テスト指標1", "123,456", "↗️ +5%")
+    with col2:
+        st.metric("テスト指標2", "987,654,321", "↗️ +10%")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+
+    
     # サイドバー設定
     settings_valid = create_sidebar()
     
