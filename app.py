@@ -1740,11 +1740,6 @@ def display_kpi_cards(metrics, selected_period):
             help="期間中の1日あたり平均収益"
         )
 
-    # テスト用：追加メトリクスを表示
-    st.markdown("---")
-    st.write("🧪 **追加メトリクステスト**")
-    display_additional_metrics(metrics)
-
 # サイドバー目標値サマリーも同様に対応
 def create_sidebar_target_summary():
     """修正版：通常のst.metricを使用した目標値サマリー"""
@@ -1804,97 +1799,6 @@ def create_sidebar_target_summary():
         )
     
     st.markdown('</div>', unsafe_allow_html=True)
-
-
-# 緊急入院比率も表示したい場合（オプション）
-def display_additional_metrics(metrics):
-    """追加メトリクスの表示（修正版）"""
-    
-    st.markdown("#### 📋 追加指標")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # 緊急入院比率
-        emergency_rate = metrics.get('emergency_rate', 0)
-        total_admissions = metrics.get('total_admissions', 0)
-        
-        # emergency_rateが0の場合、計算してみる
-        if emergency_rate == 0 and total_admissions > 0:
-            emergency_admissions = metrics.get('total_emergency_admissions', 0)
-            if emergency_admissions > 0:
-                emergency_rate = (emergency_admissions / total_admissions) * 100
-        
-        st.metric(
-            "緊急入院比率",
-            f"{emergency_rate:.1f}%",
-            delta=f"{metrics.get('total_emergency_admissions', 0)}/{total_admissions}" if total_admissions > 0 else "データなし",
-            help="全入院に占める緊急入院の割合"
-        )
-    
-    with col2:
-        # 病床回転率（退院患者数÷平均在院患者数）
-        total_patient_days = metrics.get('total_patient_days', 0)
-        period_days = metrics.get('period_days', 1)
-        avg_census = total_patient_days / period_days if period_days > 0 else 0
-        
-        discharges = metrics.get('total_discharges', 0)
-        turnover_rate = (discharges / avg_census) if avg_census > 0 else 0
-        
-        st.metric(
-            "病床回転率",
-            f"{turnover_rate:.2f}回",
-            delta=f"退院: {discharges}人, 平均在院: {avg_census:.1f}人",
-            help="期間中の病床回転数"
-        )
-    
-    with col3:
-        # 稼働率変動係数（安定性指標）
-        # hasattr問題を修正：辞書なのでキーの存在をチェック
-        if 'occupancy_cv' in metrics and metrics['occupancy_cv'] is not None:
-            cv = metrics.get('occupancy_cv', 0)
-            stability = "安定" if cv < 5 else "変動大" if cv > 10 else "普通"
-            st.metric(
-                "稼働率安定性",
-                f"{cv:.1f}%",
-                delta=stability,
-                help="変動係数（小さいほど安定）"
-            )
-        else:
-            # occupancy_cvがない場合は、代替指標を表示
-            bed_occupancy = metrics.get('bed_occupancy', 0)
-            total_beds = st.session_state.get('total_beds', 612)
-            
-            st.metric(
-                "現在病床利用率",
-                f"{bed_occupancy:.1f}%",
-                delta=f"総病床: {total_beds}床",
-                help="現在の病床利用率"
-            )
-            
-# この関数を呼び出すための追加コード
-def display_kpi_cards_with_additional(metrics, selected_period):
-    """KPIカード + 追加メトリクスの表示"""
-    
-    # 既存のKPIカード表示
-    display_kpi_cards(metrics, selected_period)
-    
-    # 追加メトリクスの表示
-    if st.checkbox("📋 追加指標を表示", value=False, key="show_additional_metrics"):
-        display_additional_metrics(metrics)
-
-# または、経営ダッシュボードに組み込む場合
-def display_enhanced_management_dashboard(df_kpi, kpi_dates, kpi_period, df_graph, graph_dates, graph_period, targets_df):
-    """追加指標付きの経営ダッシュボード"""
-    
-    # 基本KPIカードの表示
-    display_kpi_cards(metrics, selected_period)
-    
-    # 追加指標の表示オプション
-    st.markdown("---")
-    
-    if st.expander("📊 詳細運営指標", expanded=False):
-        display_additional_metrics(metrics)
 
 def display_period_specific_notes(selected_period, period_dates):
     """期間別の特別な注意事項"""
