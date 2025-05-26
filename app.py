@@ -1464,7 +1464,7 @@ def get_period_data_for_averages(df, selected_period):
         return df.copy()
 
 def display_unified_metrics_layout_colorized(metrics, selected_period):
-    """色分けされた統一レイアウトでメトリクスを表示"""
+    """修正版：st.metric()を使用した統一レイアウト"""
     
     def format_large_number(value, unit=""):
         """大きな数値を短縮表示"""
@@ -1486,94 +1486,52 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         else:
             return f"{value:,.0f}{unit}"
     
-    def create_colored_metric_card(title, value, subtitle, color, delta_text="", help_text=""):
-        """色付きメトリクスカードのHTMLを生成"""
-        return f"""
-        <div style="
-            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-            border-left: 6px solid {color};
-            border-radius: 12px;
-            padding: 24px 20px;
-            margin: 8px 0;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(0,0,0,0.12)';" 
-           onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';">
-            
-            <div style="
-                font-size: 14px;
-                font-weight: 600;
-                color: #6c757d;
-                margin-bottom: 8px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            ">{title}</div>
-            
-            <div style="
-                font-size: 32px;
-                font-weight: 700;
-                color: #2c3e50;
-                margin: 12px 0;
-                line-height: 1.2;
-            ">{value}</div>
-            
-            <div style="
-                font-size: 13px;
-                color: {color};
-                font-weight: 600;
-                margin-bottom: 4px;
-            ">{subtitle}</div>
-            
-            {f'<div style="font-size: 11px; color: #6c757d; margin-top: 8px;">{delta_text}</div>' if delta_text else ''}
-        </div>
-        """
-    
     # 期間表示
     period_info = get_period_display_info(selected_period)
     st.info(f"📊 平均値計算期間: {period_info}")
     st.caption("※延べ在院日数、病床利用率、推計収益、達成率は直近30日固定")
     
     # === 1行目：日平均在院患者数、病床利用率、平均在院日数 ===
-    st.markdown(f"### 📊 主要指標 （最新月: {st.session_state['df']['日付'].max().strftime('%Y-%m')}）")
+    st.markdown(f"### 📊 主要指標 （最新月: {pd.Timestamp.now().strftime('%Y-%m')}）")
+    
+    # management-dashboard-kpi-card クラスでKPIカードを囲む（CSSスタイル適用用）
+    st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True)
     
     col1_1, col1_2, col1_3 = st.columns(3)
     
     with col1_1:
-        # 日平均在院患者数 - ブルー
-        card_html = create_colored_metric_card(
+        # 日平均在院患者数
+        st.metric(
             "日平均在院患者数",
             f"{metrics['avg_daily_census']:.1f}人",
-            f"期間: {selected_period}",
-            "#3498db",  # ブルー
-            f"参考：直近30日 {metrics['avg_daily_census_30d']:.1f}人"
+            delta=f"参考：直近30日 {metrics['avg_daily_census_30d']:.1f}人",
+            help=f"{selected_period}の日平均在院患者数"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
     
     with col1_2:
-        # 病床利用率 - グリーン（目標達成時）/レッド（未達成時）
+        # 病床利用率
         target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
         occupancy_delta = metrics['bed_occupancy_rate'] - target_occupancy
-        color = "#27ae60" if metrics['bed_occupancy_rate'] >= target_occupancy else "#e74c3c"
+        delta_color = "normal" if abs(occupancy_delta) <= 5 else "inverse"
         
-        card_html = create_colored_metric_card(
+        st.metric(
             "病床利用率",
             f"{metrics['bed_occupancy_rate']:.1f}%",
-            f"目標達成度: {(metrics['bed_occupancy_rate']/target_occupancy*100):.1f}%",
-            color,
-            f"目標: {target_occupancy:.0f}% ({occupancy_delta:+.1f}%)"
+            delta=f"{occupancy_delta:+.1f}% (対目標{target_occupancy:.0f}%)",
+            delta_color=delta_color,
+            help="直近30日の平均病床利用率"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
     
     with col1_3:
-        # 平均在院日数 - オレンジ
-        card_html = create_colored_metric_card(
+        # 平均在院日数
+        st.metric(
             "平均在院日数",
             f"{metrics['avg_los']:.1f}日",
-            f"期間: {selected_period}",
-            "#f39c12",  # オレンジ
-            "標準: 12-16日"
+            delta="標準: 12-16日",
+            help=f"{selected_period}の平均在院日数"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -1583,33 +1541,36 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
     col2_1, col2_2, col2_3 = st.columns(3)
     
     with col2_1:
-        # 日平均新入院患者数 - パープル
-        card_html = create_colored_metric_card(
+        # 日平均新入院患者数
+        st.metric(
             "日平均新入院患者数",
             f"{metrics['avg_daily_admissions']:.1f}人",
-            f"期間: {selected_period}",
-            "#9b59b6",  # パープル
-            f"計算期間: {metrics['period_days']}日間"
+            delta=f"期間: {metrics['period_days']}日間",
+            help=f"{selected_period}の日平均新入院患者数"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
     
     with col2_2:
-        # 延べ在院日数 - レッド
+        # 延べ在院日数
         monthly_target = st.session_state.get('monthly_target_patient_days', 17000)
         achievement_days = (metrics['total_patient_days_30d'] / monthly_target) * 100
         
-        card_html = create_colored_metric_card(
-            "延べ在院日数",
+        st.metric(
+            "延べ在院日数（直近30日）",
             format_large_number(metrics['total_patient_days_30d'], "人日"),
-            f"目標達成率: {achievement_days:.1f}%",
-            "#e74c3c",  # レッド
-            f"目標: {format_large_number(monthly_target, '人日')}"
+            delta=f"目標達成率: {achievement_days:.1f}%",
+            delta_color="normal" if achievement_days >= 95 else "inverse",
+            help="直近30日間の延べ在院日数"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
     
     with col2_3:
-        # 空白または追加指標用のスペース
-        st.markdown("")
+        # 延べ在院日数達成率（詳細）
+        st.metric(
+            "延べ在院日数達成率",
+            f"{achievement_days:.1f}%",
+            delta=f"目標: {format_large_number(monthly_target, '人日')}",
+            delta_color="normal" if achievement_days >= 100 else "inverse",
+            help="月間目標に対する達成率"
+        )
     
     st.markdown("---")
     
@@ -1619,41 +1580,35 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
     col3_1, col3_2, col3_3 = st.columns(3)
     
     with col3_1:
-        # 推計収益 - レッド（収益管理画像と同じ色）
-        card_html = create_colored_metric_card(
-            "推計収益",
+        # 推計収益
+        st.metric(
+            "推計収益（直近30日）",
             format_large_number(metrics['estimated_revenue_30d'], "円"),
-            f"目標達成率: {metrics['achievement_rate']:.1f}%",
-            "#e74c3c",  # レッド
-            f"単価: {st.session_state.get('avg_admission_fee', 55000):,}円/日"
+            delta=f"単価: {st.session_state.get('avg_admission_fee', 55000):,}円/日",
+            help="直近30日の推計収益"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
     
     with col3_2:
-        # 目標達成率 - グリーン（達成時）/レッド（未達成時）
-        achievement_color = "#27ae60" if metrics['achievement_rate'] >= 100 else "#e74c3c"
+        # 目標達成率
         achievement_status = "✅ 達成" if metrics['achievement_rate'] >= 100 else "📈 未達"
         
-        card_html = create_colored_metric_card(
+        st.metric(
             "目標達成率",
             f"{metrics['achievement_rate']:.1f}%",
-            f"状況: {achievement_status}",
-            achievement_color,
-            f"目標: {format_large_number(metrics['target_revenue'], '円')}"
+            delta=f"{achievement_status}",
+            delta_color="normal" if metrics['achievement_rate'] >= 100 else "inverse",
+            help="月間目標収益に対する達成率"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
     
     with col3_3:
-        # 日平均収益 - ティール
+        # 日平均収益
         daily_revenue = metrics['estimated_revenue_30d'] / 30
-        card_html = create_colored_metric_card(
-            "日平均収益",
+        st.metric(
+            "日平均収益（直近30日）",
             format_large_number(daily_revenue, "円"),
-            "直近30日平均",
-            "#16a085",  # ティール
-            "1日あたり平均収益"
+            delta="1日あたり平均",
+            help="直近30日の日平均収益"
         )
-        st.markdown(card_html, unsafe_allow_html=True)
     
     # === 詳細情報セクション ===
     st.markdown("---")
@@ -1672,13 +1627,36 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
             st.markdown("**📅 期間情報**")
             st.write(f"• 平均値計算: {selected_period}")
             st.write(f"• 固定値計算: 直近30日")
-            st.write(f"• データ最新日: {st.session_state['df']['日付'].max().strftime('%Y/%m/%d')}")
+            if 'df' in st.session_state and st.session_state['df'] is not None:
+                st.write(f"• データ最新日: {st.session_state['df']['日付'].max().strftime('%Y/%m/%d')}")
         
         with detail_col3:
             st.markdown("**🎯 目標値**")
             st.write(f"• 月間延べ在院日数: {format_large_number(st.session_state.get('monthly_target_patient_days', 17000), '人日')}")
             st.write(f"• 月間目標収益: {format_large_number(metrics['target_revenue'], '円')}")
             st.write(f"• 月間新入院目標: {st.session_state.get('monthly_target_admissions', 1480):,}人")
+    
+    # === 色別表示の説明 ===
+    st.markdown("---")
+    st.markdown("### 🎨 表示について")
+    
+    info_col1, info_col2 = st.columns(2)
+    
+    with info_col1:
+        st.markdown("""
+        **📊 数値の見方**
+        - **緑の矢印**: 目標達成または改善
+        - **赤の矢印**: 目標未達または悪化
+        - **グレーの矢印**: 参考情報
+        """)
+    
+    with info_col2:
+        st.markdown("""
+        **🔢 数値の単位**
+        - **人日**: 延べ在院日数の単位
+        - **%**: 達成率、利用率の単位
+        - **円**: 収益関連の単位
+        """)
 
 def get_period_display_info(selected_period):
     """期間の表示情報を取得"""
