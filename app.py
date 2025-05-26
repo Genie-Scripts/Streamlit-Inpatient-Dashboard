@@ -1184,10 +1184,10 @@ def create_sidebar():
             monthly_target_patient_days > 0 and 
             monthly_target_admissions > 0)
             
-# app.pyの該当部分を以下に置き換えてください
+
 
 def create_management_dashboard_tab():
-    """修正版：正しい計算方法を使用した経営ダッシュボードタブ"""
+    """統一版：既存のkpi_calculator.pyを活用した経営ダッシュボードタブ"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
         st.warning("⚠️ データが読み込まれていません。先にデータ処理タブでファイルをアップロードしてください。")
         return
@@ -1204,46 +1204,23 @@ def create_management_dashboard_tab():
         "期間選択（平均値計算用）",
         period_options,
         index=0,
-        horizontal=True,  # 水平配置
+        horizontal=True,
         key="dashboard_period_selector",
         help="日平均在院患者数、平均在院日数、日平均新入院患者数の計算期間"
     )
     
     st.markdown("---")
     
-    # 修正版データ計算を使用
-    metrics = calculate_dashboard_metrics_fixed(df, selected_period)
+    # 既存のkpi_calculator.pyを使用したメトリクス計算
+    metrics = calculate_dashboard_metrics(df, selected_period)
     
     if not metrics:
         st.error("データの計算に失敗しました。")
         return
     
-    # 計算方法の整合性チェック（オプション）
-    if st.checkbox("🔍 計算方法の整合性チェック", key="verify_calculations"):
-        latest_date = df['日付'].max()
-        check_start_date = latest_date - pd.Timedelta(days=29)
-        check_end_date = latest_date
-        
-        verification = verify_calculation_consistency(df, check_start_date, check_end_date)
-        
-        if verification:
-            st.markdown("#### ✅ 計算方法検証結果")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric("table_generator方式", f"{verification['table_generator_method']:.2f}人")
-                st.metric("修正版dashboard方式", f"{verification['dashboard_method']:.2f}人")
-            
-            with col2:
-                st.metric("計算差異", f"{verification['difference']:.6f}人")
-                if verification['methods_match']:
-                    st.success("✅ 計算方法が一致しています")
-                else:
-                    st.error("❌ 計算方法に差異があります")
-    
     # 色分けされた統一レイアウトで数値表示
     display_unified_metrics_layout_colorized(metrics, selected_period)
-
+    
 # 色の定義（参考用）
 DASHBOARD_COLORS = {
     'primary_blue': '#3498db',      # 日平均在院患者数
@@ -1257,17 +1234,35 @@ DASHBOARD_COLORS = {
 }
 
 def calculate_dashboard_metrics(df, selected_period):
-    """修正版：正しい日平均計算を使用したダッシュボード用メトリクス計算"""
+    """統一版：既存のkpi_calculator.pyを活用したメトリクス計算"""
     try:
+        # kpi_calculator.pyをインポート
+        from kpi_calculator import calculate_kpis
+        
         latest_date = df['日付'].max()
         
         # 1. 固定期間データ（直近30日）の計算
         fixed_start_date = latest_date - pd.Timedelta(days=29)
         fixed_end_date = latest_date
-        df_fixed = df[(df['日付'] >= fixed_start_date) & (df['日付'] <= fixed_end_date)].copy()
         
-        # 2. 平均値計算用期間データの取得
-        df_avg_period = get_period_data_for_averages(df, selected_period)
+        # kpi_calculator.pyを使用して固定期間のKPIを計算
+        fixed_kpis = calculate_kpis(df, fixed_start_date, fixed_end_date, 
+                                  total_beds=st.session_state.get('total_beds', 612))
+        
+        if fixed_kpis and fixed_kpis.get("error"):
+            st.error(f"固定期間のKPI計算エラー: {fixed_kpis['error']}")
+            return None
+        
+        # 2. 平均値計算用期間データの計算
+        period_start_date, period_end_date = get_period_dates(df, selected_period)
+        
+        # kpi_calculator.pyを使用して平均値計算期間のKPIを計算
+        period_kpis = calculate_kpis(df, period_start_date, period_end_date,
+                                   total_beds=st.session_state.get('total_beds', 612))
+        
+        if period_kpis and period_kpis.get("error"):
+            st.error(f"平均値計算期間のKPI計算エラー: {period_kpis['error']}")
+            return None
         
         # 基本設定値
         total_beds = st.session_state.get('total_beds', 612)
@@ -1275,125 +1270,55 @@ def calculate_dashboard_metrics(df, selected_period):
         monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', 17000)
         target_revenue = monthly_target_patient_days * avg_admission_fee
         
-        # 数値列の確認
-        numeric_columns = ['在院患者数', '入院患者数', '退院患者数', '緊急入院患者数']
-        for col in numeric_columns:
-            if col in df_fixed.columns:
-                df_fixed[col] = pd.to_numeric(df_fixed[col], errors='coerce').fillna(0)
-            if col in df_avg_period.columns:
-                df_avg_period[col] = pd.to_numeric(df_avg_period[col], errors='coerce').fillna(0)
-        
-        # === 固定値計算（直近30日） ===
-        # 在院患者数の列名を確認
-        census_col = None
-        for col in ['在院患者数', '入院患者数（在院）', '現在患者数']:
-            if col in df_fixed.columns:
-                census_col = col
-                break
-        
-        if not census_col:
-            st.error("在院患者数データが見つかりません。")
-            return None
-        
-        # ✅ 修正：日ごとに合計してから計算
-        # 固定期間（直近30日）の計算
-        daily_totals_fixed = df_fixed.groupby('日付')[census_col].sum()
-        
-        # 延べ在院日数（全期間の合計）
-        total_patient_days_30d = daily_totals_fixed.sum()
-        
-        # 病床利用率（日平均の平均）
-        avg_daily_census_30d = daily_totals_fixed.mean()
-        bed_occupancy_rate = (avg_daily_census_30d / total_beds) * 100 if total_beds > 0 else 0
+        # 固定値（直近30日）の取得
+        total_patient_days_30d = fixed_kpis.get('total_patient_days', 0)
+        avg_daily_census_30d = fixed_kpis.get('avg_daily_census', 0)
+        bed_occupancy_rate = fixed_kpis.get('bed_occupancy_rate', 0)
         
         # 推計収益（直近30日）
         estimated_revenue_30d = total_patient_days_30d * avg_admission_fee
+        achievement_rate = (estimated_revenue_30d / target_revenue) * 100 if target_revenue > 0 else 0
         
-        # 達成率（月次換算）
-        monthly_projected_revenue = estimated_revenue_30d
-        achievement_rate = (monthly_projected_revenue / target_revenue) * 100 if target_revenue > 0 else 0
+        # 平均値（選択期間）の取得
+        avg_daily_census = period_kpis.get('avg_daily_census', 0)
+        avg_los = period_kpis.get('alos', 0)
+        avg_daily_admissions = period_kpis.get('avg_daily_admissions', 0)
+        period_days = period_kpis.get('days_count', 1)
         
-        # === 平均値計算（選択期間） ===
-        period_days = len(df_avg_period['日付'].unique()) if not df_avg_period.empty else 1
-        
-        # ✅ 修正：日平均在院患者数（正しい計算）
-        if not df_avg_period.empty:
-            daily_totals_period = df_avg_period.groupby('日付')[census_col].sum()
-            avg_daily_census = daily_totals_period.mean()
-        else:
-            avg_daily_census = 0
-        
-        # ✅ 修正：平均在院日数（正しい計算）
-        if not df_avg_period.empty:
-            # 期間全体の延べ在院日数
-            total_patient_days_period = daily_totals_period.sum()
-            
-            # 退院患者数の集計
-            discharge_col = None
-            for col in ['退院患者数', '総退院患者数']:
-                if col in df_avg_period.columns:
-                    discharge_col = col
-                    break
-            
-            if discharge_col:
-                daily_discharges = df_avg_period.groupby('日付')[discharge_col].sum()
-                total_discharges_period = daily_discharges.sum()
-                avg_los = total_patient_days_period / total_discharges_period if total_discharges_period > 0 else 0
-            else:
-                avg_los = 0
-        else:
-            avg_los = 0
-        
-        # ✅ 修正：日平均新入院患者数（正しい計算）
-        admission_col = None
-        for col in ['入院患者数', '新入院患者数', '総入院患者数']:
-            if col in df_avg_period.columns:
-                admission_col = col
-                break
-        
-        if admission_col and not df_avg_period.empty:
-            daily_admissions = df_avg_period.groupby('日付')[admission_col].sum()
-            avg_daily_admissions = daily_admissions.mean()
-        else:
-            avg_daily_admissions = 0
-        
-        # ===== デバッグ情報の表示 =====
-        if st.checkbox("🔧 計算詳細を表示", key="show_calculation_debug"):
-            st.markdown("#### 📊 計算詳細")
+        # デバッグ情報の表示
+        if st.checkbox("🔧 KPI計算詳細を表示", key="show_kpi_calculation_debug"):
+            st.markdown("#### 📊 KPI計算詳細")
             
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("**固定期間（直近30日）**")
-                st.write(f"• 期間: {fixed_start_date.strftime('%Y-%m-%d')} ～ {fixed_end_date.strftime('%Y-%m-%d')}")
-                st.write(f"• データ行数: {len(df_fixed):,}行")
-                st.write(f"• 日数: {len(daily_totals_fixed)}日")
-                st.write(f"• 延べ在院日数: {total_patient_days_30d:,.0f}人日")
-                st.write(f"• 日平均在院患者数: {avg_daily_census_30d:.1f}人")
+                st.markdown("**固定期間（直近30日）のKPI**")
+                st.json({
+                    "期間": f"{fixed_start_date.strftime('%Y-%m-%d')} ～ {fixed_end_date.strftime('%Y-%m-%d')}",
+                    "日数": fixed_kpis.get('days_count', 0),
+                    "延べ在院日数": f"{total_patient_days_30d:,.0f}人日",
+                    "日平均在院患者数": f"{avg_daily_census_30d:.1f}人",
+                    "病床利用率": f"{bed_occupancy_rate:.1f}%" if bed_occupancy_rate else "N/A",
+                    "推計収益": f"{estimated_revenue_30d:,.0f}円"
+                })
                 
-                # 日別データの表示（最新5日分）
-                st.markdown("**最新5日の日別在院患者数**")
-                latest_5_days = daily_totals_fixed.tail(5)
-                for date, count in latest_5_days.items():
-                    st.write(f"  {date.strftime('%m/%d')}: {count:.0f}人")
-            
             with col2:
-                st.markdown(f"**平均値計算期間（{selected_period}）**")
-                period_start = df_avg_period['日付'].min()
-                period_end = df_avg_period['日付'].max()
-                st.write(f"• 期間: {period_start.strftime('%Y-%m-%d')} ～ {period_end.strftime('%Y-%m-%d')}")
-                st.write(f"• データ行数: {len(df_avg_period):,}行")
-                st.write(f"• 日数: {period_days}日")
-                st.write(f"• 日平均在院患者数: {avg_daily_census:.1f}人")
-                if admission_col:
-                    st.write(f"• 日平均新入院患者数: {avg_daily_admissions:.1f}人")
-                
-                # 診療科・病棟の構成確認
-                st.markdown("**データ構成**")
-                dept_count = df_avg_period['診療科名'].nunique() if '診療科名' in df_avg_period.columns else 0
-                ward_count = df_avg_period['病棟コード'].nunique() if '病棟コード' in df_avg_period.columns else 0
-                st.write(f"  診療科数: {dept_count}")
-                st.write(f"  病棟数: {ward_count}")
+                st.markdown(f"**平均値計算期間（{selected_period}）のKPI**")
+                st.json({
+                    "期間": f"{period_start_date.strftime('%Y-%m-%d')} ～ {period_end_date.strftime('%Y-%m-%d')}",
+                    "日数": period_days,
+                    "日平均在院患者数": f"{avg_daily_census:.1f}人",
+                    "平均在院日数": f"{avg_los:.1f}日",
+                    "日平均新入院患者数": f"{avg_daily_admissions:.1f}人",
+                    "処理時間": f"{period_kpis.get('processing_time', 0):.3f}秒"
+                })
+            
+            # KPI計算の月次データも表示
+            if 'monthly_stats' in period_kpis:
+                st.markdown("**月次統計データ**")
+                monthly_df = period_kpis['monthly_stats']
+                if not monthly_df.empty:
+                    st.dataframe(monthly_df, hide_index=True)
         
         return {
             # 固定値（直近30日）
@@ -1414,59 +1339,103 @@ def calculate_dashboard_metrics(df, selected_period):
             'target_revenue': target_revenue,
             'selected_period': selected_period,
             
-            # デバッグ用追加情報
-            'debug_info': {
-                'fixed_period_data_rows': len(df_fixed),
-                'avg_period_data_rows': len(df_avg_period),
-                'fixed_period_days': len(daily_totals_fixed) if 'daily_totals_fixed' in locals() else 0,
-                'avg_period_days': period_days,
-                'census_column_used': census_col,
-                'admission_column_used': admission_col
-            }
+            # KPIデータ（詳細分析用）
+            'fixed_period_kpis': fixed_kpis,
+            'avg_period_kpis': period_kpis
         }
         
+    except ImportError as e:
+        st.error(f"kpi_calculator.pyのインポートに失敗しました: {e}")
+        st.error("kpi_calculator.pyファイルが存在し、正しく配置されているか確認してください。")
+        return None
     except Exception as e:
-        st.error(f"メトリクス計算エラー: {e}")
+        st.error(f"統一メトリクス計算エラー: {e}")
         import traceback
         st.error(traceback.format_exc())
         return None
 
-# table_generator.pyの正しい計算方法を参考にした計算検証関数
-def verify_calculation_consistency(df, period_start, period_end):
-    """table_generator.pyの計算方法と一致するかを検証"""
+def get_period_dates(df, selected_period):
+    """選択期間の開始日・終了日を取得"""
+    latest_date = df['日付'].max()
     
-    # 期間フィルタリング
-    df_period = df[(df['日付'] >= period_start) & (df['日付'] <= period_end)].copy()
+    if selected_period == "直近30日":
+        start_date = latest_date - pd.Timedelta(days=29)
+        end_date = latest_date
+    elif selected_period == "前月完了分":
+        # 前月の1日から末日まで
+        prev_month_start = (latest_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
+        prev_month_end = latest_date.replace(day=1) - pd.Timedelta(days=1)
+        start_date = prev_month_start
+        end_date = prev_month_end
+    elif selected_period == "今年度":
+        # 今年度（4月1日から現在まで）
+        current_year = latest_date.year
+        if latest_date.month >= 4:
+            fiscal_start = pd.Timestamp(current_year, 4, 1)
+        else:
+            fiscal_start = pd.Timestamp(current_year - 1, 4, 1)
+        start_date = fiscal_start
+        end_date = latest_date
+    else:
+        start_date = latest_date - pd.Timedelta(days=29)
+        end_date = latest_date
     
-    if df_period.empty:
-        return None
-    
-    # table_generator.py方式の計算
-    census_col = '入院患者数（在院）'  # table_generator.pyで使用される列名
-    if census_col not in df_period.columns:
-        census_col = '在院患者数'  # フォールバック
-    
-    if census_col not in df_period.columns:
-        return None
-    
-    # table_generator.pyと同じ計算方法
-    num_days_in_actual_period = df_period['日付'].nunique()
-    total_patient_days = df_period[census_col].sum()
-    avg_daily_census_table_method = total_patient_days / num_days_in_actual_period if num_days_in_actual_period > 0 else 0
-    
-    # 修正版ダッシュボード方式の計算
-    daily_totals = df_period.groupby('日付')[census_col].sum()
-    avg_daily_census_dashboard_method = daily_totals.mean()
-    
-    return {
-        'period_days': num_days_in_actual_period,
-        'total_patient_days': total_patient_days,
-        'table_generator_method': avg_daily_census_table_method,
-        'dashboard_method': avg_daily_census_dashboard_method,
-        'difference': abs(avg_daily_census_table_method - avg_daily_census_dashboard_method),
-        'methods_match': abs(avg_daily_census_table_method - avg_daily_census_dashboard_method) < 0.01
-    }
+    return start_date, end_date
 
+def validate_kpi_calculations():
+    """KPI計算の検証（オプション機能）"""
+    if not st.session_state.get('data_processed', False):
+        return
+    
+    df = st.session_state.get('df')
+    if df is None or df.empty:
+        return
+    
+    st.markdown("#### 🔍 KPI計算検証")
+    
+    # 検証期間の設定
+    latest_date = df['日付'].max()
+    test_start = latest_date - pd.Timedelta(days=29)
+    test_end = latest_date
+    
+    # kpi_calculator.pyの計算結果
+    from kpi_calculator import calculate_kpis
+    kpi_result = calculate_kpis(df, test_start, test_end, 
+                               total_beds=st.session_state.get('total_beds', 612))
+    
+    if kpi_result and not kpi_result.get("error"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**✅ kpi_calculator.py による計算**")
+            st.write(f"日平均在院患者数: {kpi_result.get('avg_daily_census', 0):.2f}人")
+            st.write(f"平均在院日数: {kpi_result.get('alos', 0):.2f}日")
+            st.write(f"病床利用率: {kpi_result.get('bed_occupancy_rate', 0):.2f}%")
+            st.write(f"処理時間: {kpi_result.get('processing_time', 0):.3f}秒")
+        
+        with col2:
+            # 手動計算での検証
+            test_data = df[(df['日付'] >= test_start) & (df['日付'] <= test_end)]
+            manual_days = len(test_data['日付'].unique())
+            
+            if '入院患者数（在院）' in test_data.columns:
+                manual_total_census = test_data['入院患者数（在院）'].sum()
+                manual_avg_census = manual_total_census / manual_days if manual_days > 0 else 0
+                
+                st.markdown("**🔧 手動検証計算**")
+                st.write(f"期間日数: {manual_days}日")
+                st.write(f"延べ在院日数: {manual_total_census:,.0f}人日")
+                st.write(f"日平均在院患者数: {manual_avg_census:.2f}人")
+                
+                # 差異の確認
+                diff = abs(kpi_result.get('avg_daily_census', 0) - manual_avg_census)
+                st.write(f"**計算差異**: {diff:.6f}人")
+                
+                if diff < 0.01:
+                    st.success("✅ 計算結果が一致しています")
+                else:
+                    st.warning(f"⚠️ 計算差異があります: {diff:.6f}人")
+                    
 def get_period_data_for_averages(df, selected_period):
     """平均値計算用の期間データを取得"""
     latest_date = df['日付'].max()
@@ -2664,6 +2633,10 @@ def main():
         with tab2:
             create_management_dashboard_tab()
         
+            # オプション：KPI計算の検証機能
+            if st.checkbox("🔍 KPI計算検証を表示", key="show_kpi_validation"):
+                validate_kpi_calculations()
+            
         # 予測分析タブ（新規追加）
         if FORECAST_AVAILABLE:
             with tab3:
