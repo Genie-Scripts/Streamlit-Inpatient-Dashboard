@@ -1184,8 +1184,10 @@ def create_sidebar():
             monthly_target_patient_days > 0 and 
             monthly_target_admissions > 0)
             
+# app.pyの該当部分を以下に置き換えてください
+
 def create_management_dashboard_tab():
-    """改修版：経営ダッシュボードタブ（数値のみ、統一レイアウト）"""
+    """修正版：正しい計算方法を使用した経営ダッシュボードタブ"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
         st.warning("⚠️ データが読み込まれていません。先にデータ処理タブでファイルをアップロードしてください。")
         return
@@ -1209,18 +1211,53 @@ def create_management_dashboard_tab():
     
     st.markdown("---")
     
-    # データ計算
-    metrics = calculate_dashboard_metrics(df, selected_period)
+    # 修正版データ計算を使用
+    metrics = calculate_dashboard_metrics_fixed(df, selected_period)
     
     if not metrics:
         st.error("データの計算に失敗しました。")
         return
     
-    # 統一レイアウトで数値表示
-    display_unified_metrics_layout(metrics, selected_period)
+    # 計算方法の整合性チェック（オプション）
+    if st.checkbox("🔍 計算方法の整合性チェック", key="verify_calculations"):
+        latest_date = df['日付'].max()
+        check_start_date = latest_date - pd.Timedelta(days=29)
+        check_end_date = latest_date
+        
+        verification = verify_calculation_consistency(df, check_start_date, check_end_date)
+        
+        if verification:
+            st.markdown("#### ✅ 計算方法検証結果")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("table_generator方式", f"{verification['table_generator_method']:.2f}人")
+                st.metric("修正版dashboard方式", f"{verification['dashboard_method']:.2f}人")
+            
+            with col2:
+                st.metric("計算差異", f"{verification['difference']:.6f}人")
+                if verification['methods_match']:
+                    st.success("✅ 計算方法が一致しています")
+                else:
+                    st.error("❌ 計算方法に差異があります")
+    
+    # 色分けされた統一レイアウトで数値表示
+    display_unified_metrics_layout_colorized(metrics, selected_period)
+
+# 色の定義（参考用）
+DASHBOARD_COLORS = {
+    'primary_blue': '#3498db',      # 日平均在院患者数
+    'success_green': '#27ae60',     # 病床利用率（達成時）
+    'warning_orange': '#f39c12',    # 平均在院日数
+    'danger_red': '#e74c3c',        # 延べ在院日数、推計収益
+    'info_purple': '#9b59b6',       # 日平均新入院患者数
+    'secondary_teal': '#16a085',    # 日平均収益
+    'dark_gray': '#2c3e50',         # テキスト
+    'light_gray': '#6c757d'         # サブテキスト
+}
 
 def calculate_dashboard_metrics(df, selected_period):
-    """ダッシュボード用メトリクスの計算"""
+    """修正版：正しい日平均計算を使用したダッシュボード用メトリクス計算"""
     try:
         latest_date = df['日付'].max()
         
@@ -1258,48 +1295,105 @@ def calculate_dashboard_metrics(df, selected_period):
             st.error("在院患者数データが見つかりません。")
             return None
         
-        # 延べ在院日数
-        total_patient_days_30d = df_fixed[census_col].sum()
+        # ✅ 修正：日ごとに合計してから計算
+        # 固定期間（直近30日）の計算
+        daily_totals_fixed = df_fixed.groupby('日付')[census_col].sum()
         
-        # 病床利用率（直近30日平均）
-        avg_daily_census_30d = df_fixed[census_col].mean()
+        # 延べ在院日数（全期間の合計）
+        total_patient_days_30d = daily_totals_fixed.sum()
+        
+        # 病床利用率（日平均の平均）
+        avg_daily_census_30d = daily_totals_fixed.mean()
         bed_occupancy_rate = (avg_daily_census_30d / total_beds) * 100 if total_beds > 0 else 0
         
         # 推計収益（直近30日）
         estimated_revenue_30d = total_patient_days_30d * avg_admission_fee
         
         # 達成率（月次換算）
-        monthly_projected_revenue = estimated_revenue_30d  # 30日分をそのまま月次とする
+        monthly_projected_revenue = estimated_revenue_30d
         achievement_rate = (monthly_projected_revenue / target_revenue) * 100 if target_revenue > 0 else 0
         
         # === 平均値計算（選択期間） ===
         period_days = len(df_avg_period['日付'].unique()) if not df_avg_period.empty else 1
         
-        # 日平均在院患者数
-        avg_daily_census = df_avg_period[census_col].mean() if not df_avg_period.empty else 0
+        # ✅ 修正：日平均在院患者数（正しい計算）
+        if not df_avg_period.empty:
+            daily_totals_period = df_avg_period.groupby('日付')[census_col].sum()
+            avg_daily_census = daily_totals_period.mean()
+        else:
+            avg_daily_census = 0
         
-        # 平均在院日数
-        total_patient_days_period = df_avg_period[census_col].sum()
-        discharge_col = None
-        for col in ['退院患者数', '総退院患者数']:
-            if col in df_avg_period.columns:
-                discharge_col = col
-                break
-        
-        if discharge_col:
-            total_discharges_period = df_avg_period[discharge_col].sum()
-            avg_los = total_patient_days_period / total_discharges_period if total_discharges_period > 0 else 0
+        # ✅ 修正：平均在院日数（正しい計算）
+        if not df_avg_period.empty:
+            # 期間全体の延べ在院日数
+            total_patient_days_period = daily_totals_period.sum()
+            
+            # 退院患者数の集計
+            discharge_col = None
+            for col in ['退院患者数', '総退院患者数']:
+                if col in df_avg_period.columns:
+                    discharge_col = col
+                    break
+            
+            if discharge_col:
+                daily_discharges = df_avg_period.groupby('日付')[discharge_col].sum()
+                total_discharges_period = daily_discharges.sum()
+                avg_los = total_patient_days_period / total_discharges_period if total_discharges_period > 0 else 0
+            else:
+                avg_los = 0
         else:
             avg_los = 0
         
-        # 日平均新入院患者数
+        # ✅ 修正：日平均新入院患者数（正しい計算）
         admission_col = None
         for col in ['入院患者数', '新入院患者数', '総入院患者数']:
             if col in df_avg_period.columns:
                 admission_col = col
                 break
         
-        avg_daily_admissions = df_avg_period[admission_col].mean() if admission_col and not df_avg_period.empty else 0
+        if admission_col and not df_avg_period.empty:
+            daily_admissions = df_avg_period.groupby('日付')[admission_col].sum()
+            avg_daily_admissions = daily_admissions.mean()
+        else:
+            avg_daily_admissions = 0
+        
+        # ===== デバッグ情報の表示 =====
+        if st.checkbox("🔧 計算詳細を表示", key="show_calculation_debug"):
+            st.markdown("#### 📊 計算詳細")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**固定期間（直近30日）**")
+                st.write(f"• 期間: {fixed_start_date.strftime('%Y-%m-%d')} ～ {fixed_end_date.strftime('%Y-%m-%d')}")
+                st.write(f"• データ行数: {len(df_fixed):,}行")
+                st.write(f"• 日数: {len(daily_totals_fixed)}日")
+                st.write(f"• 延べ在院日数: {total_patient_days_30d:,.0f}人日")
+                st.write(f"• 日平均在院患者数: {avg_daily_census_30d:.1f}人")
+                
+                # 日別データの表示（最新5日分）
+                st.markdown("**最新5日の日別在院患者数**")
+                latest_5_days = daily_totals_fixed.tail(5)
+                for date, count in latest_5_days.items():
+                    st.write(f"  {date.strftime('%m/%d')}: {count:.0f}人")
+            
+            with col2:
+                st.markdown(f"**平均値計算期間（{selected_period}）**")
+                period_start = df_avg_period['日付'].min()
+                period_end = df_avg_period['日付'].max()
+                st.write(f"• 期間: {period_start.strftime('%Y-%m-%d')} ～ {period_end.strftime('%Y-%m-%d')}")
+                st.write(f"• データ行数: {len(df_avg_period):,}行")
+                st.write(f"• 日数: {period_days}日")
+                st.write(f"• 日平均在院患者数: {avg_daily_census:.1f}人")
+                if admission_col:
+                    st.write(f"• 日平均新入院患者数: {avg_daily_admissions:.1f}人")
+                
+                # 診療科・病棟の構成確認
+                st.markdown("**データ構成**")
+                dept_count = df_avg_period['診療科名'].nunique() if '診療科名' in df_avg_period.columns else 0
+                ward_count = df_avg_period['病棟コード'].nunique() if '病棟コード' in df_avg_period.columns else 0
+                st.write(f"  診療科数: {dept_count}")
+                st.write(f"  病棟数: {ward_count}")
         
         return {
             # 固定値（直近30日）
@@ -1318,7 +1412,17 @@ def calculate_dashboard_metrics(df, selected_period):
             # 設定値
             'total_beds': total_beds,
             'target_revenue': target_revenue,
-            'selected_period': selected_period
+            'selected_period': selected_period,
+            
+            # デバッグ用追加情報
+            'debug_info': {
+                'fixed_period_data_rows': len(df_fixed),
+                'avg_period_data_rows': len(df_avg_period),
+                'fixed_period_days': len(daily_totals_fixed) if 'daily_totals_fixed' in locals() else 0,
+                'avg_period_days': period_days,
+                'census_column_used': census_col,
+                'admission_column_used': admission_col
+            }
         }
         
     except Exception as e:
@@ -1326,6 +1430,42 @@ def calculate_dashboard_metrics(df, selected_period):
         import traceback
         st.error(traceback.format_exc())
         return None
+
+# table_generator.pyの正しい計算方法を参考にした計算検証関数
+def verify_calculation_consistency(df, period_start, period_end):
+    """table_generator.pyの計算方法と一致するかを検証"""
+    
+    # 期間フィルタリング
+    df_period = df[(df['日付'] >= period_start) & (df['日付'] <= period_end)].copy()
+    
+    if df_period.empty:
+        return None
+    
+    # table_generator.py方式の計算
+    census_col = '入院患者数（在院）'  # table_generator.pyで使用される列名
+    if census_col not in df_period.columns:
+        census_col = '在院患者数'  # フォールバック
+    
+    if census_col not in df_period.columns:
+        return None
+    
+    # table_generator.pyと同じ計算方法
+    num_days_in_actual_period = df_period['日付'].nunique()
+    total_patient_days = df_period[census_col].sum()
+    avg_daily_census_table_method = total_patient_days / num_days_in_actual_period if num_days_in_actual_period > 0 else 0
+    
+    # 修正版ダッシュボード方式の計算
+    daily_totals = df_period.groupby('日付')[census_col].sum()
+    avg_daily_census_dashboard_method = daily_totals.mean()
+    
+    return {
+        'period_days': num_days_in_actual_period,
+        'total_patient_days': total_patient_days,
+        'table_generator_method': avg_daily_census_table_method,
+        'dashboard_method': avg_daily_census_dashboard_method,
+        'difference': abs(avg_daily_census_table_method - avg_daily_census_dashboard_method),
+        'methods_match': abs(avg_daily_census_table_method - avg_daily_census_dashboard_method) < 0.01
+    }
 
 def get_period_data_for_averages(df, selected_period):
     """平均値計算用の期間データを取得"""
@@ -1354,8 +1494,8 @@ def get_period_data_for_averages(df, selected_period):
     else:
         return df.copy()
 
-def display_unified_metrics_layout(metrics, selected_period):
-    """統一レイアウトでメトリクスを表示"""
+def display_unified_metrics_layout_colorized(metrics, selected_period):
+    """色分けされた統一レイアウトでメトリクスを表示"""
     
     def format_large_number(value, unit=""):
         """大きな数値を短縮表示"""
@@ -1377,130 +1517,199 @@ def display_unified_metrics_layout(metrics, selected_period):
         else:
             return f"{value:,.0f}{unit}"
     
+    def create_colored_metric_card(title, value, subtitle, color, delta_text="", help_text=""):
+        """色付きメトリクスカードのHTMLを生成"""
+        return f"""
+        <div style="
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border-left: 6px solid {color};
+            border-radius: 12px;
+            padding: 24px 20px;
+            margin: 8px 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(0,0,0,0.12)';" 
+           onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';">
+            
+            <div style="
+                font-size: 14px;
+                font-weight: 600;
+                color: #6c757d;
+                margin-bottom: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            ">{title}</div>
+            
+            <div style="
+                font-size: 32px;
+                font-weight: 700;
+                color: #2c3e50;
+                margin: 12px 0;
+                line-height: 1.2;
+            ">{value}</div>
+            
+            <div style="
+                font-size: 13px;
+                color: {color};
+                font-weight: 600;
+                margin-bottom: 4px;
+            ">{subtitle}</div>
+            
+            {f'<div style="font-size: 11px; color: #6c757d; margin-top: 8px;">{delta_text}</div>' if delta_text else ''}
+        </div>
+        """
+    
     # 期間表示
     period_info = get_period_display_info(selected_period)
     st.info(f"📊 平均値計算期間: {period_info}")
     st.caption("※延べ在院日数、病床利用率、推計収益、達成率は直近30日固定")
     
     # === 1行目：日平均在院患者数、病床利用率、平均在院日数 ===
-    st.markdown("### 📊 第1指標群")
+    st.markdown(f"### 📊 主要指標 （最新月: {st.session_state['df']['日付'].max().strftime('%Y-%m')}）")
+    
     col1_1, col1_2, col1_3 = st.columns(3)
     
     with col1_1:
-        st.metric(
-            f"日平均在院患者数（{selected_period}）",
+        # 日平均在院患者数 - ブルー
+        card_html = create_colored_metric_card(
+            "日平均在院患者数",
             f"{metrics['avg_daily_census']:.1f}人",
-            delta=f"参考：直近30日 {metrics['avg_daily_census_30d']:.1f}人",
-            help=f"{selected_period}の日平均在院患者数"
+            f"期間: {selected_period}",
+            "#3498db",  # ブルー
+            f"参考：直近30日 {metrics['avg_daily_census_30d']:.1f}人"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
     with col1_2:
+        # 病床利用率 - グリーン（目標達成時）/レッド（未達成時）
         target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
         occupancy_delta = metrics['bed_occupancy_rate'] - target_occupancy
-        st.metric(
-            "病床利用率（直近30日）",
+        color = "#27ae60" if metrics['bed_occupancy_rate'] >= target_occupancy else "#e74c3c"
+        
+        card_html = create_colored_metric_card(
+            "病床利用率",
             f"{metrics['bed_occupancy_rate']:.1f}%",
-            delta=f"{occupancy_delta:+.1f}% vs 目標{target_occupancy:.0f}%",
-            help="直近30日の平均病床利用率"
+            f"目標達成度: {(metrics['bed_occupancy_rate']/target_occupancy*100):.1f}%",
+            color,
+            f"目標: {target_occupancy:.0f}% ({occupancy_delta:+.1f}%)"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
     with col1_3:
-        st.metric(
-            f"平均在院日数（{selected_period}）",
+        # 平均在院日数 - オレンジ
+        card_html = create_colored_metric_card(
+            "平均在院日数",
             f"{metrics['avg_los']:.1f}日",
-            delta="標準: 12-16日",
-            help=f"{selected_period}の平均在院日数"
+            f"期間: {selected_period}",
+            "#f39c12",  # オレンジ
+            "標準: 12-16日"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # === 2行目：日平均新入院患者数、直近30日延べ在院日数 ===
-    st.markdown("### 📊 第2指標群")
-    col2_1, col2_2, col2_3 = st.columns([1, 1, 1])
+    # === 2行目：日平均新入院患者数、延べ在院日数 ===
+    st.markdown("### 📊 患者動向指標")
+    
+    col2_1, col2_2, col2_3 = st.columns(3)
     
     with col2_1:
-        st.metric(
-            f"日平均新入院患者数（{selected_period}）",
+        # 日平均新入院患者数 - パープル
+        card_html = create_colored_metric_card(
+            "日平均新入院患者数",
             f"{metrics['avg_daily_admissions']:.1f}人",
-            delta=f"期間: {metrics['period_days']}日間",
-            help=f"{selected_period}の日平均新入院患者数"
+            f"期間: {selected_period}",
+            "#9b59b6",  # パープル
+            f"計算期間: {metrics['period_days']}日間"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
     with col2_2:
-        st.metric(
-            "延べ在院日数（直近30日）",
+        # 延べ在院日数 - レッド
+        monthly_target = st.session_state.get('monthly_target_patient_days', 17000)
+        achievement_days = (metrics['total_patient_days_30d'] / monthly_target) * 100
+        
+        card_html = create_colored_metric_card(
+            "延べ在院日数",
             format_large_number(metrics['total_patient_days_30d'], "人日"),
-            delta="30日間合計",
-            help="直近30日間の延べ在院日数"
+            f"目標達成率: {achievement_days:.1f}%",
+            "#e74c3c",  # レッド
+            f"目標: {format_large_number(monthly_target, '人日')}"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
     with col2_3:
-        # 延べ在院日数達成率
-        monthly_target = st.session_state.get('monthly_target_patient_days', 17000)
-        target_achievement_days = (metrics['total_patient_days_30d'] / monthly_target) * 100
-        st.metric(
-            "延べ在院日数達成率",
-            f"{target_achievement_days:.1f}%",
-            delta=f"目標: {format_large_number(monthly_target, '人日')}",
-            help="月間目標に対する達成率"
-        )
+        # 空白または追加指標用のスペース
+        st.markdown("")
     
     st.markdown("---")
     
-    # === 3行目：直近30日推計収益、達成率 ===
-    st.markdown("### 💰 収益指標群")
-    col3_1, col3_2, col3_3 = st.columns([1, 1, 1])
+    # === 3行目：推計収益、達成率 ===
+    st.markdown("### 💰 収益指標")
+    
+    col3_1, col3_2, col3_3 = st.columns(3)
     
     with col3_1:
-        st.metric(
-            "推計収益（直近30日）",
+        # 推計収益 - レッド（収益管理画像と同じ色）
+        card_html = create_colored_metric_card(
+            "推計収益",
             format_large_number(metrics['estimated_revenue_30d'], "円"),
-            delta=f"単価: {st.session_state.get('avg_admission_fee', 55000):,}円/日",
-            help="直近30日の推計収益"
+            f"目標達成率: {metrics['achievement_rate']:.1f}%",
+            "#e74c3c",  # レッド
+            f"単価: {st.session_state.get('avg_admission_fee', 55000):,}円/日"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
     with col3_2:
+        # 目標達成率 - グリーン（達成時）/レッド（未達成時）
+        achievement_color = "#27ae60" if metrics['achievement_rate'] >= 100 else "#e74c3c"
         achievement_status = "✅ 達成" if metrics['achievement_rate'] >= 100 else "📈 未達"
-        st.metric(
+        
+        card_html = create_colored_metric_card(
             "目標達成率",
             f"{metrics['achievement_rate']:.1f}%",
-            delta=f"{achievement_status}",
-            help="月間目標収益に対する達成率"
+            f"状況: {achievement_status}",
+            achievement_color,
+            f"目標: {format_large_number(metrics['target_revenue'], '円')}"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
     with col3_3:
-        # 日平均収益
+        # 日平均収益 - ティール
         daily_revenue = metrics['estimated_revenue_30d'] / 30
-        st.metric(
-            "日平均収益（直近30日）",
+        card_html = create_colored_metric_card(
+            "日平均収益",
             format_large_number(daily_revenue, "円"),
-            delta="1日あたり平均",
-            help="直近30日の日平均収益"
+            "直近30日平均",
+            "#16a085",  # ティール
+            "1日あたり平均収益"
         )
+        st.markdown(card_html, unsafe_allow_html=True)
     
-    # === 補足情報 ===
+    # === 詳細情報セクション ===
     st.markdown("---")
-    st.markdown("### 📋 データ詳細")
     
-    detail_col1, detail_col2, detail_col3 = st.columns(3)
-    
-    with detail_col1:
-        st.markdown("**設定値**")
-        st.write(f"• 総病床数: {metrics['total_beds']:,}床")
-        st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', 0.85):.1%}")
-        st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', 55000):,}円/日")
-    
-    with detail_col2:
-        st.markdown("**期間情報**")
-        st.write(f"• 平均値計算: {selected_period}")
-        st.write(f"• 固定値計算: 直近30日")
-        st.write(f"• データ最新日: {st.session_state['df']['日付'].max().strftime('%Y/%m/%d')}")
-    
-    with detail_col3:
-        st.markdown("**目標値**")
-        st.write(f"• 月間延べ在院日数: {format_large_number(st.session_state.get('monthly_target_patient_days', 17000), '人日')}")
-        st.write(f"• 月間目標収益: {format_large_number(metrics['target_revenue'], '円')}")
-        st.write(f"• 月間新入院目標: {st.session_state.get('monthly_target_admissions', 1480):,}人")
+    # エクスパンダーで詳細情報を格納
+    with st.expander("📋 詳細データと設定値", expanded=False):
+        detail_col1, detail_col2, detail_col3 = st.columns(3)
+        
+        with detail_col1:
+            st.markdown("**🏥 基本設定**")
+            st.write(f"• 総病床数: {metrics['total_beds']:,}床")
+            st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', 0.85):.1%}")
+            st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', 55000):,}円/日")
+        
+        with detail_col2:
+            st.markdown("**📅 期間情報**")
+            st.write(f"• 平均値計算: {selected_period}")
+            st.write(f"• 固定値計算: 直近30日")
+            st.write(f"• データ最新日: {st.session_state['df']['日付'].max().strftime('%Y/%m/%d')}")
+        
+        with detail_col3:
+            st.markdown("**🎯 目標値**")
+            st.write(f"• 月間延べ在院日数: {format_large_number(st.session_state.get('monthly_target_patient_days', 17000), '人日')}")
+            st.write(f"• 月間目標収益: {format_large_number(metrics['target_revenue'], '円')}")
+            st.write(f"• 月間新入院目標: {st.session_state.get('monthly_target_admissions', 1480):,}人")
 
 def get_period_display_info(selected_period):
     """期間の表示情報を取得"""
