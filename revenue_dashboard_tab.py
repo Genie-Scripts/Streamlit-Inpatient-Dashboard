@@ -114,51 +114,33 @@ def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
         # 在院患者数の列名を特定
         census_col = None
         for col in ['在院患者数', '入院患者数（在院）', '現在患者数']:
-            if col in available_cols:
+            if col in df_filtered.columns:
                 census_col = col
                 break
-        
-        # 入院患者数の列名を特定
-        admission_col = None
-        for col in ['総入院患者数', '入院患者数', '新入院患者数']:
-            if col in available_cols:
-                admission_col = col
-                break
-        
-        # 退院患者数の列名を特定
-        discharge_col = None
-        for col in ['総退院患者数', '退院患者数']:
-            if col in available_cols:
-                discharge_col = col
-                break
-        
-        # st.write(f"**使用する列:**")
-        # st.write(f"- 在院患者数: {census_col}")
-        # st.write(f"- 入院患者数: {admission_col}")
-        # st.write(f"- 退院患者数: {discharge_col}")
         
         if not census_col:
             st.error("在院患者数の列が見つかりません。")
             return
         
-        # ⭐ 延べ在院日数の計算
-        df_filtered['延べ在院日数'] = df_filtered[census_col]
-        
-        # ⭐ 月別集計
+        # ⭐ 修正：正しい月別集計方法
         df_filtered['年月'] = df_filtered['日付'].dt.to_period('M')
         
-        # 集計用辞書の準備
-        agg_dict = {
-            '延べ在院日数': 'sum',
-            census_col: 'mean'  # 日平均在院患者数
-        }
+        # まず日別に集計してから月別に集計
+        daily_aggregated = df_filtered.groupby(['年月', '日付']).agg({
+            census_col: 'sum',  # 同日の全診療科・病棟を合計
+            admission_col: 'sum' if admission_col else lambda x: 0,
+            discharge_col: 'sum' if discharge_col else lambda x: 0
+        }).reset_index()
         
-        if admission_col:
-            agg_dict[admission_col] = 'sum'
-        if discharge_col:
-            agg_dict[discharge_col] = 'sum'
+        # 月別集計（正しい方法）
+        monthly_summary = daily_aggregated.groupby('年月').agg({
+            census_col: 'mean',        # 日別合計の平均 = 日平均在院患者数
+            admission_col: 'sum' if admission_col else lambda x: 0,     # 月間総入院患者数
+            discharge_col: 'sum' if discharge_col else lambda x: 0      # 月間総退院患者数
+        }).reset_index()
         
-        monthly_summary = df_filtered.groupby('年月').agg(agg_dict).reset_index()
+        # 延べ在院日数の計算（日平均×日数 または 日別合計の総和）
+        monthly_summary['延べ在院日数'] = daily_aggregated.groupby('年月')[census_col].sum().values
         
         # 列名を標準化
         rename_dict = {census_col: '日平均在院患者数'}
@@ -169,142 +151,49 @@ def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
         
         monthly_summary = monthly_summary.rename(columns=rename_dict)
         
-        # ⭐ 診療科別月間集計
-        dept_agg_dict = {
-            '延べ在院日数': 'sum',
-            census_col: 'mean'
-        }
-        if admission_col:
-            dept_agg_dict[admission_col] = 'sum'
-        if discharge_col:
-            dept_agg_dict[discharge_col] = 'sum'
+        # ⭐ 修正：診療科別月間集計も同様に修正
+        dept_daily_aggregated = df_filtered.groupby(['年月', '診療科名', '日付']).agg({
+            census_col: 'sum',
+            admission_col: 'sum' if admission_col else lambda x: 0,
+            discharge_col: 'sum' if discharge_col else lambda x: 0
+        }).reset_index()
         
-        dept_monthly = df_filtered.groupby(['年月', '診療科名']).agg(dept_agg_dict).reset_index()
+        dept_monthly = dept_daily_aggregated.groupby(['年月', '診療科名']).agg({
+            census_col: 'mean',  # 日平均
+            admission_col: 'sum' if admission_col else lambda x: 0,
+            discharge_col: 'sum' if discharge_col else lambda x: 0
+        }).reset_index()
+        
+        dept_monthly['延べ在院日数'] = dept_daily_aggregated.groupby(['年月', '診療科名'])[census_col].sum().values
         dept_monthly = dept_monthly.rename(columns=rename_dict)
         
-        # ⭐ 最新月データの詳細確認
-        latest_month = monthly_summary['年月'].max()
-        latest_month_data = df_filtered[df_filtered['年月'] == latest_month]
-        
-        # 手動計算での検証
-        manual_total_census = latest_month_data[census_col].sum()
-        manual_days = len(latest_month_data['日付'].unique())
-        manual_avg_census = manual_total_census / manual_days if manual_days > 0 else 0
-        
-        # st.write("**最新月の詳細データ確認:**")
-        # st.write(f"- 最新月: {latest_month}")
-        # st.write(f"- 最新月の日数: {manual_days}日")
-        # st.write(f"- 最新月の延べ在院日数（手動計算）: {manual_total_census:,.0f}人日")
-        # st.write(f"- 最新月の日平均在院患者数（手動計算）: {manual_avg_census:.1f}人")
-        
-        if admission_col:
-            manual_admissions = latest_month_data[admission_col].sum()
-            # st.write(f"- 最新月の総入院患者数: {manual_admissions:.0f}人")
-        
-        # ⭐ 集計結果との比較
-        latest_data = monthly_summary[monthly_summary['年月'] == latest_month].iloc[0]
-        
-        # st.write("**集計結果との比較:**")
-        # st.write(f"- 延べ在院日数（集計）: {latest_data['延べ在院日数']:,.0f}人日")
-        # st.write(f"- 日平均在院患者数（集計）: {latest_data['日平均在院患者数']:.1f}人")
-        
-        # ⭐ 異常値の検出と修正
-        census_diff = abs(latest_data['日平均在院患者数'] - manual_avg_census)
-        patient_days_diff = abs(latest_data['延べ在院日数'] - manual_total_census)
-        
-        # st.write(f"**計算差異:**")
-        # st.write(f"- 延べ在院日数の差異: {patient_days_diff:.0f}人日")
-        # st.write(f"- 日平均在院患者数の差異: {census_diff:.1f}人")
-        
-        # 異常値がある場合は手動計算値を使用
-        if census_diff > 1.0 or patient_days_diff > 100:
-            st.warning("⚠️ 集計値に異常が検出されました。手動計算値を使用します。")
-            current_patient_days = manual_total_census
-            current_avg_census = manual_avg_census
-        else:
-            current_patient_days = latest_data['延べ在院日数']
-            current_avg_census = latest_data['日平均在院患者数']
-        
-        # ⭐ 新入院患者数の取得
-        if '総入院患者数' in latest_data.index and pd.notna(latest_data['総入院患者数']):
-            current_admissions = latest_data['総入院患者数']
-        elif admission_col:
-            current_admissions = manual_admissions
-        else:
-            current_admissions = 0
-            st.warning("新入院患者数データが利用できません。")
-        
-        # ⭐ 最終的な計算値
-        total_beds = st.session_state.get('total_beds', 612)
-        bed_utilization = (current_avg_census / total_beds) * 100
-        
-        # st.write("**最終的な計算値:**")
-        # st.write(f"- 延べ在院日数: {current_patient_days:,.0f}人日")
-        # st.write(f"- 新入院患者数: {current_admissions:,.0f}人")
-        # st.write(f"- 日平均在院患者数: {current_avg_census:.1f}人")
-        # st.write(f"- 総病床数: {total_beds}床")
-        # st.write(f"- 病床利用率: {bed_utilization:.1f}%")
-        
-        # ⭐ 妥当性チェック
-        # if current_avg_census < 10:
-            # st.error("❌ 日平均在院患者数が異常に小さいです。データまたは計算に問題があります。")
-        # elif bed_utilization < 5:
-            # st.error("❌ 病床利用率が異常に小さいです。データまたは計算に問題があります。")
-        # else:
-            # st.success("✅ 計算値は妥当な範囲内です。")
-        
-        # 前月データ
-        if len(monthly_summary) > 1:
-            prev_month_data = monthly_summary.iloc[-2]  # 最新月の前の月
-        else:
-            prev_month_data = latest_data
-        
-        # ⭐ 目標達成率と前月比の計算
-        patient_days_achievement = (current_patient_days / monthly_target_patient_days) * 100
-        
-        if current_admissions > 0:
-            admissions_achievement = (current_admissions / monthly_target_admissions) * 100
-        else:
-            admissions_achievement = 0
-        
-        # 前月比
-        if prev_month_data['延べ在院日数'] > 0:
-            patient_days_mom = ((current_patient_days - prev_month_data['延べ在院日数']) / prev_month_data['延べ在院日数']) * 100
-        else:
-            patient_days_mom = 0
-        
-        if '総入院患者数' in prev_month_data.index and prev_month_data['総入院患者数'] > 0:
-            admissions_mom = ((current_admissions - prev_month_data['総入院患者数']) / prev_month_data['総入院患者数']) * 100
-        else:
-            admissions_mom = 0
-        
-        # 収益推計
-        estimated_revenue = current_patient_days * avg_admission_fee
-        target_revenue = monthly_target_patient_days * avg_admission_fee
-        revenue_achievement = (estimated_revenue / target_revenue) * 100
-        
-        # ===== KPIカード表示 =====
-        st.subheader(f"📊 主要指標（最新月: {latest_month}）")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.markdown(create_kpi_card(
-                "延べ在院日数",
-                f"{current_patient_days:,.0f}人日",
-                f"目標達成率: {patient_days_achievement:.1f}%",
-                f"前月比: {patient_days_mom:+.1f}%",
-                get_status_color(patient_days_achievement, alert_threshold_low, alert_threshold_high)
-            ), unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(create_kpi_card(
-                "新入院患者数",
-                f"{current_admissions:,.0f}人",
-                f"目標達成率: {admissions_achievement:.1f}%",
-                f"前月比: {admissions_mom:+.1f}%",
-                get_status_color(admissions_achievement, alert_threshold_low, alert_threshold_high)
-            ), unsafe_allow_html=True)
+        # ⭐ 計算検証の表示
+        if st.checkbox("🔧 収益計算の詳細を表示", key="show_revenue_calculation_debug"):
+            st.markdown("#### 📊 収益計算詳細")
+            
+            latest_month = monthly_summary['年月'].max()
+            latest_month_daily = daily_aggregated[daily_aggregated['年月'] == latest_month]
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**旧計算方法（間違い）**")
+                # 間違った方法をデモ
+                wrong_calc = df_filtered[df_filtered['年月'] == latest_month][census_col].mean()
+                st.write(f"全行の平均: {wrong_calc:.1f}人")
+                
+                st.markdown("**正しい計算方法**")
+                correct_calc = latest_month_daily[census_col].mean()
+                st.write(f"日別合計の平均: {correct_calc:.1f}人")
+                
+                st.write(f"**差異**: {abs(wrong_calc - correct_calc):.1f}人")
+            
+            with col2:
+                st.markdown("**日別データ（最新月）**")
+                st.dataframe(
+                    latest_month_daily[['日付', census_col]].rename(columns={census_col: '日合計在院患者数'}),
+                    hide_index=True
+                )
         
         with col3:
             st.markdown(create_kpi_card(
@@ -414,8 +303,6 @@ def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
         print(f"詳細エラー: {e}")
         import traceback
         print(traceback.format_exc())
-
-# 以下、既存の関数群をそのまま使用...
 
 def get_status_color(value, low_threshold, high_threshold):
     """達成率に基づいてステータス色を決定"""
