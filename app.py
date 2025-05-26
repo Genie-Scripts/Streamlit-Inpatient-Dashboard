@@ -1603,79 +1603,27 @@ def calculate_period_metrics(df_filtered, selected_period, period_dates):
         }
 
 def display_kpi_cards(metrics, selected_period):
-    """Streamlit Cloud完全対応版のKPIカード"""
+    """修正版：通常のst.metricを使用したKPIカード"""
     
     def format_large_number(value, unit=""):
         """大きな数値を短縮表示"""
-        if value >= 100000000:  # 1億以上
+        if pd.isna(value) or value == 0:
+            return f"0{unit}"
+            
+        abs_value = abs(value)
+        
+        if abs_value >= 100000000:  # 1億以上
             return f"{value/100000000:.1f}億{unit}"
         elif value >= 10000000:  # 1000万以上
             return f"{value/10000000:.0f}千万{unit}"
-        elif value >= 1000000:   # 100万以上
+        elif abs_value >= 1000000:   # 100万以上
             return f"{value/1000000:.0f}百万{unit}"
-        elif value >= 10000:     # 1万以上
+        elif abs_value >= 10000:     # 1万以上
             return f"{value/10000:.1f}万{unit}"
-        elif value >= 1000:      # 1000以上
+        elif abs_value >= 1000:      # 1000以上
             return f"{value/1000:.1f}千{unit}"
         else:
             return f"{value:,.0f}{unit}"
-    
-    def create_kpi_card_html(title, value, subtitle="", color="#1f77b4"):
-        """Streamlit Cloud対応のKPIカードHTML"""
-        return f"""
-        <div style="
-            background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
-            border: 1px solid #dee2e6;
-            border-left: 4px solid {color};
-            border-radius: 8px;
-            padding: 12px 10px;
-            margin: 4px 2px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-            text-align: center;
-            min-height: 85px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-        ">
-            <!-- タイトル部分（小さく） -->
-            <div style="
-                font-size: 9px;
-                color: #6c757d;
-                font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.3px;
-                margin-bottom: 3px;
-                line-height: 1.1;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            ">{title}</div>
-            
-            <!-- 数値部分（小さく） -->
-            <div style="
-                font-size: 14px;
-                font-weight: 700;
-                color: #212529;
-                line-height: 1.0;
-                margin: 4px 0;
-                word-break: break-all;
-                overflow-wrap: break-word;
-                hyphens: auto;
-            ">{value}</div>
-            
-            <!-- サブテキスト部分（小さく） -->
-            <div style="
-                font-size: 7px;
-                color: {color};
-                font-weight: 500;
-                line-height: 1.2;
-                word-break: break-all;
-                overflow-wrap: break-word;
-                margin-top: 2px;
-            ">{subtitle}</div>
-        </div>
-        """
     
     # メトリクス値の取得
     alos = metrics.get('avg_los', 0)
@@ -1707,135 +1655,112 @@ def display_kpi_cards(metrics, selected_period):
     
     st.markdown("### 📊 主要指標")
     
+    # management-dashboard-kpi-card クラスでKPIカードを囲む
+    st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True)
+    
     # 4列レイアウト
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown(create_kpi_card_html(
+        st.metric(
             "平均在院日数",
             f"{alos:.1f}日",
-            f"期間: {metrics.get('period_days', 0)}日分",
-            "#17a2b8"
-        ), unsafe_allow_html=True)
+            help="患者の平均滞在期間"
+        )
     
     with col2:
         if is_projection:
             main_value = format_large_number(projected_days, "人日")
-            subtitle = f"実績: {format_large_number(patient_days, '人日')}"
-            color = "#28a745"
+            delta_text = f"実績: {format_large_number(patient_days, '人日')}"
         else:
             main_value = format_large_number(patient_days, "人日")
-            subtitle = "期間合計"
-            color = "#6c757d"
+            delta_text = "期間合計"
         
-        st.markdown(create_kpi_card_html(
+        st.metric(
             "延べ在院日数",
             main_value,
-            subtitle,
-            color
-        ), unsafe_allow_html=True)
+            delta=delta_text,
+            help="延べ在院日数（予測含む）"
+        )
     
     with col3:
-        color = "#28a745" if occupancy_delta >= 0 else "#dc3545"
-        subtitle = f"目標: {target_occupancy:.1f}% ({occupancy_delta:+.1f}%)"
+        delta_text = f"目標差: {occupancy_delta:+.1f}%"
         
-        st.markdown(create_kpi_card_html(
+        st.metric(
             "病床利用率",
-            f"{bed_occupancy:.1f}%",
-            subtitle,
-            color
-        ), unsafe_allow_html=True)
+            f"{bed_occupancy:.1f}%", 
+            delta=delta_text,
+            help=f"目標: {target_occupancy:.1f}%"
+        )
     
     with col4:
         if is_projection:
             main_value = format_large_number(projected_admissions, "人")
-            subtitle = f"実績: {format_large_number(admissions, '人')}"
-            color = "#28a745"
+            delta_text = f"実績: {format_large_number(admissions, '人')}"
         else:
             main_value = format_large_number(admissions, "人")
-            subtitle = "期間合計"
-            color = "#6c757d"
+            delta_text = "期間合計"
         
-        st.markdown(create_kpi_card_html(
+        st.metric(
             "総入院患者数",
             main_value,
-            subtitle,
-            color
-        ), unsafe_allow_html=True)
+            delta=delta_text,
+            help="新入院患者数（予測含む）"
+        )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # 収益指標（別行）
     st.markdown("### 💰 収益指標")
     col5, col6, col7 = st.columns(3)
     
     with col5:
-        st.markdown(create_kpi_card_html(
+        st.metric(
             "推計収益",
             format_large_number(revenue, "円"),
-            f"単価: {avg_admission_fee:,}円/日",
-            "#28a745"
-        ), unsafe_allow_html=True)
+            delta=f"単価: {avg_admission_fee:,}円/日",
+            help="延べ在院日数×平均入院料で算出"
+        )
     
     with col6:
-        color = "#28a745" if revenue_achievement >= 100 else "#ffc107" if revenue_achievement >= 90 else "#dc3545"
-        st.markdown(create_kpi_card_html(
+        achievement_delta = "✅ 目標達成" if revenue_achievement >= 100 else "📈 目標未達"
+        st.metric(
             "目標達成率",
             f"{revenue_achievement:.1f}%",
-            f"目標: {format_large_number(target_revenue, '円')}",
-            color
-        ), unsafe_allow_html=True)
+            delta=achievement_delta,
+            help=f"目標: {format_large_number(target_revenue, '円')}"
+        )
     
     with col7:
         daily_revenue = revenue / max(metrics.get('period_days', 1), 1)
-        st.markdown(create_kpi_card_html(
+        st.metric(
             "日平均収益",
             format_large_number(daily_revenue, "円"),
-            "1日あたり平均",
-            "#6c757d"
-        ), unsafe_allow_html=True)
+            delta="1日あたり平均",
+            help="期間中の1日あたり平均収益"
+        )
+
+    # テスト用：追加メトリクスを表示
+    st.markdown("---")
+    st.write("🧪 **追加メトリクステスト**")
+    display_additional_metrics(metrics)
 
 # サイドバー目標値サマリーも同様に対応
-def display_sidebar_target_summary():
-    """Streamlit Cloud対応版の目標値サマリー"""
-    
-    def create_small_metric_html(title, value, color="#1f77b4"):
-        return f"""
-        <div style="
-            background: #ffffff;
-            border: 1px solid #e9ecef;
-            border-radius: 6px;
-            padding: 8px 6px;
-            margin: 2px 1px;
-            text-align: center;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-            min-height: 50px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        ">
-            <div style="
-                font-size: 7px;
-                color: #6c757d;
-                font-weight: 600;
-                margin-bottom: 2px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            ">{title}</div>
-            <div style="
-                font-size: 11px;
-                font-weight: 700;
-                color: {color};
-                line-height: 1.0;
-                word-break: break-all;
-                overflow-wrap: break-word;
-            ">{value}</div>
-        </div>
-        """
+def create_sidebar_target_summary():
+    """修正版：通常のst.metricを使用した目標値サマリー"""
     
     def format_large_number(value, unit=""):
-        if value >= 100000000:
+        """数値短縮表示"""
+        if pd.isna(value) or value == 0:
+            return f"0{unit}"
+            
+        abs_value = abs(value)
+        
+        if abs_value >= 100000000:
             return f"{value/100000000:.1f}億{unit}"
-        elif value >= 10000:
+        elif abs_value >= 10000:
             return f"{value/10000:.1f}万{unit}"
-        elif value >= 1000:
+        elif abs_value >= 1000:
             return f"{value/1000:.1f}千{unit}"
         else:
             return f"{value:,.0f}{unit}"
@@ -1848,62 +1773,85 @@ def display_sidebar_target_summary():
     
     st.markdown("### 📈 目標値サマリー")
     
+    # sidebar-target-summary-metrics クラスでサマリーを囲む
+    st.markdown('<div class="sidebar-target-summary-metrics">', unsafe_allow_html=True)
+    
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown(create_small_metric_html(
+        st.metric(
             "延べ在院日数",
             format_large_number(monthly_target_patient_days, "人日"),
-            "#1f77b4"
-        ), unsafe_allow_html=True)
+            help="月間目標延べ在院日数"
+        )
         
-        st.markdown(create_small_metric_html(
+        st.metric(
             "新入院患者数",
             format_large_number(monthly_target_admissions, "人"),
-            "#28a745"
-        ), unsafe_allow_html=True)
+            help="月間目標新入院患者数"
+        )
     
     with col2:
-        st.markdown(create_small_metric_html(
+        st.metric(
             "推定月間収益",
             format_large_number(monthly_revenue_estimate, "円"),
-            "#dc3545"
-        ), unsafe_allow_html=True)
+            help="月間目標収益"
+        )
         
-        st.markdown(create_small_metric_html(
+        st.metric(
             "病床稼働率",
             f"{bed_occupancy_rate:.1%}",
-            "#6c757d"
-        ), unsafe_allow_html=True)
+            help="目標病床稼働率"
+        )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 
 # 緊急入院比率も表示したい場合（オプション）
 def display_additional_metrics(metrics):
-    """追加メトリクスの表示"""
+    """追加メトリクスの表示（修正版）"""
+    
     st.markdown("#### 📋 追加指標")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        # 緊急入院比率
         emergency_rate = metrics.get('emergency_rate', 0)
+        total_admissions = metrics.get('total_admissions', 0)
+        
+        # emergency_rateが0の場合、計算してみる
+        if emergency_rate == 0 and total_admissions > 0:
+            emergency_admissions = metrics.get('total_emergency_admissions', 0)
+            if emergency_admissions > 0:
+                emergency_rate = (emergency_admissions / total_admissions) * 100
+        
         st.metric(
             "緊急入院比率",
             f"{emergency_rate:.1f}%",
+            delta=f"{metrics.get('total_emergency_admissions', 0)}/{total_admissions}" if total_admissions > 0 else "データなし",
             help="全入院に占める緊急入院の割合"
         )
     
     with col2:
         # 病床回転率（退院患者数÷平均在院患者数）
-        avg_census = metrics.get('total_patient_days', 0) / metrics.get('period_days', 1)
+        total_patient_days = metrics.get('total_patient_days', 0)
+        period_days = metrics.get('period_days', 1)
+        avg_census = total_patient_days / period_days if period_days > 0 else 0
+        
         discharges = metrics.get('total_discharges', 0)
         turnover_rate = (discharges / avg_census) if avg_census > 0 else 0
+        
         st.metric(
             "病床回転率",
             f"{turnover_rate:.2f}回",
+            delta=f"退院: {discharges}人, 平均在院: {avg_census:.1f}人",
             help="期間中の病床回転数"
         )
     
     with col3:
         # 稼働率変動係数（安定性指標）
-        if hasattr(metrics, 'occupancy_cv'):
+        # hasattr問題を修正：辞書なのでキーの存在をチェック
+        if 'occupancy_cv' in metrics and metrics['occupancy_cv'] is not None:
             cv = metrics.get('occupancy_cv', 0)
             stability = "安定" if cv < 5 else "変動大" if cv > 10 else "普通"
             st.metric(
@@ -1912,6 +1860,41 @@ def display_additional_metrics(metrics):
                 delta=stability,
                 help="変動係数（小さいほど安定）"
             )
+        else:
+            # occupancy_cvがない場合は、代替指標を表示
+            bed_occupancy = metrics.get('bed_occupancy', 0)
+            total_beds = st.session_state.get('total_beds', 612)
+            
+            st.metric(
+                "現在病床利用率",
+                f"{bed_occupancy:.1f}%",
+                delta=f"総病床: {total_beds}床",
+                help="現在の病床利用率"
+            )
+            
+# この関数を呼び出すための追加コード
+def display_kpi_cards_with_additional(metrics, selected_period):
+    """KPIカード + 追加メトリクスの表示"""
+    
+    # 既存のKPIカード表示
+    display_kpi_cards(metrics, selected_period)
+    
+    # 追加メトリクスの表示
+    if st.checkbox("📋 追加指標を表示", value=False, key="show_additional_metrics"):
+        display_additional_metrics(metrics)
+
+# または、経営ダッシュボードに組み込む場合
+def display_enhanced_management_dashboard(df_kpi, kpi_dates, kpi_period, df_graph, graph_dates, graph_period, targets_df):
+    """追加指標付きの経営ダッシュボード"""
+    
+    # 基本KPIカードの表示
+    display_kpi_cards(metrics, selected_period)
+    
+    # 追加指標の表示オプション
+    st.markdown("---")
+    
+    if st.expander("📊 詳細運営指標", expanded=False):
+        display_additional_metrics(metrics)
 
 def display_period_specific_notes(selected_period, period_dates):
     """期間別の特別な注意事項"""
