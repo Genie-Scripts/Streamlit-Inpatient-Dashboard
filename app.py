@@ -1101,17 +1101,37 @@ def create_sidebar():
         monthly_revenue_estimate = monthly_target_patient_days * avg_admission_fee
         st.session_state.monthly_revenue_estimate = monthly_revenue_estimate
         
-        # 目標値の表示
+        # 目標値の表示（修正：1列4行に変更）
         st.markdown("### 📈 目標値サマリー")
-        st.markdown('<div class="sidebar-target-summary-metrics">', unsafe_allow_html=True) # クラス名を追加
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("延べ在院日数", f"{monthly_target_patient_days:,}人日")
-            st.metric("新入院患者数", f"{monthly_target_admissions:,}人")
-        with col2:
-            st.metric("推定月間収益", f"{monthly_revenue_estimate:,.0f}円")
-            st.metric("病床稼働率", f"{bed_occupancy_rate:.1%}")
-        st.markdown('</div>', unsafe_allow_html=True) # div を閉じる
+        st.markdown('<div class="sidebar-target-summary-metrics">', unsafe_allow_html=True)
+        
+        # ✅ 修正：2列から1列4行に変更
+        st.metric(
+            "延べ在院日数",
+            f"{monthly_target_patient_days:,}人日",
+            help="月間目標延べ在院日数"
+        )
+        
+        st.metric(
+            "新入院患者数",
+            f"{monthly_target_admissions:,}人",
+            help="月間目標新入院患者数"
+        )
+        
+        st.metric(
+            "推定月間収益",
+            f"{monthly_revenue_estimate:,.0f}円",
+            help="月間目標収益"
+        )
+        
+        st.metric(
+            "病床稼働率",
+            f"{bed_occupancy_rate:.1%}",
+            help="目標病床稼働率"
+        )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
     # --- 表示設定セクション ---
     with st.sidebar.expander("📊 表示設定", expanded=False):
         show_weekday_analysis = st.checkbox(
