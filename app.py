@@ -1187,7 +1187,8 @@ def create_sidebar():
 
 
 def create_management_dashboard_tab():
-    """統一版：既存のkpi_calculator.pyを活用した経営ダッシュボードタブ"""
+def create_management_dashboard_tab():
+    """修正版：正しい収益達成率計算を使用"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
         st.warning("⚠️ データが読み込まれていません。先にデータ処理タブでファイルをアップロードしてください。")
         return
@@ -1196,7 +1197,7 @@ def create_management_dashboard_tab():
     
     st.header("💰 経営ダッシュボード")
     
-    # 期間選択UI（簡素化）
+    # 期間選択UI
     st.markdown("### 📊 表示期間設定")
     
     period_options = ["直近30日", "前月完了分", "今年度"]
@@ -1211,7 +1212,7 @@ def create_management_dashboard_tab():
     
     st.markdown("---")
     
-    # 既存のkpi_calculator.pyを使用したメトリクス計算
+    # ✅ 修正版のメトリクス計算を使用
     metrics = calculate_dashboard_metrics(df, selected_period)
     
     if not metrics:
@@ -1234,9 +1235,8 @@ DASHBOARD_COLORS = {
 }
 
 def calculate_dashboard_metrics(df, selected_period):
-    """統一版：既存のkpi_calculator.pyを活用したメトリクス計算"""
+    """修正版：正しい収益達成率計算を含むメトリクス計算"""
     try:
-        # kpi_calculator.pyをインポート
         from kpi_calculator import calculate_kpis
         
         latest_date = df['日付'].max()
@@ -1245,27 +1245,29 @@ def calculate_dashboard_metrics(df, selected_period):
         fixed_start_date = latest_date - pd.Timedelta(days=29)
         fixed_end_date = latest_date
         
-        # kpi_calculator.pyを使用して固定期間のKPIを計算
-        fixed_kpis = calculate_kpis(df, fixed_start_date, fixed_end_date, 
-                                  total_beds=st.session_state.get('total_beds', 612))
+        total_beds = st.session_state.get('total_beds', 612)
+        fixed_kpis = calculate_kpis(df, fixed_start_date, fixed_end_date, total_beds=total_beds)
         
         if fixed_kpis and fixed_kpis.get("error"):
             st.error(f"固定期間のKPI計算エラー: {fixed_kpis['error']}")
             return None
         
         # 2. 平均値計算用期間データの計算
-        period_start_date, period_end_date = get_period_dates(df, selected_period)
-        
-        # kpi_calculator.pyを使用して平均値計算期間のKPIを計算
-        period_kpis = calculate_kpis(df, period_start_date, period_end_date,
-                                   total_beds=st.session_state.get('total_beds', 612))
+        period_start_date, period_end_date = get_period_dates_for_dashboard(df, selected_period)
+        period_kpis = calculate_kpis(df, period_start_date, period_end_date, total_beds=total_beds)
         
         if period_kpis and period_kpis.get("error"):
             st.error(f"平均値計算期間のKPI計算エラー: {period_kpis['error']}")
             return None
         
+        # 3. ✅ 月次収益達成率の正しい計算
+        current_month_start = latest_date.replace(day=1)
+        current_month_end = latest_date
+        
+        # 当月実績の計算
+        current_month_kpis = calculate_kpis(df, current_month_start, current_month_end, total_beds=total_beds)
+        
         # 基本設定値
-        total_beds = st.session_state.get('total_beds', 612)
         avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
         monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', 17000)
         target_revenue = monthly_target_patient_days * avg_admission_fee
@@ -1275,9 +1277,33 @@ def calculate_dashboard_metrics(df, selected_period):
         avg_daily_census_30d = fixed_kpis.get('avg_daily_census', 0)
         bed_occupancy_rate = fixed_kpis.get('bed_occupancy_rate', 0)
         
-        # 推計収益（直近30日）
+        # 直近30日の推計収益（月次目標とは比較しない）
         estimated_revenue_30d = total_patient_days_30d * avg_admission_fee
-        achievement_rate = (estimated_revenue_30d / target_revenue) * 100 if target_revenue > 0 else 0
+        
+        # ✅ 正しい月次収益達成率の計算
+        if current_month_kpis and not current_month_kpis.get("error"):
+            current_month_patient_days = current_month_kpis.get('total_patient_days', 0)
+            current_month_revenue = current_month_patient_days * avg_admission_fee
+            
+            # 月途中の場合は月次換算
+            days_elapsed = (current_month_end - current_month_start).days + 1
+            days_in_month = pd.Timestamp(current_month_end.year, current_month_end.month, 1).days_in_month
+            
+            if days_elapsed < days_in_month:
+                # 月途中の場合：月次換算収益を計算
+                projected_monthly_revenue = current_month_revenue * (days_in_month / days_elapsed)
+                monthly_achievement_rate = (projected_monthly_revenue / target_revenue) * 100 if target_revenue > 0 else 0
+                revenue_calculation_note = f"月途中換算（{days_elapsed}/{days_in_month}日）"
+            else:
+                # 月完了の場合：実績そのまま
+                monthly_achievement_rate = (current_month_revenue / target_revenue) * 100 if target_revenue > 0 else 0
+                projected_monthly_revenue = current_month_revenue
+                revenue_calculation_note = "月完了実績"
+        else:
+            # 当月データが取得できない場合
+            projected_monthly_revenue = 0
+            monthly_achievement_rate = 0
+            revenue_calculation_note = "当月データなし"
         
         # 平均値（選択期間）の取得
         avg_daily_census = period_kpis.get('avg_daily_census', 0)
@@ -1285,48 +1311,17 @@ def calculate_dashboard_metrics(df, selected_period):
         avg_daily_admissions = period_kpis.get('avg_daily_admissions', 0)
         period_days = period_kpis.get('days_count', 1)
         
-        # デバッグ情報の表示
-        if st.checkbox("🔧 KPI計算詳細を表示", key="show_kpi_calculation_debug"):
-            st.markdown("#### 📊 KPI計算詳細")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**固定期間（直近30日）のKPI**")
-                st.json({
-                    "期間": f"{fixed_start_date.strftime('%Y-%m-%d')} ～ {fixed_end_date.strftime('%Y-%m-%d')}",
-                    "日数": fixed_kpis.get('days_count', 0),
-                    "延べ在院日数": f"{total_patient_days_30d:,.0f}人日",
-                    "日平均在院患者数": f"{avg_daily_census_30d:.1f}人",
-                    "病床利用率": f"{bed_occupancy_rate:.1f}%" if bed_occupancy_rate else "N/A",
-                    "推計収益": f"{estimated_revenue_30d:,.0f}円"
-                })
-                
-            with col2:
-                st.markdown(f"**平均値計算期間（{selected_period}）のKPI**")
-                st.json({
-                    "期間": f"{period_start_date.strftime('%Y-%m-%d')} ～ {period_end_date.strftime('%Y-%m-%d')}",
-                    "日数": period_days,
-                    "日平均在院患者数": f"{avg_daily_census:.1f}人",
-                    "平均在院日数": f"{avg_los:.1f}日",
-                    "日平均新入院患者数": f"{avg_daily_admissions:.1f}人",
-                    "処理時間": f"{period_kpis.get('processing_time', 0):.3f}秒"
-                })
-            
-            # KPI計算の月次データも表示
-            if 'monthly_stats' in period_kpis:
-                st.markdown("**月次統計データ**")
-                monthly_df = period_kpis['monthly_stats']
-                if not monthly_df.empty:
-                    st.dataframe(monthly_df, hide_index=True)
-        
         return {
             # 固定値（直近30日）
             'total_patient_days_30d': total_patient_days_30d,
             'bed_occupancy_rate': bed_occupancy_rate,
-            'estimated_revenue_30d': estimated_revenue_30d,
-            'achievement_rate': achievement_rate,
+            'estimated_revenue_30d': estimated_revenue_30d,  # 直近30日の収益
             'avg_daily_census_30d': avg_daily_census_30d,
+            
+            # ✅ 修正：正しい月次達成率
+            'monthly_achievement_rate': monthly_achievement_rate,  # 月次達成率
+            'projected_monthly_revenue': projected_monthly_revenue,  # 月次換算収益
+            'revenue_calculation_note': revenue_calculation_note,   # 計算方法の説明
             
             # 平均値（選択期間）
             'avg_daily_census': avg_daily_census,
@@ -1337,19 +1332,14 @@ def calculate_dashboard_metrics(df, selected_period):
             # 設定値
             'total_beds': total_beds,
             'target_revenue': target_revenue,
-            'selected_period': selected_period,
-            
-            # KPIデータ（詳細分析用）
-            'fixed_period_kpis': fixed_kpis,
-            'avg_period_kpis': period_kpis
+            'selected_period': selected_period
         }
         
     except ImportError as e:
         st.error(f"kpi_calculator.pyのインポートに失敗しました: {e}")
-        st.error("kpi_calculator.pyファイルが存在し、正しく配置されているか確認してください。")
         return None
     except Exception as e:
-        st.error(f"統一メトリクス計算エラー: {e}")
+        st.error(f"メトリクス計算エラー: {e}")
         import traceback
         st.error(traceback.format_exc())
         return None
@@ -1464,35 +1454,31 @@ def get_period_data_for_averages(df, selected_period):
         return df.copy()
 
 def display_unified_metrics_layout_colorized(metrics, selected_period):
-    """修正版：通常の数値表記を使用した統一レイアウト"""
+    """修正版：正しい収益達成率を表示"""
     
     def format_number_normal(value, unit=""):
         """通常のカンマ区切り数値表記"""
         if pd.isna(value) or value == 0:
             return f"0{unit}"
         
-        # 整数として表示する場合
         if isinstance(value, (int, float)) and value == int(value):
             return f"{int(value):,}{unit}"
-        # 小数点がある場合
         else:
             return f"{value:,.0f}{unit}"
     
     # 期間表示
     period_info = get_period_display_info(selected_period)
     st.info(f"📊 平均値計算期間: {period_info}")
-    st.caption("※延べ在院日数、病床利用率、推計収益、達成率は直近30日固定")
+    st.caption("※延べ在院日数、病床利用率は直近30日固定。収益達成率は当月実績ベース。")
     
     # === 1行目：日平均在院患者数、病床利用率、平均在院日数 ===
     st.markdown(f"### 📊 主要指標 （最新月: {pd.Timestamp.now().strftime('%Y-%m')}）")
     
-    # management-dashboard-kpi-card クラスでKPIカードを囲む（CSSスタイル適用用）
     st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True)
     
     col1_1, col1_2, col1_3 = st.columns(3)
     
     with col1_1:
-        # 日平均在院患者数
         st.metric(
             "日平均在院患者数",
             f"{metrics['avg_daily_census']:.1f}人",
@@ -1501,7 +1487,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
     
     with col1_2:
-        # 病床利用率
         target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
         occupancy_delta = metrics['bed_occupancy_rate'] - target_occupancy
         delta_color = "normal" if abs(occupancy_delta) <= 5 else "inverse"
@@ -1515,7 +1500,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
     
     with col1_3:
-        # 平均在院日数
         st.metric(
             "平均在院日数",
             f"{metrics['avg_los']:.1f}日",
@@ -1524,7 +1508,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
     
     st.markdown('</div>', unsafe_allow_html=True)
-    
     st.markdown("---")
     
     # === 2行目：日平均新入院患者数、延べ在院日数 ===
@@ -1533,7 +1516,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
     col2_1, col2_2, col2_3 = st.columns(3)
     
     with col2_1:
-        # 日平均新入院患者数
         st.metric(
             "日平均新入院患者数",
             f"{metrics['avg_daily_admissions']:.1f}人",
@@ -1542,70 +1524,98 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
     
     with col2_2:
-        # 延べ在院日数（通常表記）
         monthly_target = st.session_state.get('monthly_target_patient_days', 17000)
         achievement_days = (metrics['total_patient_days_30d'] / monthly_target) * 100
         
         st.metric(
             "延べ在院日数（直近30日）",
             f"{format_number_normal(metrics['total_patient_days_30d'])}人日",
-            delta=f"目標達成率: {achievement_days:.1f}%",
+            delta=f"対月間目標: {achievement_days:.1f}%",
             delta_color="normal" if achievement_days >= 95 else "inverse",
-            help="直近30日間の延べ在院日数"
+            help="直近30日間の延べ在院日数（参考値）"
         )
     
     with col2_3:
-        # 延べ在院日数達成率（詳細）
         st.metric(
             "延べ在院日数達成率",
             f"{achievement_days:.1f}%",
             delta=f"目標: {format_number_normal(monthly_target)}人日",
             delta_color="normal" if achievement_days >= 100 else "inverse",
-            help="月間目標に対する達成率"
+            help="直近30日の月間目標に対する参考達成率"
         )
     
     st.markdown("---")
     
-    # === 3行目：推計収益、達成率 ===
+    # === 3行目：推計収益、達成率（修正版） ===
     st.markdown("### 💰 収益指標")
     
     col3_1, col3_2, col3_3 = st.columns(3)
     
     with col3_1:
-        # 推計収益（通常表記）
+        # 直近30日の推計収益（参考値として表示）
         st.metric(
             "推計収益（直近30日）",
             f"{format_number_normal(metrics['estimated_revenue_30d'])}円",
             delta=f"単価: {st.session_state.get('avg_admission_fee', 55000):,}円/日",
-            help="直近30日の推計収益"
+            help="直近30日の推計収益（参考値）"
         )
     
     with col3_2:
-        # 目標達成率
-        achievement_status = "✅ 達成" if metrics['achievement_rate'] >= 100 else "📈 未達"
+        # ✅ 修正：正しい月次達成率
+        achievement_status = "✅ 達成" if metrics['monthly_achievement_rate'] >= 100 else "📈 未達"
         
         st.metric(
-            "目標達成率",
-            f"{metrics['achievement_rate']:.1f}%",
-            delta=f"{achievement_status}",
-            delta_color="normal" if metrics['achievement_rate'] >= 100 else "inverse",
-            help="月間目標収益に対する達成率"
+            "月次収益達成率",
+            f"{metrics['monthly_achievement_rate']:.1f}%",
+            delta=f"{achievement_status} ({metrics['revenue_calculation_note']})",
+            delta_color="normal" if metrics['monthly_achievement_rate'] >= 100 else "inverse",
+            help="当月の収益達成率（月途中の場合は換算値）"
         )
     
     with col3_3:
-        # 日平均収益（通常表記）
-        daily_revenue = metrics['estimated_revenue_30d'] / 30
+        # 月次換算収益
         st.metric(
-            "日平均収益（直近30日）",
-            f"{format_number_normal(daily_revenue)}円",
-            delta="1日あたり平均",
-            help="直近30日の日平均収益"
+            "月次換算収益",
+            f"{format_number_normal(metrics['projected_monthly_revenue'])}円",
+            delta=f"目標: {format_number_normal(metrics['target_revenue'])}円",
+            help="当月の月次換算収益"
         )
     
-    # === 詳細情報セクション ===
+    # === 計算方法の説明 ===
     st.markdown("---")
+    with st.expander("🔍 収益達成率の計算方法", expanded=False):
+        st.markdown("""
+        **✅ 修正後の正しい計算方法:**
+        
+        1. **直近30日の推計収益**: 参考値として表示（月次目標とは比較しない）
+        2. **月次収益達成率**: 当月実績ベースで計算
+           - 月完了の場合: 当月実績 ÷ 月間目標
+           - 月途中の場合: (当月実績 × 月の日数 ÷ 経過日数) ÷ 月間目標
+        3. **月次換算収益**: 当月実績を月全体に換算した推定値
+        
+        **❌ 修正前の問題点:**
+        - 直近30日の収益を月間目標と直接比較（期間の不整合）
+        - 30日 ≠ 1ヶ月（日数の違い）
+        - 複数月にまたがる期間の問題
+        """)
+        
+        # 計算詳細の表示
+        st.markdown("**📊 現在の計算詳細:**")
+        latest_date = st.session_state['df']['日付'].max() if 'df' in st.session_state else pd.Timestamp.now()
+        current_month_start = latest_date.replace(day=1)
+        days_elapsed = (latest_date - current_month_start).days + 1
+        days_in_month = pd.Timestamp(latest_date.year, latest_date.month, 1).days_in_month
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"• 当月: {latest_date.strftime('%Y年%m月')}")
+            st.write(f"• 経過日数: {days_elapsed}日")
+            st.write(f"• 月の総日数: {days_in_month}日")
+        with col2:
+            st.write(f"• 月次換算係数: {days_in_month/days_elapsed:.2f}倍")
+            st.write(f"• 計算方法: {metrics.get('revenue_calculation_note', 'N/A')}")
     
-    # エクスパンダーで詳細情報を格納
+    # === 詳細情報セクション ===
     with st.expander("📋 詳細データと設定値", expanded=False):
         detail_col1, detail_col2, detail_col3 = st.columns(3)
         
@@ -1619,12 +1629,10 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
             st.markdown("**📅 期間情報**")
             st.write(f"• 平均値計算: {selected_period}")
             st.write(f"• 固定値計算: 直近30日")
-            if 'df' in st.session_state and st.session_state['df'] is not None:
-                st.write(f"• データ最新日: {st.session_state['df']['日付'].max().strftime('%Y/%m/%d')}")
+            st.write(f"• 収益計算: 当月ベース")
         
         with detail_col3:
             st.markdown("**🎯 目標値**")
-            # 目標値も通常表記に修正
             st.write(f"• 月間延べ在院日数: {format_number_normal(st.session_state.get('monthly_target_patient_days', 17000))}人日")
             st.write(f"• 月間目標収益: {format_number_normal(metrics['target_revenue'])}円")
             st.write(f"• 月間新入院目標: {st.session_state.get('monthly_target_admissions', 1480):,}人")
