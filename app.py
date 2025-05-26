@@ -1185,8 +1185,6 @@ def create_sidebar():
             monthly_target_admissions > 0)
             
 
-
-def create_management_dashboard_tab():
 def create_management_dashboard_tab():
     """修正版：正しい収益達成率計算を使用"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
