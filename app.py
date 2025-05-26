@@ -1233,7 +1233,7 @@ DASHBOARD_COLORS = {
 }
 
 def calculate_dashboard_metrics(df, selected_period):
-    """修正版：正しい収益達成率計算を含むメトリクス計算"""
+    """修正版：不足していた関数を含む完全版メトリクス計算"""
     try:
         from kpi_calculator import calculate_kpis
         
@@ -1317,9 +1317,9 @@ def calculate_dashboard_metrics(df, selected_period):
             'avg_daily_census_30d': avg_daily_census_30d,
             
             # ✅ 修正：正しい月次達成率
-            'monthly_achievement_rate': monthly_achievement_rate,  # 月次達成率
-            'projected_monthly_revenue': projected_monthly_revenue,  # 月次換算収益
-            'revenue_calculation_note': revenue_calculation_note,   # 計算方法の説明
+            'monthly_achievement_rate': monthly_achievement_rate if 'monthly_achievement_rate' in locals() else 0,
+            'projected_monthly_revenue': projected_monthly_revenue if 'projected_monthly_revenue' in locals() else 0,
+            'revenue_calculation_note': revenue_calculation_note if 'revenue_calculation_note' in locals() else "計算エラー",
             
             # 平均値（選択期間）
             'avg_daily_census': avg_daily_census,
@@ -1452,7 +1452,7 @@ def get_period_data_for_averages(df, selected_period):
         return df.copy()
 
 def display_unified_metrics_layout_colorized(metrics, selected_period):
-    """修正版：正しい収益達成率を表示"""
+    """修正版：正しい収益達成率を表示（完全版）"""
     
     def format_number_normal(value, unit=""):
         """通常のカンマ区切り数値表記"""
@@ -1560,60 +1560,29 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
     
     with col3_2:
         # ✅ 修正：正しい月次達成率
-        achievement_status = "✅ 達成" if metrics['monthly_achievement_rate'] >= 100 else "📈 未達"
+        monthly_rate = metrics.get('monthly_achievement_rate', 0)
+        achievement_status = "✅ 達成" if monthly_rate >= 100 else "📈 未達"
         
         st.metric(
             "月次収益達成率",
-            f"{metrics['monthly_achievement_rate']:.1f}%",
-            delta=f"{achievement_status} ({metrics['revenue_calculation_note']})",
-            delta_color="normal" if metrics['monthly_achievement_rate'] >= 100 else "inverse",
+            f"{monthly_rate:.1f}%",
+            delta=f"{achievement_status} ({metrics.get('revenue_calculation_note', 'N/A')})",
+            delta_color="normal" if monthly_rate >= 100 else "inverse",
             help="当月の収益達成率（月途中の場合は換算値）"
         )
     
     with col3_3:
         # 月次換算収益
+        projected_revenue = metrics.get('projected_monthly_revenue', 0)
         st.metric(
             "月次換算収益",
-            f"{format_number_normal(metrics['projected_monthly_revenue'])}円",
+            f"{format_number_normal(projected_revenue)}円",
             delta=f"目標: {format_number_normal(metrics['target_revenue'])}円",
             help="当月の月次換算収益"
         )
     
-    # === 計算方法の説明 ===
-    st.markdown("---")
-    with st.expander("🔍 収益達成率の計算方法", expanded=False):
-        st.markdown("""
-        **✅ 修正後の正しい計算方法:**
-        
-        1. **直近30日の推計収益**: 参考値として表示（月次目標とは比較しない）
-        2. **月次収益達成率**: 当月実績ベースで計算
-           - 月完了の場合: 当月実績 ÷ 月間目標
-           - 月途中の場合: (当月実績 × 月の日数 ÷ 経過日数) ÷ 月間目標
-        3. **月次換算収益**: 当月実績を月全体に換算した推定値
-        
-        **❌ 修正前の問題点:**
-        - 直近30日の収益を月間目標と直接比較（期間の不整合）
-        - 30日 ≠ 1ヶ月（日数の違い）
-        - 複数月にまたがる期間の問題
-        """)
-        
-        # 計算詳細の表示
-        st.markdown("**📊 現在の計算詳細:**")
-        latest_date = st.session_state['df']['日付'].max() if 'df' in st.session_state else pd.Timestamp.now()
-        current_month_start = latest_date.replace(day=1)
-        days_elapsed = (latest_date - current_month_start).days + 1
-        days_in_month = pd.Timestamp(latest_date.year, latest_date.month, 1).days_in_month
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"• 当月: {latest_date.strftime('%Y年%m月')}")
-            st.write(f"• 経過日数: {days_elapsed}日")
-            st.write(f"• 月の総日数: {days_in_month}日")
-        with col2:
-            st.write(f"• 月次換算係数: {days_in_month/days_elapsed:.2f}倍")
-            st.write(f"• 計算方法: {metrics.get('revenue_calculation_note', 'N/A')}")
-    
     # === 詳細情報セクション ===
+    st.markdown("---")
     with st.expander("📋 詳細データと設定値", expanded=False):
         detail_col1, detail_col2, detail_col3 = st.columns(3)
         
@@ -1656,7 +1625,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         - **円**: 収益金額（例: 580,000,000円）  
         - **%**: 達成率、利用率（例: 95.5%）
         """)
-
 
 def get_period_display_info(selected_period):
     """期間の表示情報を取得"""
