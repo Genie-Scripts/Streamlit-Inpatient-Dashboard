@@ -1851,66 +1851,6 @@ def display_kpi_cards(metrics, selected_period):
             help="期間中の1日あたり平均収益"
         )
 
-# サイドバー目標値サマリーも同様に対応
-def create_sidebar_target_summary():
-    """修正版：通常のst.metricを使用した目標値サマリー"""
-    
-    def format_large_number(value, unit=""):
-        """数値短縮表示"""
-        if pd.isna(value) or value == 0:
-            return f"0{unit}"
-            
-        abs_value = abs(value)
-        
-        if abs_value >= 100000000:
-            return f"{value/100000000:.1f}億{unit}"
-        elif abs_value >= 10000:
-            return f"{value/10000:.1f}万{unit}"
-        elif abs_value >= 1000:
-            return f"{value/1000:.1f}千{unit}"
-        else:
-            return f"{value:,.0f}{unit}"
-    
-    # 目標値取得
-    monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', 17000)
-    monthly_target_admissions = st.session_state.get('monthly_target_admissions', 1480)
-    monthly_revenue_estimate = st.session_state.get('monthly_revenue_estimate', 935000000)
-    bed_occupancy_rate = st.session_state.get('bed_occupancy_rate', 0.85)
-    
-    st.markdown("### 📈 目標値サマリー")
-    
-    # sidebar-target-summary-metrics クラスでサマリーを囲む
-    st.markdown('<div class="sidebar-target-summary-metrics">', unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(
-            "延べ在院日数",
-            format_large_number(monthly_target_patient_days, "人日"),
-            help="月間目標延べ在院日数"
-        )
-        
-        st.metric(
-            "新入院患者数",
-            format_large_number(monthly_target_admissions, "人"),
-            help="月間目標新入院患者数"
-        )
-    
-    with col2:
-        st.metric(
-            "推定月間収益",
-            format_large_number(monthly_revenue_estimate, "円"),
-            help="月間目標収益"
-        )
-        
-        st.metric(
-            "病床稼働率",
-            f"{bed_occupancy_rate:.1%}",
-            help="目標病床稼働率"
-        )
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
 # ===== 月次予測関連の関数（forecast.py に実装予定） =====
 
 def create_operations_dashboard_section(df, targets_df=None):
