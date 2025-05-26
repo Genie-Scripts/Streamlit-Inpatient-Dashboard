@@ -1464,25 +1464,17 @@ def get_period_data_for_averages(df, selected_period):
         return df.copy()
 
 def display_unified_metrics_layout_colorized(metrics, selected_period):
-    """修正版：st.metric()を使用した統一レイアウト"""
+    """修正版：通常の数値表記を使用した統一レイアウト"""
     
-    def format_large_number(value, unit=""):
-        """大きな数値を短縮表示"""
+    def format_number_normal(value, unit=""):
+        """通常のカンマ区切り数値表記"""
         if pd.isna(value) or value == 0:
             return f"0{unit}"
-            
-        abs_value = abs(value)
         
-        if abs_value >= 100000000:  # 1億以上
-            return f"{value/100000000:.1f}億{unit}"
-        elif abs_value >= 10000000:  # 1000万以上
-            return f"{value/10000000:.0f}千万{unit}"
-        elif abs_value >= 1000000:   # 100万以上
-            return f"{value/1000000:.0f}百万{unit}"
-        elif abs_value >= 10000:     # 1万以上
-            return f"{value/10000:.1f}万{unit}"
-        elif abs_value >= 1000:      # 1000以上
-            return f"{value/1000:.1f}千{unit}"
+        # 整数として表示する場合
+        if isinstance(value, (int, float)) and value == int(value):
+            return f"{int(value):,}{unit}"
+        # 小数点がある場合
         else:
             return f"{value:,.0f}{unit}"
     
@@ -1550,13 +1542,13 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
     
     with col2_2:
-        # 延べ在院日数
+        # 延べ在院日数（通常表記）
         monthly_target = st.session_state.get('monthly_target_patient_days', 17000)
         achievement_days = (metrics['total_patient_days_30d'] / monthly_target) * 100
         
         st.metric(
             "延べ在院日数（直近30日）",
-            format_large_number(metrics['total_patient_days_30d'], "人日"),
+            f"{format_number_normal(metrics['total_patient_days_30d'])}人日",
             delta=f"目標達成率: {achievement_days:.1f}%",
             delta_color="normal" if achievement_days >= 95 else "inverse",
             help="直近30日間の延べ在院日数"
@@ -1567,7 +1559,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         st.metric(
             "延べ在院日数達成率",
             f"{achievement_days:.1f}%",
-            delta=f"目標: {format_large_number(monthly_target, '人日')}",
+            delta=f"目標: {format_number_normal(monthly_target)}人日",
             delta_color="normal" if achievement_days >= 100 else "inverse",
             help="月間目標に対する達成率"
         )
@@ -1580,10 +1572,10 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
     col3_1, col3_2, col3_3 = st.columns(3)
     
     with col3_1:
-        # 推計収益
+        # 推計収益（通常表記）
         st.metric(
             "推計収益（直近30日）",
-            format_large_number(metrics['estimated_revenue_30d'], "円"),
+            f"{format_number_normal(metrics['estimated_revenue_30d'])}円",
             delta=f"単価: {st.session_state.get('avg_admission_fee', 55000):,}円/日",
             help="直近30日の推計収益"
         )
@@ -1601,11 +1593,11 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
     
     with col3_3:
-        # 日平均収益
+        # 日平均収益（通常表記）
         daily_revenue = metrics['estimated_revenue_30d'] / 30
         st.metric(
             "日平均収益（直近30日）",
-            format_large_number(daily_revenue, "円"),
+            f"{format_number_normal(daily_revenue)}円",
             delta="1日あたり平均",
             help="直近30日の日平均収益"
         )
@@ -1632,19 +1624,20 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         
         with detail_col3:
             st.markdown("**🎯 目標値**")
-            st.write(f"• 月間延べ在院日数: {format_large_number(st.session_state.get('monthly_target_patient_days', 17000), '人日')}")
-            st.write(f"• 月間目標収益: {format_large_number(metrics['target_revenue'], '円')}")
+            # 目標値も通常表記に修正
+            st.write(f"• 月間延べ在院日数: {format_number_normal(st.session_state.get('monthly_target_patient_days', 17000))}人日")
+            st.write(f"• 月間目標収益: {format_number_normal(metrics['target_revenue'])}円")
             st.write(f"• 月間新入院目標: {st.session_state.get('monthly_target_admissions', 1480):,}人")
     
-    # === 色別表示の説明 ===
+    # === 数値の見方説明 ===
     st.markdown("---")
-    st.markdown("### 🎨 表示について")
+    st.markdown("### 📊 表示について")
     
     info_col1, info_col2 = st.columns(2)
     
     with info_col1:
         st.markdown("""
-        **📊 数値の見方**
+        **🔢 数値の見方**
         - **緑の矢印**: 目標達成または改善
         - **赤の矢印**: 目標未達または悪化
         - **グレーの矢印**: 参考情報
@@ -1652,11 +1645,12 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
     
     with info_col2:
         st.markdown("""
-        **🔢 数値の単位**
-        - **人日**: 延べ在院日数の単位
-        - **%**: 達成率、利用率の単位
-        - **円**: 収益関連の単位
+        **📋 単位の説明**
+        - **人日**: 延べ在院日数（例: 10,500人日）
+        - **円**: 収益金額（例: 580,000,000円）  
+        - **%**: 達成率、利用率（例: 95.5%）
         """)
+
 
 def get_period_display_info(selected_period):
     """期間の表示情報を取得"""
