@@ -1251,7 +1251,7 @@ def calculate_dashboard_metrics(df, selected_period):
             return None
         
         # 2. 平均値計算用期間データの計算
-        period_start_date, period_end_date = get_period_dates_for_dashboard(df, selected_period)
+        period_start_date, period_end_date = get_period_dates(df, selected_period)
         period_kpis = calculate_kpis(df, period_start_date, period_end_date, total_beds=total_beds)
         
         if period_kpis and period_kpis.get("error"):
