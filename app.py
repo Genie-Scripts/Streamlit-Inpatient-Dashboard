@@ -279,55 +279,49 @@ st.markdown("""
         }
     }
 
-/* ▼▼▼▼▼ 経営ダッシュボードとサイドバー目標値サマリーの調整（修正版） ▼▼▼▼▼ */
+/* ▼▼▼▼▼ KPIカードと目標値サマリーの数字・タイトル縮小版 ▼▼▼▼▼ */
 
     /* 経営ダッシュボードタブのKPIカードのフォントサイズ調整 */
     /* (display_kpi_cards 関数内で <div class="management-dashboard-kpi-card"> で囲まれた st.metric を対象) */
+
+    /* 経営ダッシュボードKPIカードの調整（少し小さく） */
     .management-dashboard-kpi-card [data-testid="stMetricValue"] {
-        font-size: 1.1rem !important; /* 1.6rem から縮小 */
-        line-height: 1.0 !important;  /* 行間を詰める */
+        font-size: 0.9rem !important; /* 1.1rem → 0.9rem に縮小 */
+        line-height: 1.0 !important;
         padding-top: 1px !important;
         padding-bottom: 1px !important;
-        word-break: break-all !important; /* 長い数値を強制改行 */
+        word-break: break-all !important;
         overflow-wrap: break-word !important;
-        white-space: normal !important; /* 改行を許可 */
+        white-space: normal !important;
     }
 
     .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
-        font-size: 0.65rem !important; /* 0.8rem から縮小 */
-        margin-bottom: -3px !important; /* ラベルと値の間隔をさらに詰める */
-        white-space: nowrap !important; /* ラベルは改行しない */
+        font-size: 0.55rem !important; /* 0.65rem → 0.55rem に縮小 */
+        margin-bottom: -3px !important;
+        white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
     }
 
     .management-dashboard-kpi-card [data-testid="stMetricDelta"] {
-        font-size: 0.6rem !important; /* 0.7rem から縮小 */
-        margin-top: -3px !important; /* デルタと値の間隔を詰める */
+        font-size: 0.5rem !important; /* 0.6rem → 0.5rem に縮小 */
+        margin-top: -3px !important;
         word-break: break-all !important;
         overflow-wrap: break-word !important;
     }
 
-    .management-dashboard-kpi-card .stCaption { /* KPIカード内の st.caption のフォントサイズ */
-        font-size: 0.55rem !important; /* 0.65rem から縮小 */
-        margin-top: -5px !important; /* 上の要素との間隔を詰める */
+    .management-dashboard-kpi-card .stCaption {
+        font-size: 0.45rem !important; /* 0.55rem → 0.45rem に縮小 */
+        margin-top: -5px !important;
         line-height: 1.1 !important;
         word-break: break-all !important;
         overflow-wrap: break-word !important;
     }
 
-    /* KPIカードコンテナの幅と高さを調整 */
-    .management-dashboard-kpi-card [data-testid="metric-container"] {
-        min-height: 120px !important; /* 高さを確保 */
-        padding: 0.6rem 0.8rem !important; /* パディング調整 */
-        width: 100% !important;
-        overflow: hidden !important;
-    }
-
-    /* div指定での追加調整（より具体的なセレクタ） */
+    /* より具体的なセレクタでの追加調整 */
     div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 1.0rem !important; /* さらに縮小 */
-        line-height: 1.0 !important;  /* 行間を詰める */
+        font-size: 0.85rem !important; /* 1.0rem → 0.85rem に縮小 */
+        line-height: 1.0 !important;
         padding-top: 1px !important;
         padding-bottom: 1px !important;
         word-break: break-all !important;
@@ -336,31 +330,23 @@ st.markdown("""
     }
 
     div.management-dashboard-kpi-card div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-        font-size: 0.6rem !important; /* さらに縮小 */
-        margin-bottom: -3px !important; /* ラベルと値の間隔をさらに詰める */
+        font-size: 0.5rem !important; /* 0.6rem → 0.5rem に縮小 */
+        margin-bottom: -3px !important;
         white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
     }
 
     div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
-        font-size: 0.55rem !important; /* さらに縮小 */
-        margin-top: -3px !important; /* デルタと値の間隔を詰める */
+        font-size: 0.45rem !important; /* 0.55rem → 0.45rem に縮小 */
+        margin-top: -3px !important;
         word-break: break-all !important;
         overflow-wrap: break-word !important;
     }
 
-    /* カラム幅の均等化 */
-    .management-dashboard-kpi-card .stColumns > div {
-        padding-left: 0.2rem !important;
-        padding-right: 0.2rem !important;
-        min-width: 0 !important; /* フレックスボックスでの幅調整 */
-    }
-
-    /* サイドバーの目標値サマリーのフォントサイズ調整 */
-    /* (create_sidebar 関数内で <div class="sidebar-target-summary-metrics"> で囲まれた st.metric を対象) */
+    /* サイドバーの目標値サマリーの調整（少し小さく） */
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricLabel"] {
-        font-size: 10px !important;  /* 12px から縮小 */
+        font-size: 9px !important; /* 10px → 9px に縮小 */
         font-weight: normal !important;
         margin-bottom: -2px !important;
         white-space: nowrap !important;
@@ -369,8 +355,8 @@ st.markdown("""
     }
 
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricValue"] {
-        font-size: 0.9rem !important; /* 1.2rem から縮小 */
-        line-height: 1.0 !important;  /* 行間を詰める */
+        font-size: 0.75rem !important; /* 0.9rem → 0.75rem に縮小 */
+        line-height: 1.0 !important;
         padding-top: 0px !important;
         padding-bottom: 1px !important;
         word-break: break-all !important;
@@ -378,14 +364,14 @@ st.markdown("""
     }
 
     [data-testid="stSidebar"] .sidebar-target-summary-metrics [data-testid="stMetricDelta"] {
-        font-size: 0.6rem !important; /* 0.7rem から縮小 */
+        font-size: 0.5rem !important; /* 0.6rem → 0.5rem に縮小 */
         margin-top: -2px !important;
         word-break: break-all !important;
     }
 
     /* より具体的なサイドバー指定 */
     section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-        font-size: 9px !important;  /* さらに縮小 */
+        font-size: 8px !important; /* 9px → 8px に縮小 */
         font-weight: normal !important;
         margin-bottom: -2px !important;
         white-space: nowrap !important;
@@ -394,8 +380,8 @@ st.markdown("""
     }
 
     section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 0.8rem !important; /* さらに縮小 */
-        line-height: 1.0 !important;  /* 行間を詰める */
+        font-size: 0.7rem !important; /* 0.8rem → 0.7rem に縮小 */
+        line-height: 1.0 !important;
         padding-top: 0px !important;
         padding-bottom: 1px !important;
         word-break: break-all !important;
@@ -403,35 +389,23 @@ st.markdown("""
     }
 
     section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
-        font-size: 0.55rem !important; /* さらに縮小 */
+        font-size: 0.45rem !important; /* 0.55rem → 0.45rem に縮小 */
         margin-top: -2px !important;
         word-break: break-all !important;
     }
 
-    /* サイドバーの「目標値サマリー」見出しの調整 */
-    [data-testid="stSidebar"] div[data-testid="stExpander"] div[role="region"] h3:contains("目標値サマリー") { 
-        font-size: 0.9rem !important; /* さらに縮小 */
-        margin-bottom: 0.2rem !important;
+    /* KPIカードコンテナの高さも少し調整 */
+    .management-dashboard-kpi-card [data-testid="metric-container"] {
+        min-height: 100px !important; /* 120px → 100px に縮小 */
+        padding: 0.5rem 0.7rem !important; /* パディングも少し縮小 */
+        width: 100% !important;
+        overflow: hidden !important;
     }
 
-    /* レスポンシブ対応: 画面幅に応じた調整 */
+    /* レスポンシブ対応も調整 */
     @media (max-width: 1400px) {
         .management-dashboard-kpi-card [data-testid="stMetricValue"] {
-            font-size: 0.9rem !important;
-        }
-        
-        .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
-            font-size: 0.55rem !important;
-        }
-
-        div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-            font-size: 0.85rem !important;
-        }
-    }
-
-    @media (max-width: 1200px) {
-        .management-dashboard-kpi-card [data-testid="stMetricValue"] {
-            font-size: 0.8rem !important;
+            font-size: 0.8rem !important; /* さらに縮小 */
         }
         
         .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
@@ -441,14 +415,9 @@ st.markdown("""
         div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
             font-size: 0.75rem !important;
         }
-
-        .management-dashboard-kpi-card [data-testid="metric-container"] {
-            min-height: 100px !important;
-            padding: 0.4rem 0.6rem !important;
-        }
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 1200px) {
         .management-dashboard-kpi-card [data-testid="stMetricValue"] {
             font-size: 0.7rem !important;
         }
@@ -462,19 +431,40 @@ st.markdown("""
         }
 
         .management-dashboard-kpi-card [data-testid="metric-container"] {
+            min-height: 90px !important;
+            padding: 0.4rem 0.6rem !important;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .management-dashboard-kpi-card [data-testid="stMetricValue"] {
+            font-size: 0.6rem !important;
+        }
+        
+        .management-dashboard-kpi-card [data-testid="stMetricLabel"] {
+            font-size: 0.4rem !important;
+        }
+
+        div.management-dashboard-kpi-card div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+            font-size: 0.55rem !important;
+        }
+
+        .management-dashboard-kpi-card [data-testid="metric-container"] {
             min-height: 80px !important;
             padding: 0.3rem 0.4rem !important;
         }
 
         /* モバイル時はサイドバーも調整 */
         section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-            font-size: 0.7rem !important;
+            font-size: 0.6rem !important;
         }
 
         section[data-testid="stSidebar"] div.sidebar-target-summary-metrics div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-            font-size: 8px !important;
+            font-size: 7px !important;
         }
     }
+
+    /* ▲▲▲▲▲ ここまでがKPIカードと目標値サマリーの数字・タイトル縮小版 ▲▲▲▲▲ */
 
     /* 数値が非常に長い場合の緊急対応 */
     .management-dashboard-kpi-card [data-testid="stMetricValue"]:has-text("000,000") {
@@ -2412,50 +2402,6 @@ def main():
 
     # ヘッダー
     st.markdown('<h1 class="main-header">🏥 入退院分析ダッシュボード</h1>', unsafe_allow_html=True)
-    
-    # app.py のメインヘッダーの直後に一時的に追加してください
-    
-    # CSSデバッグ用テストコード
-    st.markdown("### 🔍 CSS動作テスト")
-    
-    # 基本的なCSS動作確認
-    st.markdown("""
-    <style>
-    .test-css-working {
-        background-color: red !important;
-        color: white !important;
-        padding: 10px !important;
-        border-radius: 5px !important;
-    }
-    </style>
-    <div class="test-css-working">
-    このテキストが白字に赤背景で表示されていれば、CSSは動作しています
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # KPIカード用のクラスが実際に適用されているかテスト
-    st.markdown("""
-    <div class="management-dashboard-kpi-card">
-        <div style="border: 2px solid blue; padding: 10px; margin: 10px;">
-            management-dashboard-kpi-card クラステスト
-            <div data-testid="stMetricValue" style="border: 1px solid green;">
-                stMetricValue テスト
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # 実際のst.metricでテスト
-    st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("テスト指標1", "123,456", "↗️ +5%")
-    with col2:
-        st.metric("テスト指標2", "987,654,321", "↗️ +10%")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-
     
     # サイドバー設定
     settings_valid = create_sidebar()
