@@ -80,14 +80,14 @@ st.markdown("""
     }
 
     [data-testid="metric-container"] label[data-testid="stMetricLabel"] { /* st.metric のラベル */
-        font-size: 1.0rem !important; /* やや大きめ */
+        font-size: 0.7rem !important; /* 1.0rem → 0.7rem に変更 */
         font-weight: 600 !important;
         color: #262730 !important;
         margin-bottom: 0.1rem !important; /* 値との間隔を調整 */
     }
 
     [data-testid="metric-container"] div[data-testid="stMetricValue"] { /* st.metric の値 */
-        font-size: 2.2rem !important; /* やや大きめ */
+        font-size: 1.0rem !important; /* 2.2rem → 1.0rem に変更 */
         font-weight: 600 !important;
         color: #262730 !important;
         line-height: 1.2 !important;
@@ -1603,110 +1603,277 @@ def calculate_period_metrics(df_filtered, selected_period, period_dates):
         }
 
 def display_kpi_cards(metrics, selected_period):
-    """レスポンシブ対応のKPIカード表示"""
+    """Streamlit Cloud完全対応版のKPIカード"""
     
-    # 画面幅に応じて列数を調整
-    st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True)
+    def format_large_number(value, unit=""):
+        """大きな数値を短縮表示"""
+        if value >= 100000000:  # 1億以上
+            return f"{value/100000000:.1f}億{unit}"
+        elif value >= 10000000:  # 1000万以上
+            return f"{value/10000000:.0f}千万{unit}"
+        elif value >= 1000000:   # 100万以上
+            return f"{value/1000000:.0f}百万{unit}"
+        elif value >= 10000:     # 1万以上
+            return f"{value/10000:.1f}万{unit}"
+        elif value >= 1000:      # 1000以上
+            return f"{value/1000:.1f}千{unit}"
+        else:
+            return f"{value:,.0f}{unit}"
     
-    # 上段: 主要指標（3列）
-    st.markdown("#### 📊 主要運営指標")
-    col1, col2, col3 = st.columns(3)
+    def create_kpi_card_html(title, value, subtitle="", color="#1f77b4"):
+        """Streamlit Cloud対応のKPIカードHTML"""
+        return f"""
+        <div style="
+            background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+            border: 1px solid #dee2e6;
+            border-left: 4px solid {color};
+            border-radius: 8px;
+            padding: 12px 10px;
+            margin: 4px 2px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+            text-align: center;
+            min-height: 85px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+        ">
+            <!-- タイトル部分（小さく） -->
+            <div style="
+                font-size: 9px;
+                color: #6c757d;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+                margin-bottom: 3px;
+                line-height: 1.1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            ">{title}</div>
+            
+            <!-- 数値部分（小さく） -->
+            <div style="
+                font-size: 14px;
+                font-weight: 700;
+                color: #212529;
+                line-height: 1.0;
+                margin: 4px 0;
+                word-break: break-all;
+                overflow-wrap: break-word;
+                hyphens: auto;
+            ">{value}</div>
+            
+            <!-- サブテキスト部分（小さく） -->
+            <div style="
+                font-size: 7px;
+                color: {color};
+                font-weight: 500;
+                line-height: 1.2;
+                word-break: break-all;
+                overflow-wrap: break-word;
+                margin-top: 2px;
+            ">{subtitle}</div>
+        </div>
+        """
+    
+    # メトリクス値の取得
+    alos = metrics.get('avg_los', 0)
+    patient_days = metrics.get('total_patient_days', 0)
+    bed_occupancy = metrics.get('bed_occupancy', 0)
+    admissions = metrics.get('total_admissions', 0)
+    
+    # 月次換算計算
+    if metrics.get('is_partial_month'):
+        projected_days = metrics.get('monthly_projected_patient_days', 0)
+        projected_admissions = metrics.get('monthly_projected_admissions', 0)
+        is_projection = True
+    else:
+        projected_days = patient_days
+        projected_admissions = admissions
+        is_projection = False
+    
+    # 収益計算
+    avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
+    revenue = projected_days * avg_admission_fee
+    
+    # 目標値
+    target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
+    target_revenue = st.session_state.get('monthly_target_patient_days', 17000) * avg_admission_fee
+    
+    # デルタ計算
+    occupancy_delta = bed_occupancy - target_occupancy
+    revenue_achievement = (revenue / target_revenue) * 100 if target_revenue > 0 else 0
+    
+    st.markdown("### 📊 主要指標")
+    
+    # 4列レイアウト
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        alos = metrics.get('avg_los', 0)
-        st.metric(
+        st.markdown(create_kpi_card_html(
             "平均在院日数",
             f"{alos:.1f}日",
-            help="患者の平均滞在期間"
-        )
-
-    with col2:
-        patient_days = metrics.get('total_patient_days', 0)
-        if metrics.get('is_partial_month'):
-            projected_days = metrics.get('monthly_projected_patient_days', 0)
-            # 表示形式を改善
-            if projected_days >= 10000:
-                display_value = f"{projected_days/10000:.1f}万人日"
-            else:
-                display_value = f"{projected_days:,.0f}人日"
-            
-            st.metric(
-                "月次換算患者数",
-                display_value,
-                help="月末までの予測延べ在院日数"
-            )
-        else:
-            if patient_days >= 10000:
-                display_value = f"{patient_days/10000:.1f}万人日"
-            else:
-                display_value = f"{patient_days:,.0f}人日"
-            st.metric("延べ在院日数", display_value)
-
-    with col3:
-        bed_occupancy = metrics.get('bed_occupancy', 0)
-        target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
-        delta = bed_occupancy - target_occupancy
-        st.metric(
-            "病床利用率", 
-            f"{bed_occupancy:.1f}%",
-            delta=f"{delta:+.1f}% (vs目標)",
-            help=f"目標: {target_occupancy:.1f}%"
-        )
+            f"期間: {metrics.get('period_days', 0)}日分",
+            "#17a2b8"
+        ), unsafe_allow_html=True)
     
-    # 下段: 患者数・収益指標（2列）
-    st.markdown("#### 💰 患者数・収益指標")
-    col4, col5 = st.columns(2)
+    with col2:
+        if is_projection:
+            main_value = format_large_number(projected_days, "人日")
+            subtitle = f"実績: {format_large_number(patient_days, '人日')}"
+            color = "#28a745"
+        else:
+            main_value = format_large_number(patient_days, "人日")
+            subtitle = "期間合計"
+            color = "#6c757d"
+        
+        st.markdown(create_kpi_card_html(
+            "延べ在院日数",
+            main_value,
+            subtitle,
+            color
+        ), unsafe_allow_html=True)
+    
+    with col3:
+        color = "#28a745" if occupancy_delta >= 0 else "#dc3545"
+        subtitle = f"目標: {target_occupancy:.1f}% ({occupancy_delta:+.1f}%)"
+        
+        st.markdown(create_kpi_card_html(
+            "病床利用率",
+            f"{bed_occupancy:.1f}%",
+            subtitle,
+            color
+        ), unsafe_allow_html=True)
     
     with col4:
-        admissions = metrics.get('total_admissions', 0)
-        if metrics.get('is_partial_month'):
-            projected_admissions = metrics.get('monthly_projected_admissions', 0)
-            if projected_admissions >= 1000:
-                display_value = f"{projected_admissions/1000:.1f}千人"
-            else:
-                display_value = f"{projected_admissions:,.0f}人"
-            
-            st.metric(
-                "月次換算新入院",
-                display_value,
-                help="月末までの予測新入院患者数"
-            )
+        if is_projection:
+            main_value = format_large_number(projected_admissions, "人")
+            subtitle = f"実績: {format_large_number(admissions, '人')}"
+            color = "#28a745"
         else:
-            if admissions >= 1000:
-                display_value = f"{admissions/1000:.1f}千人"
-            else:
-                display_value = f"{admissions:,.0f}人"
-            st.metric("総入院患者数", display_value)
-
-    with col5:
-        # 推計収益の計算と表示
-        avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
-        if metrics.get('is_partial_month'):
-            projected_revenue = metrics.get('monthly_projected_patient_days', 0) * avg_admission_fee
-        else:
-            projected_revenue = patient_days * avg_admission_fee
+            main_value = format_large_number(admissions, "人")
+            subtitle = "期間合計"
+            color = "#6c757d"
         
-        # 収益の短縮表示
-        if projected_revenue >= 100000000:  # 1億以上
-            display_value = f"{projected_revenue/100000000:.1f}億円"
-        elif projected_revenue >= 10000000:  # 1000万以上
-            display_value = f"{projected_revenue/10000000:.0f}千万円"
-        elif projected_revenue >= 1000000:   # 100万以上
-            display_value = f"{projected_revenue/1000000:.0f}百万円"
-        else:
-            display_value = f"{projected_revenue:,.0f}円"
-        
-        target_revenue = st.session_state.get('monthly_target_patient_days', 17000) * avg_admission_fee
-        achievement_rate = (projected_revenue / target_revenue) * 100 if target_revenue > 0 else 0
-        
-        st.metric(
-            "推計収益",
-            display_value,
-            delta=f"{achievement_rate:.1f}% (目標達成率)",
-            help="延べ在院日数 × 平均入院料で算出"
-        )
+        st.markdown(create_kpi_card_html(
+            "総入院患者数",
+            main_value,
+            subtitle,
+            color
+        ), unsafe_allow_html=True)
     
-    st.markdown('</div>', unsafe_allow_html=True)
+    # 収益指標（別行）
+    st.markdown("### 💰 収益指標")
+    col5, col6, col7 = st.columns(3)
+    
+    with col5:
+        st.markdown(create_kpi_card_html(
+            "推計収益",
+            format_large_number(revenue, "円"),
+            f"単価: {avg_admission_fee:,}円/日",
+            "#28a745"
+        ), unsafe_allow_html=True)
+    
+    with col6:
+        color = "#28a745" if revenue_achievement >= 100 else "#ffc107" if revenue_achievement >= 90 else "#dc3545"
+        st.markdown(create_kpi_card_html(
+            "目標達成率",
+            f"{revenue_achievement:.1f}%",
+            f"目標: {format_large_number(target_revenue, '円')}",
+            color
+        ), unsafe_allow_html=True)
+    
+    with col7:
+        daily_revenue = revenue / max(metrics.get('period_days', 1), 1)
+        st.markdown(create_kpi_card_html(
+            "日平均収益",
+            format_large_number(daily_revenue, "円"),
+            "1日あたり平均",
+            "#6c757d"
+        ), unsafe_allow_html=True)
+
+# サイドバー目標値サマリーも同様に対応
+def display_sidebar_target_summary():
+    """Streamlit Cloud対応版の目標値サマリー"""
+    
+    def create_small_metric_html(title, value, color="#1f77b4"):
+        return f"""
+        <div style="
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 8px 6px;
+            margin: 2px 1px;
+            text-align: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            min-height: 50px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        ">
+            <div style="
+                font-size: 7px;
+                color: #6c757d;
+                font-weight: 600;
+                margin-bottom: 2px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            ">{title}</div>
+            <div style="
+                font-size: 11px;
+                font-weight: 700;
+                color: {color};
+                line-height: 1.0;
+                word-break: break-all;
+                overflow-wrap: break-word;
+            ">{value}</div>
+        </div>
+        """
+    
+    def format_large_number(value, unit=""):
+        if value >= 100000000:
+            return f"{value/100000000:.1f}億{unit}"
+        elif value >= 10000:
+            return f"{value/10000:.1f}万{unit}"
+        elif value >= 1000:
+            return f"{value/1000:.1f}千{unit}"
+        else:
+            return f"{value:,.0f}{unit}"
+    
+    # 目標値取得
+    monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', 17000)
+    monthly_target_admissions = st.session_state.get('monthly_target_admissions', 1480)
+    monthly_revenue_estimate = st.session_state.get('monthly_revenue_estimate', 935000000)
+    bed_occupancy_rate = st.session_state.get('bed_occupancy_rate', 0.85)
+    
+    st.markdown("### 📈 目標値サマリー")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(create_small_metric_html(
+            "延べ在院日数",
+            format_large_number(monthly_target_patient_days, "人日"),
+            "#1f77b4"
+        ), unsafe_allow_html=True)
+        
+        st.markdown(create_small_metric_html(
+            "新入院患者数",
+            format_large_number(monthly_target_admissions, "人"),
+            "#28a745"
+        ), unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(create_small_metric_html(
+            "推定月間収益",
+            format_large_number(monthly_revenue_estimate, "円"),
+            "#dc3545"
+        ), unsafe_allow_html=True)
+        
+        st.markdown(create_small_metric_html(
+            "病床稼働率",
+            f"{bed_occupancy_rate:.1%}",
+            "#6c757d"
+        ), unsafe_allow_html=True)
 
 # 緊急入院比率も表示したい場合（オプション）
 def display_additional_metrics(metrics):
