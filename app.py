@@ -2385,7 +2385,7 @@ def predict_monthly_completion(df_actual, period_dates):
         st.error(traceback.format_exc())
         return pd.DataFrame()
 
-def main_revised():
+def main():
     """改修版メイン関数（経営ダッシュボードタブ部分のみ抜粋）"""
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
