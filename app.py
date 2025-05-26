@@ -1602,7 +1602,7 @@ def calculate_period_metrics(df_filtered, selected_period, period_dates):
             'is_partial_month': False
         }
 
-def display_kpi_cards_responsive(metrics, selected_period):
+def display_kpi_cards(metrics, selected_period):
     """レスポンシブ対応のKPIカード表示"""
     
     # 画面幅に応じて列数を調整
