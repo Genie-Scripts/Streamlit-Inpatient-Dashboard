@@ -109,7 +109,7 @@ def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
         
         # ⭐ 利用可能な列名の確認
         available_cols = df_filtered.columns.tolist()
-        st.write("**利用可能な列名:**", available_cols)
+        # st.write("**利用可能な列名:**", available_cols)
         
         # 在院患者数の列名を特定
         census_col = None
@@ -132,10 +132,10 @@ def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
                 discharge_col = col
                 break
         
-        st.write(f"**使用する列:**")
-        st.write(f"- 在院患者数: {census_col}")
-        st.write(f"- 入院患者数: {admission_col}")
-        st.write(f"- 退院患者数: {discharge_col}")
+        # st.write(f"**使用する列:**")
+        # st.write(f"- 在院患者数: {census_col}")
+        # st.write(f"- 入院患者数: {admission_col}")
+        # st.write(f"- 退院患者数: {discharge_col}")
         
         if not census_col:
             st.error("在院患者数の列が見つかりません。")
@@ -191,30 +191,30 @@ def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
         manual_days = len(latest_month_data['日付'].unique())
         manual_avg_census = manual_total_census / manual_days if manual_days > 0 else 0
         
-        st.write("**最新月の詳細データ確認:**")
-        st.write(f"- 最新月: {latest_month}")
-        st.write(f"- 最新月の日数: {manual_days}日")
-        st.write(f"- 最新月の延べ在院日数（手動計算）: {manual_total_census:,.0f}人日")
-        st.write(f"- 最新月の日平均在院患者数（手動計算）: {manual_avg_census:.1f}人")
+        # st.write("**最新月の詳細データ確認:**")
+        # st.write(f"- 最新月: {latest_month}")
+        # st.write(f"- 最新月の日数: {manual_days}日")
+        # st.write(f"- 最新月の延べ在院日数（手動計算）: {manual_total_census:,.0f}人日")
+        # st.write(f"- 最新月の日平均在院患者数（手動計算）: {manual_avg_census:.1f}人")
         
         if admission_col:
             manual_admissions = latest_month_data[admission_col].sum()
-            st.write(f"- 最新月の総入院患者数: {manual_admissions:.0f}人")
+            # st.write(f"- 最新月の総入院患者数: {manual_admissions:.0f}人")
         
         # ⭐ 集計結果との比較
         latest_data = monthly_summary[monthly_summary['年月'] == latest_month].iloc[0]
         
-        st.write("**集計結果との比較:**")
-        st.write(f"- 延べ在院日数（集計）: {latest_data['延べ在院日数']:,.0f}人日")
-        st.write(f"- 日平均在院患者数（集計）: {latest_data['日平均在院患者数']:.1f}人")
+        # st.write("**集計結果との比較:**")
+        # st.write(f"- 延べ在院日数（集計）: {latest_data['延べ在院日数']:,.0f}人日")
+        # st.write(f"- 日平均在院患者数（集計）: {latest_data['日平均在院患者数']:.1f}人")
         
         # ⭐ 異常値の検出と修正
         census_diff = abs(latest_data['日平均在院患者数'] - manual_avg_census)
         patient_days_diff = abs(latest_data['延べ在院日数'] - manual_total_census)
         
-        st.write(f"**計算差異:**")
-        st.write(f"- 延べ在院日数の差異: {patient_days_diff:.0f}人日")
-        st.write(f"- 日平均在院患者数の差異: {census_diff:.1f}人")
+        # st.write(f"**計算差異:**")
+        # st.write(f"- 延べ在院日数の差異: {patient_days_diff:.0f}人日")
+        # st.write(f"- 日平均在院患者数の差異: {census_diff:.1f}人")
         
         # 異常値がある場合は手動計算値を使用
         if census_diff > 1.0 or patient_days_diff > 100:
@@ -238,20 +238,20 @@ def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
         total_beds = st.session_state.get('total_beds', 612)
         bed_utilization = (current_avg_census / total_beds) * 100
         
-        st.write("**最終的な計算値:**")
-        st.write(f"- 延べ在院日数: {current_patient_days:,.0f}人日")
-        st.write(f"- 新入院患者数: {current_admissions:,.0f}人")
-        st.write(f"- 日平均在院患者数: {current_avg_census:.1f}人")
-        st.write(f"- 総病床数: {total_beds}床")
-        st.write(f"- 病床利用率: {bed_utilization:.1f}%")
+        # st.write("**最終的な計算値:**")
+        # st.write(f"- 延べ在院日数: {current_patient_days:,.0f}人日")
+        # st.write(f"- 新入院患者数: {current_admissions:,.0f}人")
+        # st.write(f"- 日平均在院患者数: {current_avg_census:.1f}人")
+        # st.write(f"- 総病床数: {total_beds}床")
+        # st.write(f"- 病床利用率: {bed_utilization:.1f}%")
         
         # ⭐ 妥当性チェック
-        if current_avg_census < 10:
-            st.error("❌ 日平均在院患者数が異常に小さいです。データまたは計算に問題があります。")
-        elif bed_utilization < 5:
-            st.error("❌ 病床利用率が異常に小さいです。データまたは計算に問題があります。")
-        else:
-            st.success("✅ 計算値は妥当な範囲内です。")
+        # if current_avg_census < 10:
+            # st.error("❌ 日平均在院患者数が異常に小さいです。データまたは計算に問題があります。")
+        # elif bed_utilization < 5:
+            # st.error("❌ 病床利用率が異常に小さいです。データまたは計算に問題があります。")
+        # else:
+            # st.success("✅ 計算値は妥当な範囲内です。")
         
         # 前月データ
         if len(monthly_summary) > 1:
