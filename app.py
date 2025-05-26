@@ -1185,367 +1185,334 @@ def create_sidebar():
             monthly_target_admissions > 0)
             
 def create_management_dashboard_tab():
-    """経営ダッシュボードタブの作成（期間選択機能付き）"""
+    """改修版：経営ダッシュボードタブ（数値のみ、統一レイアウト）"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
         st.warning("⚠️ データが読み込まれていません。先にデータ処理タブでファイルをアップロードしてください。")
         return
     
     df = st.session_state['df']
-    targets_df = st.session_state.get('target_data', None)
     
     st.header("💰 経営ダッシュボード")
     
-    # 期間選択UI（上部に配置）- KPIカード用とグラフ用を分離
+    # 期間選択UI（簡素化）
     st.markdown("### 📊 表示期間設定")
     
-    period_col1, period_col2, col3 = st.columns(3)
-    
-    with period_col1:
-        st.markdown("#### KPIカード期間")
-        kpi_period_options = [
-            "直近30日",
-            "前月完了分", 
-            "当月実績（月途中）",
-            "当月予測（実績+予測）"
-        ]
-        
-        selected_kpi_period = st.radio(
-            "",
-            kpi_period_options,
-            index=get_default_period_index(df),
-            horizontal=False,
-            key="kpi_period_selector",
-            help="KPIカードは短期的な状況把握に適しています"
-        )
-    
-    with period_col2:
-        st.markdown("#### グラフ期間")
-        graph_period_options = [
-            "直近12ヶ月",
-            "直近6ヶ月",
-            "直近3ヶ月",
-            "カスタム期間"
-        ]
-        
-        selected_graph_period = st.radio(
-            "",
-            graph_period_options,
-            index=0,
-            horizontal=False,
-            key="graph_period_selector",
-            help="グラフは長期的なトレンド分析に適しています"
-        )
-        
-        # カスタム期間の場合の日付選択
-        if selected_graph_period == "カスタム期間":
-            custom_start = st.date_input(
-                "開始日",
-                value=df['日付'].max() - pd.Timedelta(days=365),
-                key="custom_graph_start"
-            )
-            custom_end = st.date_input(
-                "終了日", 
-                value=df['日付'].max(),
-                key="custom_graph_end"
-            )
-    
-    with col3:
-        # 期間情報の表示
-        kpi_period_info = get_period_info(df, selected_kpi_period)
-        if kpi_period_info['warning']:
-            st.warning(kpi_period_info['warning'])
-        else:
-            st.info(kpi_period_info['description'])
+    period_options = ["直近30日", "前月完了分", "今年度"]
+    selected_period = st.radio(
+        "期間選択（平均値計算用）",
+        period_options,
+        index=0,
+        horizontal=True,  # 水平配置
+        key="dashboard_period_selector",
+        help="日平均在院患者数、平均在院日数、日平均新入院患者数の計算期間"
+    )
     
     st.markdown("---")
     
-    # セクション選択
-    dashboard_section = st.selectbox(
-        "表示セクション",
-        ["概要ダッシュボード", "収益管理", "運営指標", "統合ビュー"],
-        key="dashboard_section"
-    )
+    # データ計算
+    metrics = calculate_dashboard_metrics(df, selected_period)
     
-    # KPI用とグラフ用でそれぞれデータをフィルタリング
-    df_kpi_filtered, kpi_period_dates = filter_data_by_period(df, selected_kpi_period)
-    df_graph_filtered, graph_period_dates = filter_data_by_graph_period(df, selected_graph_period)
-    
-    if df_kpi_filtered.empty:
-        st.warning("選択された期間にデータがありません。")
+    if not metrics:
+        st.error("データの計算に失敗しました。")
         return
     
- # 各セクションの表示（修正版）
-    if dashboard_section == "概要ダッシュボード":
-        display_overview_dashboard(
-            df_kpi_filtered, kpi_period_dates, selected_kpi_period,
-            df_graph_filtered, graph_period_dates, selected_graph_period,
-            targets_df
-        )
-    elif dashboard_section == "収益管理":
-        display_revenue_management( # <--- _modified を削除
-            df_kpi_filtered, kpi_period_dates, selected_kpi_period, # display_revenue_management 関数の引数に合わせて調整が必要な場合があります
-            targets_df
-        )
-    elif dashboard_section == "運営指標":
-        display_operations_metrics( # <--- _modified を削除
-            df_kpi_filtered, kpi_period_dates, selected_kpi_period, # display_operations_metrics 関数の引数に合わせて調整が必要な場合があります
-            targets_df
-        )
-    else:  # 統合ビュー
-        display_integrated_view( # <--- _modified を削除
-            df_kpi_filtered, kpi_period_dates, selected_kpi_period, # display_integrated_view 関数の引数に合わせて調整が必要な場合があります
-            targets_df
-        )
+    # 統一レイアウトで数値表示
+    display_unified_metrics_layout(metrics, selected_period)
 
-def get_default_period_index(df):
-    """月途中かどうかに基づいてデフォルトの期間を決定"""
-    latest_date = df['日付'].max()
-    current_date = pd.Timestamp.now()
-    
-    # 最新データが今月のもので、かつ月の前半（15日以前）の場合
-    if (latest_date.month == current_date.month and 
-        latest_date.year == current_date.year and 
-        latest_date.day <= 15):
-        return 1  # "前月完了分"をデフォルト
-    else:
-        return 0  # "直近30日"をデフォルト
-
-def get_period_info(df, selected_period):
-    """期間情報と警告メッセージを取得"""
-    latest_date = df['日付'].max()
-    current_date = pd.Timestamp.now()
-    
-    if selected_period == "直近30日":
-        start_date = latest_date - pd.Timedelta(days=29)
-        return {
-            'description': f"📊 {start_date.strftime('%m/%d')} - {latest_date.strftime('%m/%d')}",
-            'warning': None
-        }
-    
-    elif selected_period == "前月完了分":
-        prev_month_start = (latest_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
-        prev_month_end = latest_date.replace(day=1) - pd.Timedelta(days=1)
-        return {
-            'description': f"📅 {prev_month_start.strftime('%m月')}完了分",
-            'warning': None
-        }
-    
-    elif selected_period == "当月実績（月途中）":
-        current_month_start = latest_date.replace(day=1)
-        days_elapsed = (latest_date - current_month_start).days + 1
-        return {
-            'description': f"📆 {latest_date.strftime('%m月')}{days_elapsed}日分",
-            'warning': "⚠️ 月途中のため参考値です" if days_elapsed < 20 else None
-        }
-    
-    else:  # 当月予測
-        current_month_start = latest_date.replace(day=1)
-        days_elapsed = (latest_date - current_month_start).days + 1
-        return {
-            'description': f"🔮 {latest_date.strftime('%m月')}予測値",
-            'warning': "📊 実績+予測の組み合わせです" if days_elapsed < 25 else None
-        }
-
-def filter_data_by_period(df, selected_period):
-    """選択された期間でデータをフィルタリング"""
-    latest_date = df['日付'].max()
-    
-    if selected_period == "直近30日":
-        start_date = latest_date - pd.Timedelta(days=29)
-        end_date = latest_date
-        df_filtered = df[(df['日付'] >= start_date) & (df['日付'] <= end_date)].copy()
-        
-    elif selected_period == "前月完了分":
-        prev_month_start = (latest_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
-        prev_month_end = latest_date.replace(day=1) - pd.Timedelta(days=1)
-        df_filtered = df[(df['日付'] >= prev_month_start) & (df['日付'] <= prev_month_end)].copy()
-        start_date, end_date = prev_month_start, prev_month_end
-        
-    elif selected_period == "当月実績（月途中）":
-        current_month_start = latest_date.replace(day=1)
-        df_filtered = df[(df['日付'] >= current_month_start) & (df['日付'] <= latest_date)].copy()
-        start_date, end_date = current_month_start, latest_date
-        
-    else:  # 当月予測
-        current_month_start = latest_date.replace(day=1)
-        df_filtered = df[(df['日付'] >= current_month_start) & (df['日付'] <= latest_date)].copy()
-        start_date, end_date = current_month_start, latest_date
-        
-    return df_filtered, {'start_date': start_date, 'end_date': end_date, 'period_type': selected_period}
-
-def filter_data_by_graph_period(df, selected_graph_period):
-    """グラフ用の長期間データフィルタリング"""
-    latest_date = df['日付'].max()
-    
-    if selected_graph_period == "直近12ヶ月":
-        start_date = latest_date - pd.Timedelta(days=365)
-        end_date = latest_date
-    elif selected_graph_period == "直近6ヶ月":
-        start_date = latest_date - pd.Timedelta(days=180)
-        end_date = latest_date
-    else:  # 直近3ヶ月
-        start_date = latest_date - pd.Timedelta(days=90)
-        end_date = latest_date
-    
-    # データ開始日より前にならないように調整
-    actual_start_date = max(start_date, df['日付'].min())
-    
-    df_filtered = df[(df['日付'] >= actual_start_date) & (df['日付'] <= end_date)].copy()
-    
-    return df_filtered, {
-        'start_date': actual_start_date,
-        'end_date': end_date,
-        'period_type': selected_graph_period
-    }
-    
-def display_overview_dashboard(df_kpi, kpi_dates, kpi_period,
-                                       df_graph, graph_dates, graph_period, targets_df):
-    """修正版：概要ダッシュボードの表示（KPIとグラフで異なる期間を使用）"""
+def calculate_dashboard_metrics(df, selected_period):
+    """ダッシュボード用メトリクスの計算"""
     try:
-        # dashboard_overview_tab から必要な関数をインポート
-        from dashboard_overview_tab import display_kpi_cards_only, display_trend_graphs_only
+        latest_date = df['日付'].max()
         
-        # 基本設定を取得
+        # 1. 固定期間データ（直近30日）の計算
+        fixed_start_date = latest_date - pd.Timedelta(days=29)
+        fixed_end_date = latest_date
+        df_fixed = df[(df['日付'] >= fixed_start_date) & (df['日付'] <= fixed_end_date)].copy()
+        
+        # 2. 平均値計算用期間データの取得
+        df_avg_period = get_period_data_for_averages(df, selected_period)
+        
+        # 基本設定値
         total_beds = st.session_state.get('total_beds', 612)
-        target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
+        avg_admission_fee = st.session_state.get('avg_admission_fee', 55000)
+        monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', 17000)
+        target_revenue = monthly_target_patient_days * avg_admission_fee
         
-        # KPIカードの表示（短期間データ使用）
-        st.markdown("### 📊 KPIカード（" + kpi_period + "）")
+        # 数値列の確認
+        numeric_columns = ['在院患者数', '入院患者数', '退院患者数', '緊急入院患者数']
+        for col in numeric_columns:
+            if col in df_fixed.columns:
+                df_fixed[col] = pd.to_numeric(df_fixed[col], errors='coerce').fillna(0)
+            if col in df_avg_period.columns:
+                df_avg_period[col] = pd.to_numeric(df_avg_period[col], errors='coerce').fillna(0)
         
-        if kpi_period == "当月予測（実績+予測）":
-            df_kpi_with_prediction = add_monthly_prediction(df_kpi, kpi_dates)
-            display_kpi_cards_only(df_kpi_with_prediction, kpi_dates['start_date'], 
-                                 kpi_dates['end_date'], total_beds, target_occupancy)
+        # === 固定値計算（直近30日） ===
+        # 在院患者数の列名を確認
+        census_col = None
+        for col in ['在院患者数', '入院患者数（在院）', '現在患者数']:
+            if col in df_fixed.columns:
+                census_col = col
+                break
+        
+        if not census_col:
+            st.error("在院患者数データが見つかりません。")
+            return None
+        
+        # 延べ在院日数
+        total_patient_days_30d = df_fixed[census_col].sum()
+        
+        # 病床利用率（直近30日平均）
+        avg_daily_census_30d = df_fixed[census_col].mean()
+        bed_occupancy_rate = (avg_daily_census_30d / total_beds) * 100 if total_beds > 0 else 0
+        
+        # 推計収益（直近30日）
+        estimated_revenue_30d = total_patient_days_30d * avg_admission_fee
+        
+        # 達成率（月次換算）
+        monthly_projected_revenue = estimated_revenue_30d  # 30日分をそのまま月次とする
+        achievement_rate = (monthly_projected_revenue / target_revenue) * 100 if target_revenue > 0 else 0
+        
+        # === 平均値計算（選択期間） ===
+        period_days = len(df_avg_period['日付'].unique()) if not df_avg_period.empty else 1
+        
+        # 日平均在院患者数
+        avg_daily_census = df_avg_period[census_col].mean() if not df_avg_period.empty else 0
+        
+        # 平均在院日数
+        total_patient_days_period = df_avg_period[census_col].sum()
+        discharge_col = None
+        for col in ['退院患者数', '総退院患者数']:
+            if col in df_avg_period.columns:
+                discharge_col = col
+                break
+        
+        if discharge_col:
+            total_discharges_period = df_avg_period[discharge_col].sum()
+            avg_los = total_patient_days_period / total_discharges_period if total_discharges_period > 0 else 0
         else:
-            display_kpi_cards_only(df_kpi, kpi_dates['start_date'], 
-                                 kpi_dates['end_date'], total_beds, target_occupancy)
+            avg_los = 0
         
-        display_period_specific_notes(kpi_period, kpi_dates) # この関数も app.py 内にあるか確認
+        # 日平均新入院患者数
+        admission_col = None
+        for col in ['入院患者数', '新入院患者数', '総入院患者数']:
+            if col in df_avg_period.columns:
+                admission_col = col
+                break
         
-        st.markdown("---")
+        avg_daily_admissions = df_avg_period[admission_col].mean() if admission_col and not df_avg_period.empty else 0
         
-        # グラフの表示（長期間データ使用）
-        st.markdown("### 📈 トレンドグラフ（" + graph_period + "）")
-        display_trend_graphs_only(df_graph, graph_dates['start_date'], 
-                                graph_dates['end_date'], total_beds, target_occupancy)
-        
-    except ImportError as e: # 具体的なエラーも表示すると良いでしょう
-        st.error(f"概要ダッシュボード機能のインポートに失敗しました: {e}")
-        st.error("dashboard_overview_tab.pyに必要な関数 (display_kpi_cards_only, display_trend_graphs_only) が存在するか確認してください。")
-        # display_fallback_overview(df_kpi, kpi_dates, kpi_period) # フォールバック処理
-
-def display_revenue_management(df_filtered, period_dates_dict, selected_period_str, targets_df): # 引数名変更
-    """収益管理セクションの表示"""
-    try:
-        from revenue_dashboard_tab import create_revenue_dashboard_section
-
-        st.subheader(f"💰 収益管理 - {selected_period_str}") # selected_period_str を使用
-
-        # period_info を period_dates_dict と selected_period_str から作成
-        period_info_for_revenue = {
-            'start_date': period_dates_dict.get('start_date'),
-            'end_date': period_dates_dict.get('end_date'),
-            'period_type': selected_period_str
+        return {
+            # 固定値（直近30日）
+            'total_patient_days_30d': total_patient_days_30d,
+            'bed_occupancy_rate': bed_occupancy_rate,
+            'estimated_revenue_30d': estimated_revenue_30d,
+            'achievement_rate': achievement_rate,
+            'avg_daily_census_30d': avg_daily_census_30d,
+            
+            # 平均値（選択期間）
+            'avg_daily_census': avg_daily_census,
+            'avg_los': avg_los,
+            'avg_daily_admissions': avg_daily_admissions,
+            'period_days': period_days,
+            
+            # 設定値
+            'total_beds': total_beds,
+            'target_revenue': target_revenue,
+            'selected_period': selected_period
         }
-
-        # 当月予測の場合の処理 (もしあれば)
-        # if selected_period_str == "当月予測（実績+予測）":
-        #     df_with_prediction = add_monthly_prediction(df_filtered, period_dates_dict)
-        #     create_revenue_dashboard_section(df_with_prediction, targets_df, period_info=period_info_for_revenue)
-        #     display_prediction_confidence(df_filtered, period_dates_dict)
-        # else:
-        create_revenue_dashboard_section(df_filtered, targets_df, period_info=period_info_for_revenue)
-
-    except ImportError:
-        st.error("収益管理機能が利用できません。")
-        # display_fallback_revenue(df_filtered, period_dates_dict, selected_period_str) # フォールバックも引数名合わせる
+        
     except Exception as e:
-        st.error(f"収益管理セクション表示中にエラー: {e}")
+        st.error(f"メトリクス計算エラー: {e}")
+        import traceback
         st.error(traceback.format_exc())
+        return None
 
-def display_operations_metrics(df_filtered, period_dates, selected_period, targets_df):
-    """運営指標セクションの表示"""
-    st.subheader(f"📊 運営指標 - {selected_period}")
+def get_period_data_for_averages(df, selected_period):
+    """平均値計算用の期間データを取得"""
+    latest_date = df['日付'].max()
     
-    # 基本メトリクスの計算
-    metrics = calculate_period_metrics(df_filtered, selected_period, period_dates)
+    if selected_period == "直近30日":
+        start_date = latest_date - pd.Timedelta(days=29)
+        end_date = latest_date
+        return df[(df['日付'] >= start_date) & (df['日付'] <= end_date)].copy()
     
-    # KPI表示
-    display_kpi_cards(metrics, selected_period)
+    elif selected_period == "前月完了分":
+        # 前月の1日から末日まで
+        prev_month_start = (latest_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
+        prev_month_end = latest_date.replace(day=1) - pd.Timedelta(days=1)
+        return df[(df['日付'] >= prev_month_start) & (df['日付'] <= prev_month_end)].copy()
     
-    # 期間比較グラフ
-    if st.checkbox("📈 期間比較グラフを表示", value=True, key="show_comparison_charts"):
-        display_period_comparison_charts(df_filtered, period_dates, selected_period)
-    
-    # 運営インサイト
-    display_operational_insights(metrics, selected_period)
-
-def display_integrated_view(df_filtered, period_dates, selected_period, targets_df):
-    """統合ビューの表示"""
-    st.subheader(f"🔍 統合ビュー - {selected_period}")
-    
-    # 概要メトリクス（簡約版）
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 💰 収益指標")
-        display_revenue_summary(df_filtered, period_dates, selected_period)
-    
-    with col2:
-        st.markdown("#### 📊 運営指標")
-        display_operations_summary(df_filtered, period_dates, selected_period)
-    
-    # 統合チャート
-    st.markdown("#### 📈 統合トレンド")
-    display_integrated_charts(df_filtered, period_dates, selected_period)
-
-import traceback # エラー表示用にインポート (既にあれば不要)
-# from kpi_calculator import calculate_kpis, analyze_kpi_insights, get_kpi_status # この関数のスコープでは不要
-
-def add_monthly_prediction(df_filtered, period_dates):
-    """月末までの予測データを追加"""
-    try:
-        # from forecast import predict_monthly_completion # ← この行を削除またはコメントアウト
-
-        # 同じファイル内で定義されている predict_monthly_completion を直接呼び出す
-        predicted_data = predict_monthly_completion(df_filtered, period_dates)
-
-        if predicted_data is not None and not predicted_data.empty:
-            df_actual_copy = df_filtered.copy()
-            df_actual_copy['データ種別'] = '実績'
-            predicted_data['データ種別'] = '予測'
-
-            all_cols = df_actual_copy.columns.union(predicted_data.columns)
-            df_actual_aligned = df_actual_copy.reindex(columns=all_cols)
-            predicted_data_aligned = predicted_data.reindex(columns=all_cols)
-            
-            df_combined = pd.concat([df_actual_aligned, predicted_data_aligned], ignore_index=True)
-            
-            if '日付' in df_combined.columns:
-                df_combined['日付'] = pd.to_datetime(df_combined['日付'])
-                df_combined = df_combined.sort_values(by='日付').reset_index(drop=True)
-            
-            st.info(f"実績データに{len(predicted_data)}日分の予測を追加しました。")
-            return df_combined
+    elif selected_period == "今年度":
+        # 今年度（4月1日から現在まで）
+        current_year = latest_date.year
+        if latest_date.month >= 4:
+            fiscal_start = pd.Timestamp(current_year, 4, 1)
         else:
-            st.info("予測データが生成されませんでした（または予測対象期間なし）。実績データのみ表示します。")
-            df_actual_copy = df_filtered.copy()
-            df_actual_copy['データ種別'] = '実績'
-            return df_actual_copy
+            fiscal_start = pd.Timestamp(current_year - 1, 4, 1)
+        return df[(df['日付'] >= fiscal_start) & (df['日付'] <= latest_date)].copy()
+    
+    else:
+        return df.copy()
 
-    except NameError as ne: # predict_monthly_completion が見つからない場合のエラーをキャッチ
-        st.error(f"予測機能の呼び出しに失敗しました (NameError): {ne}。app.py内に predict_monthly_completion 関数が定義されているか確認してください。")
-        st.error(traceback.format_exc())
-        df_actual_copy = df_filtered.copy()
-        df_actual_copy['データ種別'] = '実績'
-        return df_actual_copy
-    except Exception as e:
-        st.error(f"月次予測データの追加中に予期せぬエラーが発生しました: {e}")
-        st.error(traceback.format_exc())
-        df_actual_copy = df_filtered.copy()
-        df_actual_copy['データ種別'] = '実績'
-        return df_actual_copy
+def display_unified_metrics_layout(metrics, selected_period):
+    """統一レイアウトでメトリクスを表示"""
+    
+    def format_large_number(value, unit=""):
+        """大きな数値を短縮表示"""
+        if pd.isna(value) or value == 0:
+            return f"0{unit}"
+            
+        abs_value = abs(value)
+        
+        if abs_value >= 100000000:  # 1億以上
+            return f"{value/100000000:.1f}億{unit}"
+        elif abs_value >= 10000000:  # 1000万以上
+            return f"{value/10000000:.0f}千万{unit}"
+        elif abs_value >= 1000000:   # 100万以上
+            return f"{value/1000000:.0f}百万{unit}"
+        elif abs_value >= 10000:     # 1万以上
+            return f"{value/10000:.1f}万{unit}"
+        elif abs_value >= 1000:      # 1000以上
+            return f"{value/1000:.1f}千{unit}"
+        else:
+            return f"{value:,.0f}{unit}"
+    
+    # 期間表示
+    period_info = get_period_display_info(selected_period)
+    st.info(f"📊 平均値計算期間: {period_info}")
+    st.caption("※延べ在院日数、病床利用率、推計収益、達成率は直近30日固定")
+    
+    # === 1行目：日平均在院患者数、病床利用率、平均在院日数 ===
+    st.markdown("### 📊 第1指標群")
+    col1_1, col1_2, col1_3 = st.columns(3)
+    
+    with col1_1:
+        st.metric(
+            f"日平均在院患者数（{selected_period}）",
+            f"{metrics['avg_daily_census']:.1f}人",
+            delta=f"参考：直近30日 {metrics['avg_daily_census_30d']:.1f}人",
+            help=f"{selected_period}の日平均在院患者数"
+        )
+    
+    with col1_2:
+        target_occupancy = st.session_state.get('bed_occupancy_rate', 0.85) * 100
+        occupancy_delta = metrics['bed_occupancy_rate'] - target_occupancy
+        st.metric(
+            "病床利用率（直近30日）",
+            f"{metrics['bed_occupancy_rate']:.1f}%",
+            delta=f"{occupancy_delta:+.1f}% vs 目標{target_occupancy:.0f}%",
+            help="直近30日の平均病床利用率"
+        )
+    
+    with col1_3:
+        st.metric(
+            f"平均在院日数（{selected_period}）",
+            f"{metrics['avg_los']:.1f}日",
+            delta="標準: 12-16日",
+            help=f"{selected_period}の平均在院日数"
+        )
+    
+    st.markdown("---")
+    
+    # === 2行目：日平均新入院患者数、直近30日延べ在院日数 ===
+    st.markdown("### 📊 第2指標群")
+    col2_1, col2_2, col2_3 = st.columns([1, 1, 1])
+    
+    with col2_1:
+        st.metric(
+            f"日平均新入院患者数（{selected_period}）",
+            f"{metrics['avg_daily_admissions']:.1f}人",
+            delta=f"期間: {metrics['period_days']}日間",
+            help=f"{selected_period}の日平均新入院患者数"
+        )
+    
+    with col2_2:
+        st.metric(
+            "延べ在院日数（直近30日）",
+            format_large_number(metrics['total_patient_days_30d'], "人日"),
+            delta="30日間合計",
+            help="直近30日間の延べ在院日数"
+        )
+    
+    with col2_3:
+        # 延べ在院日数達成率
+        monthly_target = st.session_state.get('monthly_target_patient_days', 17000)
+        target_achievement_days = (metrics['total_patient_days_30d'] / monthly_target) * 100
+        st.metric(
+            "延べ在院日数達成率",
+            f"{target_achievement_days:.1f}%",
+            delta=f"目標: {format_large_number(monthly_target, '人日')}",
+            help="月間目標に対する達成率"
+        )
+    
+    st.markdown("---")
+    
+    # === 3行目：直近30日推計収益、達成率 ===
+    st.markdown("### 💰 収益指標群")
+    col3_1, col3_2, col3_3 = st.columns([1, 1, 1])
+    
+    with col3_1:
+        st.metric(
+            "推計収益（直近30日）",
+            format_large_number(metrics['estimated_revenue_30d'], "円"),
+            delta=f"単価: {st.session_state.get('avg_admission_fee', 55000):,}円/日",
+            help="直近30日の推計収益"
+        )
+    
+    with col3_2:
+        achievement_status = "✅ 達成" if metrics['achievement_rate'] >= 100 else "📈 未達"
+        st.metric(
+            "目標達成率",
+            f"{metrics['achievement_rate']:.1f}%",
+            delta=f"{achievement_status}",
+            help="月間目標収益に対する達成率"
+        )
+    
+    with col3_3:
+        # 日平均収益
+        daily_revenue = metrics['estimated_revenue_30d'] / 30
+        st.metric(
+            "日平均収益（直近30日）",
+            format_large_number(daily_revenue, "円"),
+            delta="1日あたり平均",
+            help="直近30日の日平均収益"
+        )
+    
+    # === 補足情報 ===
+    st.markdown("---")
+    st.markdown("### 📋 データ詳細")
+    
+    detail_col1, detail_col2, detail_col3 = st.columns(3)
+    
+    with detail_col1:
+        st.markdown("**設定値**")
+        st.write(f"• 総病床数: {metrics['total_beds']:,}床")
+        st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', 0.85):.1%}")
+        st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', 55000):,}円/日")
+    
+    with detail_col2:
+        st.markdown("**期間情報**")
+        st.write(f"• 平均値計算: {selected_period}")
+        st.write(f"• 固定値計算: 直近30日")
+        st.write(f"• データ最新日: {st.session_state['df']['日付'].max().strftime('%Y/%m/%d')}")
+    
+    with detail_col3:
+        st.markdown("**目標値**")
+        st.write(f"• 月間延べ在院日数: {format_large_number(st.session_state.get('monthly_target_patient_days', 17000), '人日')}")
+        st.write(f"• 月間目標収益: {format_large_number(metrics['target_revenue'], '円')}")
+        st.write(f"• 月間新入院目標: {st.session_state.get('monthly_target_admissions', 1480):,}人")
 
+def get_period_display_info(selected_period):
+    """期間の表示情報を取得"""
+    if selected_period == "直近30日":
+        return "直近30日間"
+    elif selected_period == "前月完了分":
+        return "前月1ヶ月間（完了分）"
+    elif selected_period == "今年度":
+        return "今年度（4月〜現在）"
+    else:
+        return selected_period
+        
 def calculate_period_metrics(df_filtered, selected_period, period_dates):
     """期間別メトリクスの計算"""
     # 数値列の確認
@@ -1799,26 +1766,6 @@ def create_sidebar_target_summary():
         )
     
     st.markdown('</div>', unsafe_allow_html=True)
-
-def display_period_specific_notes(selected_period, period_dates):
-    """期間別の特別な注意事項"""
-    if selected_period == "当月実績（月途中）":
-        days_elapsed = (period_dates['end_date'] - period_dates['start_date']).days + 1
-        if days_elapsed < 15:
-            st.info("💡 月前半のデータのため、月次トレンド分析は限定的です。前月完了分または直近30日での分析をお勧めします。")
-    
-    elif selected_period == "当月予測（実績+予測）":
-        st.info("🔮 予測値が含まれています。実際の結果と異なる場合があります。")
-    
-    elif selected_period == "前月完了分":
-        st.success("✅ 完了月のデータのため、正確な月次分析が可能です。")
-
-def display_fallback_overview(df_filtered, period_dates, selected_period):
-    """フォールバック版の概要表示"""
-    st.info("簡易版の概要を表示しています。")
-    
-    metrics = calculate_period_metrics(df_filtered, selected_period, period_dates)
-    display_kpi_cards(metrics, selected_period)
 
 # ===== 月次予測関連の関数（forecast.py に実装予定） =====
 
@@ -2438,8 +2385,8 @@ def predict_monthly_completion(df_actual, period_dates):
         st.error(traceback.format_exc())
         return pd.DataFrame()
 
-def main():
-    """メイン関数"""
+def main_revised():
+    """改修版メイン関数（経営ダッシュボードタブ部分のみ抜粋）"""
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
         st.session_state['data_processed'] = False
