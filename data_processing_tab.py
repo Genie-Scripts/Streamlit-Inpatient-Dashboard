@@ -190,7 +190,7 @@ def display_data_management_section():
                 show_data_clear_confirmation()
 
 def process_and_save_data(uploaded_files, target_file=None):
-    """データ処理と保存"""
+    """データ処理と保存（目標値ファイル対応版）"""
     try:
         with st.spinner("データを処理中..."):
             # ファイル読み込み
@@ -202,23 +202,50 @@ def process_and_save_data(uploaded_files, target_file=None):
                 st.error("ファイルの読み込みに失敗しました。")
                 return
             
-            progress_bar.progress(50, "データを前処理中...")
+            st.write(f"📊 読み込み完了: {len(df_raw):,}件")
             
-            # データ前処理
-            df_processed, validation_results = integrated_preprocess_data(df_raw)
+            progress_bar.progress(50, "目標データを処理中...")
+            
+            # ✅ 修正：目標データの処理を前処理前に実施
+            target_data = None
+            if target_file is not None:
+                try:
+                    # 目標ファイルの読み込み
+                    target_data = load_files(None, [target_file])
+                    if target_data is not None and not target_data.empty:
+                        st.write(f"🎯 目標データ読み込み完了: {len(target_data):,}件")
+                        st.write(f"🏷️ 目標データ列: {list(target_data.columns)}")
+                        
+                        # 部門コード列の確認
+                        if '部門コード' in target_data.columns:
+                            unique_depts = target_data['部門コード'].nunique()
+                            st.success(f"✅ 部門コード列を確認: {unique_depts}部門")
+                        else:
+                            st.warning("⚠️ 目標データに'部門コード'列が見つかりません")
+                            st.write(f"利用可能な列: {list(target_data.columns)}")
+                    else:
+                        st.warning("目標データが空です")
+                except Exception as e:
+                    st.error(f"目標データの読み込みに失敗しました: {e}")
+                    target_data = None
+            
+            progress_bar.progress(75, "データを前処理中...")
+            
+            # ✅ 修正：target_dataを明示的に渡す
+            df_processed, validation_results = integrated_preprocess_data(df_raw, target_data_df=target_data)
             if df_processed is None or df_processed.empty:
                 st.error("データの前処理に失敗しました。")
                 return
             
-            progress_bar.progress(75, "目標データを処理中...")
-            
-            # 目標データの処理
-            target_data = None
-            if target_file is not None:
-                try:
-                    target_data = load_files(None, [target_file])
-                except Exception as e:
-                    st.warning(f"目標データの読み込みに失敗しました: {e}")
+            st.write(f"📊 前処理完了: {len(df_processed):,}件")
+            loss_count = len(df_raw) - len(df_processed)
+            if loss_count > 0:
+                loss_rate = (loss_count / len(df_raw)) * 100
+                st.warning(f"⚠️ 前処理で{loss_count:,}件削除されました（{loss_rate:.1f}%）")
+                if loss_rate > 10:
+                    st.error("🚨 大量のデータが失われています。設定を確認してください。")
+            else:
+                st.success("✅ データ損失なし")
             
             progress_bar.progress(90, "データを保存中...")
             
@@ -227,7 +254,9 @@ def process_and_save_data(uploaded_files, target_file=None):
                 'upload_files': [f.name for f in uploaded_files],
                 'target_file': target_file.name if target_file else None,
                 'validation_results': validation_results,
-                'processing_timestamp': datetime.now()
+                'processing_timestamp': datetime.now(),
+                'raw_record_count': len(df_raw),
+                'processed_record_count': len(df_processed)
             }
             
             # 基本設定の準備
@@ -250,6 +279,24 @@ def process_and_save_data(uploaded_files, target_file=None):
                 st.success("✅ データの処理と保存が完了しました！")
                 st.balloons()
                 
+                # ✅ 追加：バリデーション結果の詳細表示
+                if validation_results:
+                    with st.expander("🔍 処理結果詳細", expanded=False):
+                        if validation_results.get('warnings'):
+                            st.warning("⚠️ 警告:")
+                            for warning in validation_results['warnings']:
+                                st.write(f"• {warning}")
+                        
+                        if validation_results.get('info'):
+                            st.info("ℹ️ 情報:")
+                            for info in validation_results['info']:
+                                st.write(f"• {info}")
+                        
+                        if validation_results.get('errors'):
+                            st.error("❌ エラー:")
+                            for error in validation_results['errors']:
+                                st.write(f"• {error}")
+                
                 # データ統計の表示
                 show_processing_results(df_processed, validation_results)
                 
@@ -258,14 +305,32 @@ def process_and_save_data(uploaded_files, target_file=None):
                 
     except Exception as e:
         st.error(f"データ処理中にエラーが発生しました: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
 
 def update_existing_data(new_files, target_file, update_mode):
-    """既存データの更新"""
+    """既存データの更新（目標値ファイル対応版）"""
     try:
         with st.spinner(f"データを{update_mode}中..."):
             # 新しいデータの読み込み・処理
             df_new = load_files(None, new_files)
-            df_new_processed, validation_results = integrated_preprocess_data(df_new)
+            st.write(f"📊 新データ読み込み: {len(df_new):,}件")
+            
+            # ✅ 修正：目標データの処理
+            target_data = None
+            if target_file is not None:
+                try:
+                    target_data = load_files(None, [target_file])
+                    if target_data is not None and not target_data.empty:
+                        st.write(f"🎯 目標データ更新: {len(target_data):,}件")
+                except Exception as e:
+                    st.warning(f"目標データの更新に失敗: {e}")
+            else:
+                target_data = st.session_state.get('target_data')
+            
+            # ✅ 修正：前処理時に目標データを渡す
+            df_new_processed, validation_results = integrated_preprocess_data(df_new, target_data_df=target_data)
+            st.write(f"📊 新データ前処理完了: {len(df_new_processed):,}件")
             
             if update_mode == "完全置換":
                 df_final = df_new_processed
@@ -273,25 +338,40 @@ def update_existing_data(new_files, target_file, update_mode):
             else:  # データ追加
                 df_existing = st.session_state.get('df')
                 if df_existing is not None:
-                    df_final = pd.concat([df_existing, df_new_processed], ignore_index=True)
-                    # 重複データの除去
-                    df_final = df_final.drop_duplicates()
-                    st.info(f"既存データに{len(df_new_processed)}件のデータを追加しました。")
+                    st.write(f"📊 既存データ: {len(df_existing):,}件")
+                    
+                    # データ結合
+                    df_combined = pd.concat([df_existing, df_new_processed], ignore_index=True)
+                    st.write(f"📊 結合後: {len(df_combined):,}件")
+                    
+                    # 重複除去を安全に実行
+                    before_dedup = len(df_combined)
+                    if '日付' in df_combined.columns and '病棟コード' in df_combined.columns:
+                        df_final = df_combined.drop_duplicates(
+                            subset=['日付', '病棟コード', '診療科名'] if '診療科名' in df_combined.columns else ['日付', '病棟コード']
+                        )
+                    else:
+                        df_final = df_combined
+                        st.warning("⚠️ 適切な重複除去キーが見つからないため、重複除去をスキップしました。")
+                    
+                    after_dedup = len(df_final)
+                    removed_count = before_dedup - after_dedup
+                    
+                    st.write(f"📊 重複除去後: {len(df_final):,}件")
+                    if removed_count > 0:
+                        st.info(f"🔄 {removed_count:,}件の重複データを除去しました。")
                 else:
                     df_final = df_new_processed
             
-            # 目標データの処理
-            target_data = None
-            if target_file is not None:
-                target_data = load_files(None, [target_file])
-            else:
-                target_data = st.session_state.get('target_data')
+            st.write(f"📊 最終データ: {len(df_final):,}件")
             
             # メタデータと設定の準備
             metadata = {
                 'update_mode': update_mode,
                 'update_files': [f.name for f in new_files],
-                'update_timestamp': datetime.now()
+                'target_file': target_file.name if target_file else None,
+                'update_timestamp': datetime.now(),
+                'final_record_count': len(df_final)
             }
             
             settings = {key: st.session_state.get(key) for key in [
@@ -307,6 +387,8 @@ def update_existing_data(new_files, target_file, update_mode):
                 
     except Exception as e:
         st.error(f"データ更新中にエラーが発生しました: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
 
 def reprocess_current_data():
     """現在のデータの再処理"""
