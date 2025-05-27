@@ -189,8 +189,61 @@ def display_data_management_section():
             if st.button("🗑️ データクリア", type="secondary"):
                 show_data_clear_confirmation()
 
+def load_single_file(uploaded_file):
+    """
+    単一ファイルの読み込み（Excel/CSV対応）
+    
+    Parameters:
+    -----------
+    uploaded_file: StreamlitUploadedFile
+        アップロードされたファイル
+        
+    Returns:
+    --------
+    pd.DataFrame
+        読み込まれたデータフレーム
+    """
+    try:
+        # ファイル拡張子の確認
+        file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+        
+        if file_extension in ['.xlsx', '.xls']:
+            # Excel ファイルの場合は既存のload_files関数を使用
+            return load_files(None, [uploaded_file])
+        
+        elif file_extension == '.csv':
+            # CSV ファイルの直接読み込み
+            try:
+                # ファイルポインタを先頭に戻す
+                uploaded_file.seek(0)
+                
+                # まずUTF-8で試行
+                try:
+                    df = pd.read_csv(uploaded_file, encoding='utf-8')
+                except UnicodeDecodeError:
+                    # UTF-8で失敗した場合はShift-JISで試行
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, encoding='shift_jis')
+                
+                print(f"CSV読込成功: {uploaded_file.name} - {len(df)}行 × {len(df.columns)}列")
+                print(f"CSV列名: {list(df.columns)}")
+                
+                return df
+                
+            except Exception as e:
+                print(f"CSV読込エラー ({uploaded_file.name}): {str(e)}")
+                return pd.DataFrame()
+        
+        else:
+            print(f"サポートされていないファイル形式: {file_extension}")
+            return pd.DataFrame()
+            
+    except Exception as e:
+        print(f"ファイル読込エラー ({uploaded_file.name}): {str(e)}")
+        return pd.DataFrame()
+
 def process_and_save_data(uploaded_files, target_file=None):
-    """データ処理と保存（目標値ファイル対応版）"""
+    """データ処理と保存（CSV対応版）"""
     try:
         with st.spinner("データを処理中..."):
             # ファイル読み込み
@@ -206,12 +259,13 @@ def process_and_save_data(uploaded_files, target_file=None):
             
             progress_bar.progress(50, "目標データを処理中...")
             
-            # ✅ 修正：目標データの処理を前処理前に実施
+            # ✅ 修正：目標データの処理（CSV対応）
             target_data = None
             if target_file is not None:
                 try:
-                    # 目標ファイルの読み込み
-                    target_data = load_files(None, [target_file])
+                    # ✅ 修正：CSVファイルに対応した読み込み
+                    target_data = load_single_file(target_file)
+                    
                     if target_data is not None and not target_data.empty:
                         st.write(f"🎯 目標データ読み込み完了: {len(target_data):,}件")
                         st.write(f"🏷️ 目標データ列: {list(target_data.columns)}")
@@ -219,14 +273,25 @@ def process_and_save_data(uploaded_files, target_file=None):
                         # 部門コード列の確認
                         if '部門コード' in target_data.columns:
                             unique_depts = target_data['部門コード'].nunique()
+                            dept_list = target_data['部門コード'].unique()[:10]  # 最初の10個を表示
                             st.success(f"✅ 部門コード列を確認: {unique_depts}部門")
+                            st.info(f"📋 部門コード例: {list(dept_list)}")
                         else:
                             st.warning("⚠️ 目標データに'部門コード'列が見つかりません")
                             st.write(f"利用可能な列: {list(target_data.columns)}")
+                        
+                        # 部門名列の確認
+                        if '部門名' in target_data.columns:
+                            dept_names = target_data['部門名'].unique()[:10]
+                            st.info(f"🏥 部門名例: {list(dept_names)}")
+                            
                     else:
-                        st.warning("目標データが空です")
+                        st.warning("⚠️ 目標データが空です")
+                        
                 except Exception as e:
                     st.error(f"目標データの読み込みに失敗しました: {e}")
+                    import traceback
+                    st.error(traceback.format_exc())
                     target_data = None
             
             progress_bar.progress(75, "データを前処理中...")
@@ -279,7 +344,7 @@ def process_and_save_data(uploaded_files, target_file=None):
                 st.success("✅ データの処理と保存が完了しました！")
                 st.balloons()
                 
-                # ✅ 追加：バリデーション結果の詳細表示
+                # バリデーション結果の詳細表示
                 if validation_results:
                     with st.expander("🔍 処理結果詳細", expanded=False):
                         if validation_results.get('warnings'):
@@ -296,6 +361,25 @@ def process_and_save_data(uploaded_files, target_file=None):
                             st.error("❌ エラー:")
                             for error in validation_results['errors']:
                                 st.write(f"• {error}")
+                
+                # ✅ 追加：診療科マッピング状況の表示
+                if target_data is not None and not target_data.empty:
+                    with st.expander("🏥 診療科マッピング状況", expanded=False):
+                        # 実データの診療科名
+                        actual_depts = df_processed['診療科名'].unique() if '診療科名' in df_processed.columns else []
+                        st.write(f"**実データの診療科:** {len(actual_depts)}種類")
+                        st.write(f"例: {list(actual_depts[:10])}")
+                        
+                        # 目標データの部門
+                        target_dept_codes = target_data['部門コード'].unique() if '部門コード' in target_data.columns else []
+                        target_dept_names = target_data['部門名'].unique() if '部門名' in target_data.columns else []
+                        
+                        st.write(f"**目標データの部門コード:** {len(target_dept_codes)}種類")
+                        st.write(f"例: {list(target_dept_codes[:10])}")
+                        
+                        if len(target_dept_names) > 0:
+                            st.write(f"**目標データの部門名:** {len(target_dept_names)}種類")
+                            st.write(f"例: {list(target_dept_names[:10])}")
                 
                 # データ統計の表示
                 show_processing_results(df_processed, validation_results)
