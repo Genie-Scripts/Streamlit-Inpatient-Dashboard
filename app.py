@@ -27,7 +27,6 @@ from config import (
     DEFAULT_TARGET_PATIENT_DAYS,  # 17000
     DEFAULT_TARGET_ADMISSIONS,    # 1480
     PERIOD_OPTIONS,               # ["直近30日", "前月完了分", "今年度"]
-    CHART_HEIGHT,                 # 400
     DASHBOARD_COLORS,             # カラーパレット辞書
     NUMBER_FORMAT,                # 数値フォーマット設定
     MESSAGES,                     # メッセージ設定
@@ -360,17 +359,6 @@ def create_sidebar():
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-    # --- 表示設定セクション ---
-    with st.sidebar.expander("📊 表示設定", expanded=False):
-        # グラフの高さ設定
-        chart_height = st.select_slider(
-            "グラフの高さ",
-            options=[300, 400, 500, 600, 700],
-            value=st.session_state.get('chart_height', 400),
-            help="グラフの表示高さを調整します"
-        )
-        st.session_state.chart_height = chart_height
-
     # --- データ品質情報 ---
     if st.session_state.get('data_processed', False):
         with st.sidebar.expander("📊 データ情報", expanded=False):
@@ -799,178 +787,138 @@ def get_period_display_info(selected_period):
 # def predict_monthly_completion(df_actual, period_dates):
 
 def main():
-    """改修版メイン関数（経営ダッシュボードタブ部分のみ抜粋）"""
+    """メイン関数"""
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
         st.session_state['data_processed'] = False
     if 'df' not in st.session_state:
         st.session_state['df'] = None
-
-    # 予測関連のセッションステート初期化（新規追加）
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
-    if 'forecast_annual_summary_df' not in st.session_state:
-        st.session_state.forecast_annual_summary_df = pd.DataFrame()
-    if 'latest_data_date_str' not in st.session_state:
-        st.session_state.latest_data_date_str = None
 
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
     
     # サイドバー設定
     settings_valid = create_sidebar()
-    
     if not settings_valid:
         st.stop()
     
-    # メインタブ（6タブ構成に変更 - 予測分析タブを追加）
+    # ===== タブ定義（修正済み） =====
     if FORECAST_AVAILABLE:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        tabs = st.tabs([
             "📊 データ処理",
             "💰 経営ダッシュボード", 
-            "🔮 予測分析",         # 新規追加
-            "📈 詳細分析",
-            "📋 データテーブル",
-            "📄 出力"
+            "📈 詳細分析",          # ← 3番目に移動
+            "📋 データテーブル",    # ← 4番目に移動
+            "🔮 予測分析",          # ← 5番目に移動
+            "📄 PDF出力"
         ])
     else:
-        # 予測機能が利用できない場合は従来の5タブ
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tabs = st.tabs([
             "📊 データ処理",
             "💰 経営ダッシュボード", 
             "📈 詳細分析",
-            "📋 データテーブル",
-            "📄 出力"
+            "📋 データテーブル",    
+            "📄 PDF出力"
         ])
 
-    # データ処理タブ
-    with tab1:
-        # data_processing_tab.pyの関数を使用
+    # データ処理タブ（tabs[0] - 変更なし）
+    with tabs[0]:
         try:
             create_data_processing_tab()
             
-            # 最新データ日付の更新（予測機能用）
+            # データ処理後のマッピング初期化
             if (st.session_state.get('data_processed', False) and 
                 st.session_state.get('df') is not None):
                 df = st.session_state['df']
+                target_data = st.session_state.get('target_data')
+                
+                # マッピングの初期化
+                initialize_all_mappings(df, target_data)
+                
+                # 最新データ日付の更新
                 if '日付' in df.columns:
                     latest_date = df['日付'].max()
                     st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
                     
         except Exception as e:
             st.error(f"データ処理タブでエラーが発生しました: {str(e)}")
-            st.info("データ処理機能に問題があります。開発者に連絡してください。")
     
-    # データが処理されている場合のみ他のタブを有効化
+    # データ処理済みの場合のみ他のタブを有効化
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         
-        # 経営ダッシュボードタブ
-        with tab2:
-            create_management_dashboard_tab()
+        # 経営ダッシュボードタブ（tabs[1] - 変更なし）
+        with tabs[1]:
+            try:
+                create_management_dashboard_tab()
+            except Exception as e:
+                st.error(f"経営ダッシュボードでエラーが発生しました: {str(e)}")
         
-            # オプション：KPI計算の検証機能
-            if st.checkbox("🔍 KPI計算検証を表示", key="show_kpi_validation"):
-                validate_kpi_calculations()
-            
-        # 予測分析タブ（新規追加）
+        # 詳細分析タブ（tabs[2] - インデックス変更：旧tabs[3]）
+        with tabs[2]:
+            try:
+                create_detailed_analysis_tab()
+            except Exception as e:
+                st.error(f"詳細分析でエラーが発生しました: {str(e)}")
+        
+        # データテーブルタブ（tabs[3] - インデックス変更：旧tabs[4]）
+        with tabs[3]:
+            try:
+                create_data_tables_tab()
+            except Exception as e:
+                st.error(f"データテーブルでエラーが発生しました: {str(e)}")
+        
+        # 予測分析タブ（利用可能な場合）
         if FORECAST_AVAILABLE:
-            with tab3:
-                # 依存関係のチェック
-                deps_ok = check_forecast_dependencies()
-                
-                if not deps_ok:
-                    st.info("📋 予測機能を使用するには上記のライブラリをインストールしてください。")
-                    st.markdown("""
-                    ### 🔮 予測機能について
-                    このタブでは以下の予測機能が利用できます：
-                    
-                    #### 📈 利用可能な予測モデル
-                    - **単純移動平均**: 過去n日間の平均値を未来に延長
-                    - **Holt-Winters**: 季節性とトレンドを考慮した指数平滑法  
-                    - **ARIMA**: 自己回帰和分移動平均モデル
-                    
-                    #### 🎯 予測の活用
-                    - 年度末までの患者数予測
-                    - 病床利用率の将来推移
-                    - 収益計画の立案支援
-                    
-                    各モデルで年度末までの患者数を予測し、年度総患者数を算出します。
-                    """)
-                else:
-                    display_forecast_analysis_tab()
-            
-            # 詳細分析タブ（インデックス調整）
-            with tab4:
+            # 予測分析タブ（tabs[4] - インデックス変更：旧tabs[2]）
+            with tabs[4]:
                 try:
-                    create_detailed_analysis_tab()
+                    deps_ok = check_forecast_dependencies()
+                    if deps_ok:
+                        display_forecast_analysis_tab()
+                    else:
+                        st.info(MESSAGES['forecast_libs_missing'])
+                        st.markdown("""
+                        ### 🔮 予測機能について
+                        このタブでは以下の予測機能が利用できます：
+                        - **単純移動平均**: 過去の平均値を未来に延長
+                        - **Holt-Winters**: 季節性とトレンドを考慮した予測
+                        - **ARIMA**: 時系列の自己回帰モデル
+                        """)
                 except Exception as e:
-                    st.error(f"詳細分析タブでエラーが発生しました: {str(e)}")
-                    st.info("詳細分析機能は開発中です。")
+                    st.error(f"予測分析でエラーが発生しました: {str(e)}")
             
-            # データテーブルタブ（インデックス調整）
-            with tab5:
+            # PDF出力（tabs[5] - 変更なし）
+            with tabs[5]:
                 try:
-                    create_data_tables_tab()
+                    create_pdf_output_tab()
                 except Exception as e:
-                    st.error(f"データテーブルタブでエラーが発生しました: {str(e)}")
-                    st.info("データテーブル機能は開発中です。")
-            
-            # 出力タブ（インデックス調整）
-            with tab6:
-                create_pdf_output_tab()
+                    st.error(f"出力機能でエラーが発生しました: {str(e)}")
         
         else:
-            # 予測機能が利用できない場合（従来の構成）
-            with tab3:
+            # 予測機能なしの場合
+            # PDF出力（tabs[4] - 予測機能なし版）
+            with tabs[4]:
                 try:
-                    create_detailed_analysis_tab()
+                    create_pdf_output_tab()
                 except Exception as e:
-                    st.error(f"詳細分析タブでエラーが発生しました: {str(e)}")
-                    st.info("詳細分析機能は開発中です。")
-            
-            with tab4:
-                try:
-                    create_data_tables_tab()
-                except Exception as e:
-                    st.error(f"データテーブルタブでエラーが発生しました: {str(e)}")
-                    st.info("データテーブル機能は開発中です。")
-            
-            with tab5:  
-                create_pdf_output_tab()
+                    st.error(f"出力機能でエラーが発生しました: {str(e)}")
     
     else:
-        # データ未処理の場合の表示（調整）
-        with tab2:
-            st.info("💰 データを読み込み後、収益管理ダッシュボードが利用可能になります。")
-        
-        if FORECAST_AVAILABLE:
-            with tab3:
-                st.info("🔮 データを読み込み後、予測分析が利用可能になります。")
-            with tab4:
-                st.info("📈 データを読み込み後、詳細分析が利用可能になります。")
-            with tab5:
-                st.info("📋 データを読み込み後、データテーブルが利用可能になります。")
-            with tab6:
-                create_pdf_output_tab()
-        else:
-            with tab3:
-                st.info("📈 データを読み込み後、詳細分析が利用可能になります。")
-            with tab4:
-                st.info("📋 データを読み込み後、データテーブルが利用可能になります。")
-            with tab5:  
-                create_pdf_output_tab()
-            
-    # フッター
+        # データ未処理の場合
+        for i in range(1, len(tabs)):
+            with tabs[i]:
+                st.info(MESSAGES['insufficient_data'])
+    
+    # フッター（変更なし）
     st.markdown("---")
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown(
-            '<div style="text-align: center; color: #666; font-size: 0.8rem;">'
-            f'{APP_ICON} {APP_TITLE} v2.0 | {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
-            f'⏰ {datetime.datetime.now().strftime("%H:%M:%S")}'
-            '</div>',
-            unsafe_allow_html=True
-        )
+    st.markdown(
+        f'<div style="text-align: center; color: {DASHBOARD_COLORS["light_gray"]}; font-size: 0.8rem;">'
+        f'{APP_ICON} {APP_TITLE} v{APP_VERSION} | {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
 if __name__ == "__main__":
     main()
