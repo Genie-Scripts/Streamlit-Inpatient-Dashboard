@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
 import logging
 
-
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
@@ -194,6 +193,16 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             )
         else:
             validation_results["warnings"].append("「診療科名」列が存在しないため、診療科集約をスキップしました。")
+        
+        # 新しい効率的な重複チェック関数を呼び出す
+        initial_rows = len(df_processed)
+        df_processed = efficient_duplicate_check(df_processed)
+        rows_dropped_due_to_duplicates = initial_rows - len(df_processed)
+        
+        if rows_dropped_due_to_duplicates > 0:
+            validation_results["info"].append(
+                f"重複データ {rows_dropped_due_to_duplicates} 行を削除しました"
+            )
     
         # --- 数値列の処理 ---
         numeric_cols_to_process = [
