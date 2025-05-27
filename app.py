@@ -853,14 +853,6 @@ def main():
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
 
-    # ===== 追加：アプリ起動時の自動データ読み込み =====
-    if not st.session_state.get('auto_load_attempted', False):
-        # データの自動読み込み試行
-        if auto_load_persistent_data():
-            # 成功時は通知なし（data_processing_tab.pyで処理）
-            pass
-        st.session_state['auto_load_attempted'] = True
-
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
     
