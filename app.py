@@ -6,15 +6,16 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
+import io
+import zipfile
+import tempfile
+import os
 try:
     import jpholiday
     JPHOLIDAY_AVAILABLE = True
 except ImportError:
     JPHOLIDAY_AVAILABLE = False
-import io
-import zipfile
-import tempfile
-import os
+from scipy import stats
 from config import (
     APP_TITLE,                    # "入退院分析ダッシュボード"
     APP_ICON,                     # "🏥"
@@ -35,10 +36,6 @@ from config import (
     FONT_SCALE                    # 1.0
 )
 
-from style import inject_global_css
-inject_global_css(1.0)  # style.pyの関数を使用
-from utils import safe_date_filter, initialize_all_mappings
-
 # ページ設定
 st.set_page_config(
     page_title=APP_TITLE,
@@ -46,12 +43,15 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+from style import inject_global_css
+from utils import safe_date_filter, initialize_all_mappings
+
+inject_global_css(1.0)  # style.pyの関数を使用
 
 # カスタムCSS
 # 削除したCSSはapp_backupに保存
 
 from pdf_output_tab import create_pdf_output_tab
-from scipy import stats # display_trend_analysis で使用 (pip install scipy が必要)
 
 # カスタムモジュールのインポート
 try:
