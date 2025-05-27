@@ -123,7 +123,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         "info": []
     }
 
-    # ✅ 追加：データ件数のトラッキング
+    # データ件数のトラッキング
     initial_record_count = len(df) if df is not None and not df.empty else 0
     validation_results["info"].append(f"初期データ件数: {initial_record_count:,}件")
 
@@ -165,8 +165,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         available_cols = [col for col in df.columns if col in expected_cols]
         df_processed = df[available_cols].copy()
 
-        # --- 1. 欠損値の取り扱い変更 ---
-        # 「病棟コード」が欠損している行のみを除外
+        # --- 1. 欠損値の取り扱い ---
         before_ward_filter = len(df_processed)
         df_processed.dropna(subset=['病棟コード'], inplace=True)
         after_ward_filter = len(df_processed)
@@ -217,19 +216,42 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         else:
             validation_results["warnings"].append("「診療科名」列が存在しないため、診療科集約をスキップしました。")
         
-        # ✅ 修正：重複除去処理を改善
+        # ✅ 修正：安全な重複除去の再実装
         before_dedup = len(df_processed)
-        # 重複除去は行わない（既にload_files関数で実行済み）
-        # または、必要な場合は特定の列のみで実行
-        validation_results["info"].append(f"重複除去処理をスキップしました（前段で実行済み）")
         
-        # ✅ 削除：以下の行をコメントアウト
-        # df_processed = efficient_duplicate_check(df_processed)
-        # rows_dropped_due_to_duplicates = initial_rows - len(df_processed)
-        # if rows_dropped_due_to_duplicates > 0:
-        #     validation_results["info"].append(
-        #         f"重複データ {rows_dropped_due_to_duplicates} 行を削除しました"
-        #     )
+        # 重複除去用のキー列を決定
+        key_columns = []
+        if '日付' in df_processed.columns:
+            key_columns.append('日付')
+        if '病棟コード' in df_processed.columns:
+            key_columns.append('病棟コード')
+        if '診療科名' in df_processed.columns:
+            key_columns.append('診療科名')
+        
+        if key_columns:
+            # 特定の列のみで重複除去（安全）
+            df_processed = df_processed.drop_duplicates(subset=key_columns)
+            after_dedup = len(df_processed)
+            rows_dropped_due_to_duplicates = before_dedup - after_dedup
+            
+            if rows_dropped_due_to_duplicates > 0:
+                drop_rate = (rows_dropped_due_to_duplicates / before_dedup) * 100
+                validation_results["info"].append(
+                    f"重複データ {rows_dropped_due_to_duplicates:,} 行を削除しました（{drop_rate:.1f}%）"
+                )
+                validation_results["info"].append(
+                    f"重複除去キー: {key_columns}"
+                )
+                
+                # 大量削除の警告
+                if drop_rate > 30:
+                    validation_results["warnings"].append(f"⚠️ 大量の重複データ（{drop_rate:.1f}%）が削除されました。")
+                elif drop_rate > 10:
+                    validation_results["info"].append(f"中程度の重複データ（{drop_rate:.1f}%）が削除されました。")
+            else:
+                validation_results["info"].append("重複データは見つかりませんでした。")
+        else:
+            validation_results["warnings"].append("重複除去用のキー列が見つからないため、重複除去をスキップしました。")
     
         # --- 数値列の処理 ---
         numeric_cols_to_process = [
@@ -250,7 +272,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
                 df_processed[col] = 0
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
     
-        # --- 列名の統一処理を修正 --- 
+        # --- 列名の統一処理 --- 
         if "在院患者数" in df_processed.columns:
             df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
             validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
@@ -286,7 +308,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         gc.collect()
         end_time = time.time()
         
-        # ✅ 追加：最終的なデータ件数の確認
+        # 最終的なデータ件数の確認
         final_record_count = len(df_processed)
         total_loss = initial_record_count - final_record_count
         loss_rate = (total_loss / initial_record_count) * 100 if initial_record_count > 0 else 0
@@ -295,7 +317,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         validation_results["info"].append(f"処理後のレコード数: {final_record_count:,}")
         validation_results["info"].append(f"総データ損失: {total_loss:,}件（{loss_rate:.1f}%）")
         
-        # ✅ 追加：大量データ損失の警告
+        # 大量データ損失の警告
         if loss_rate > 30:
             validation_results["errors"].append(f"🚨 重大な警告: {loss_rate:.1f}%のデータが失われました。設定を確認してください。")
         elif loss_rate > 10:
