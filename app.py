@@ -993,8 +993,8 @@ def main():
     # フッター（変更なし）
     st.markdown("---")
     st.markdown(
-        f'<div style="text-align: center; color: {DASHBOARD_COLORS["light_gray"]}; font-size: 0.8rem;">'
-        f'{APP_ICON} {APP_TITLE} v{APP_VERSION} | {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        f'<div style="text-align: center; color: {DASHBOARD_COLORS["light_text"]};">'
+        f'{APP_ICON} {APP_TITLE} v{APP_VERSION} | {datetime.now().strftime("%Y-%m-%d %H:%M")}'
         f'</div>',
         unsafe_allow_html=True
     )
