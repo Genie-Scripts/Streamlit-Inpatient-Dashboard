@@ -207,29 +207,35 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         # --- 数値列の処理 ---
         numeric_cols_to_process = [
             "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
+            # "入院患者数（在院）" も数値として扱いたい場合はここに追加、または別途処理
         ]
+        # "入院患者数（在院）" も処理対象に含めるか、専用の処理を追加
+        if "入院患者数（在院）" in df_processed.columns:
+            # ハイフンなどをNaNに置換してから数値型に変換
+            df_processed["入院患者数（在院）"] = df_processed["入院患者数（在院）"].replace('-', np.nan)
+            df_processed["入院患者数（在院）"] = pd.to_numeric(df_processed["入院患者数（在院）"], errors='coerce')
+            # その後、必要に応じて .fillna(0) などでNaNを処理
+
         for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                # 非数値データをNaNに変換（エラーを抑制し、後でまとめて処理）
+                # ★修正案: ハイフンなどもNaNとして扱うようにする
+                df_processed[col] = df_processed[col].replace('-', np.nan) # ハイフンをNaNに置換
                 df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce')
-                    
+
                 # マイナス値は許容するため、警告は出さない（必要ならログには残す）
                 # negative_vals = (df_processed[col] < 0).sum()
                 # if negative_vals > 0:
                 #     validation_results["info"].append(f"'{col}'列にマイナスの値が {negative_vals} 件ありました。これらは集計に含まれます。")
-    
-                # 数値列のNaNを0で埋める (調整データでNaNが意図しない0になる可能性に注意)
-                # ご指示「病棟コード以外の空白は無視」から、数値列のNaNは0として扱うのが適切か、
-                # あるいは調整項目としてそのまま（NaNのまま）にして後段の集計でよしなに扱うか検討が必要。
-                # ここでは一旦0で埋めるが、調整の性質によっては要再考。
+
                 na_vals_before_fill = df_processed[col].isna().sum()
                 if na_vals_before_fill > 0:
-                    df_processed[col] = df_processed[col].fillna(0)
+                    df_processed[col] = df_processed[col].fillna(0) # NaNを0で補完
                     validation_results["info"].append(f"数値列'{col}'の欠損値 {na_vals_before_fill} 件を0で補完しました。")
             else:
-                # 数値列が存在しない場合は0で埋めた列を作成（後段の計算エラーを防ぐため）
+                # 数値列が存在しない場合は0で埋めた列を作成
                 df_processed[col] = 0
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
+
     
         # --- 列名の統一処理を修正 --- 
         # 在院患者数 -> 入院患者数（在院）へのリネーム
