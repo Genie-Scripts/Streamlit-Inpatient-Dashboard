@@ -369,12 +369,22 @@ def process_data_with_progress(base_file_uploaded, new_files_uploaded, target_fi
 
         progress_bar.progress(25, text="2. データの結合中...")
         df_raw = pd.concat(df_list_for_concat, ignore_index=True)
-        
+        st.write(f"結合後の行数: {len(df_raw)}") # ★追加：結合直後の行数
+        if not df_raw.empty:
+            # 例: 主要なキー列 (日付, 病棟コード, 診療科名など) で重複を確認
+            # key_columns = ['日付', '病棟コード', '診療科名'] # 実際のキー列に合わせてください
+            # st.write(f"主要キーでの重複行数 (結合後): {df_raw.duplicated(subset=key_columns).sum()}")
+            st.write(f"完全一致での重複行数 (結合後): {df_raw.duplicated().sum()}")
+
         # 進捗バーの更新
         progress_bar.progress(26, text="2. 重複チェック中...")
         
         # 効率的な重複チェック関数を呼び出す
         df_raw = efficient_duplicate_check(df_raw)
+        st.write(f"efficient_duplicate_check後の行数: {len(df_raw)}") # ★追加：重複削除直後の行数
+        if not df_raw.empty:
+            # st.write(f"主要キーでの重複行数 (efficient_duplicate_check後): {df_raw.duplicated(subset=key_columns).sum()}")
+            st.write(f"完全一致での重複行数 (efficient_duplicate_check後): {df_raw.duplicated().sum()}")
         
         # 不要な列の削除
         if 'ファイルソース' in df_raw.columns:
