@@ -243,7 +243,7 @@ def load_single_file(uploaded_file):
         return pd.DataFrame()
 
 def process_and_save_data(uploaded_files, target_file=None):
-    """データ処理と保存（CSV対応版）"""
+    """データ処理と保存（CSV対応版・デバッグ強化）"""
     try:
         with st.spinner("データを処理中..."):
             # ファイル読み込み
@@ -259,42 +259,82 @@ def process_and_save_data(uploaded_files, target_file=None):
             
             progress_bar.progress(50, "目標データを処理中...")
             
-            # ✅ 修正：目標データの処理（CSV対応）
+            # ✅ 修正：目標データの処理（CSV対応・デバッグ強化）
             target_data = None
             if target_file is not None:
+                # デバッグ情報の表示
+                st.write(f"🔍 目標ファイル名: {target_file.name}")
+                st.write(f"🔍 目標ファイルサイズ: {target_file.size} bytes")
+                st.write(f"🔍 目標ファイル拡張子: {os.path.splitext(target_file.name)[1].lower()}")
+                
                 try:
                     # ✅ 修正：CSVファイルに対応した読み込み
                     target_data = load_single_file(target_file)
                     
-                    if target_data is not None and not target_data.empty:
-                        st.write(f"🎯 目標データ読み込み完了: {len(target_data):,}件")
-                        st.write(f"🏷️ 目標データ列: {list(target_data.columns)}")
+                    # 詳細なデバッグ情報
+                    st.write(f"🔍 target_data type: {type(target_data)}")
+                    st.write(f"🔍 target_data is None: {target_data is None}")
+                    
+                    if target_data is not None:
+                        st.write(f"🔍 target_data empty: {target_data.empty}")
+                        st.write(f"🔍 target_data shape: {target_data.shape}")
                         
-                        # 部門コード列の確認
-                        if '部門コード' in target_data.columns:
-                            unique_depts = target_data['部門コード'].nunique()
-                            dept_list = target_data['部門コード'].unique()[:10]  # 最初の10個を表示
-                            st.success(f"✅ 部門コード列を確認: {unique_depts}部門")
-                            st.info(f"📋 部門コード例: {list(dept_list)}")
-                        else:
-                            st.warning("⚠️ 目標データに'部門コード'列が見つかりません")
-                            st.write(f"利用可能な列: {list(target_data.columns)}")
-                        
-                        # 部門名列の確認
-                        if '部門名' in target_data.columns:
-                            dept_names = target_data['部門名'].unique()[:10]
-                            st.info(f"🏥 部門名例: {list(dept_names)}")
+                        if not target_data.empty:
+                            st.write(f"🎯 目標データ読み込み完了: {len(target_data):,}件")
+                            st.write(f"🏷️ 目標データ列: {list(target_data.columns)}")
                             
+                            # 部門コード列の確認
+                            if '部門コード' in target_data.columns:
+                                unique_depts = target_data['部門コード'].nunique()
+                                dept_list = target_data['部門コード'].unique()[:10]  # 最初の10個を表示
+                                st.success(f"✅ 部門コード列を確認: {unique_depts}部門")
+                                st.info(f"📋 部門コード例: {list(dept_list)}")
+                                
+                                # 部門コードの詳細情報
+                                st.write(f"🔍 部門コード詳細:")
+                                for i, code in enumerate(dept_list):
+                                    st.write(f"  {i+1}. {code}")
+                                    
+                            else:
+                                st.warning("⚠️ 目標データに'部門コード'列が見つかりません")
+                                st.write(f"利用可能な列: {list(target_data.columns)}")
+                            
+                            # 部門名列の確認
+                            if '部門名' in target_data.columns:
+                                dept_names = target_data['部門名'].unique()[:10]
+                                st.info(f"🏥 部門名例: {list(dept_names)}")
+                                
+                                # 部門名の詳細情報
+                                st.write(f"🔍 部門名詳細:")
+                                for i, name in enumerate(dept_names):
+                                    st.write(f"  {i+1}. {name}")
+                                    
+                            # データサンプルの表示
+                            st.write("🔍 目標データサンプル（最初の5行）:")
+                            st.dataframe(target_data.head())
+                            
+                        else:
+                            st.error("❌ 目標データが空です（読み込み後）")
                     else:
-                        st.warning("⚠️ 目標データが空です")
+                        st.error("❌ 目標データがNoneです（読み込み失敗）")
                         
                 except Exception as e:
-                    st.error(f"目標データの読み込みに失敗しました: {e}")
+                    st.error(f"❌ 目標データの読み込みに失敗しました: {e}")
                     import traceback
-                    st.error(traceback.format_exc())
+                    st.error("詳細なエラー情報:")
+                    st.code(traceback.format_exc())
                     target_data = None
+            else:
+                st.info("ℹ️ 目標ファイルが指定されていません")
             
             progress_bar.progress(75, "データを前処理中...")
+            
+            # デバッグ：前処理前の確認
+            st.write(f"🔍 前処理前のtarget_data: {type(target_data)}")
+            if target_data is not None and not target_data.empty:
+                st.write(f"🔍 前処理に渡す目標データ: {len(target_data)}件")
+            else:
+                st.write("🔍 前処理に渡す目標データ: None または空")
             
             # ✅ 修正：target_dataを明示的に渡す
             df_processed, validation_results = integrated_preprocess_data(df_raw, target_data_df=target_data)
@@ -380,6 +420,21 @@ def process_and_save_data(uploaded_files, target_file=None):
                         if len(target_dept_names) > 0:
                             st.write(f"**目標データの部門名:** {len(target_dept_names)}種類")
                             st.write(f"例: {list(target_dept_names[:10])}")
+                        
+                        # マッピング結果の詳細分析
+                        st.write("**マッピング分析:**")
+                        matched_depts = []
+                        for actual_dept in actual_depts:
+                            if actual_dept in target_dept_codes or actual_dept in target_dept_names:
+                                matched_depts.append(actual_dept)
+                        
+                        st.write(f"直接マッチした診療科: {len(matched_depts)}件")
+                        if matched_depts:
+                            st.write(f"マッチ例: {matched_depts[:5]}")
+                        
+                        unmatched_count = len(actual_depts) - len(matched_depts)
+                        if unmatched_count > 0:
+                            st.warning(f"マッチしなかった診療科: {unmatched_count}件（「その他」に分類）")
                 
                 # データ統計の表示
                 show_processing_results(df_processed, validation_results)
@@ -390,7 +445,8 @@ def process_and_save_data(uploaded_files, target_file=None):
     except Exception as e:
         st.error(f"データ処理中にエラーが発生しました: {str(e)}")
         import traceback
-        st.error(traceback.format_exc())
+        st.error("詳細なエラー情報:")
+        st.code(traceback.format_exc())
 
 def update_existing_data(new_files, target_file, update_mode):
     """既存データの更新（目標値ファイル対応版）"""
@@ -405,6 +461,12 @@ def update_existing_data(new_files, target_file, update_mode):
             if target_file is not None:
                 try:
                     target_data = load_files(None, [target_file])
+                    # ✅ 追加：デバッグ情報
+                    if target_data is not None and not target_data.empty:
+                        st.write(f"🎯 目標データ読み込み成功: {len(target_data):,}件")
+                        st.write(f"🏷️ 目標データ列: {list(target_data.columns)}")
+                    else:
+                        st.error(f"❌ 目標データの読み込みに失敗: {target_file.name}")
                     if target_data is not None and not target_data.empty:
                         st.write(f"🎯 目標データ更新: {len(target_data):,}件")
                 except Exception as e:
