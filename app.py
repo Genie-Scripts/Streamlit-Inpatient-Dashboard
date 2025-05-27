@@ -5,7 +5,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import datetime
+from datetime import datetime
 import io
 import zipfile
 import tempfile
@@ -51,6 +51,7 @@ inject_global_css(1.0)  # style.pyの関数を使用
 # 削除したCSSはapp_backupに保存
 
 from pdf_output_tab import create_pdf_output_tab
+from persistent_data import auto_load_persistent_data, get_persistent_data_info
 
 # カスタムモジュールのインポート
 try:
@@ -109,10 +110,61 @@ def check_forecast_dependencies():
 # def display_trend_analysis(monthly_data):
 # def display_period_comparison_charts(df_graph, graph_dates, graph_period):
 
+def show_data_status_banner():
+    """データ状況バナーの表示"""
+    if st.session_state.get('data_loaded_from_persistent', False):
+        info = get_persistent_data_info()
+        if info.get('exists'):
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                record_count = info.get('record_count', 0)
+                st.success(f"💾 保存データ使用中: {record_count:,}件")
+            
+            with col2:
+                if isinstance(info.get('save_timestamp'), datetime):
+                    days_ago = (datetime.now() - info['save_timestamp']).days
+                    if days_ago == 0:
+                        st.info("🕐 今日更新")
+                    else:
+                        st.info(f"🕐 {days_ago}日前更新")
+            
+            with col3:
+                if st.button("📊 データ管理"):
+                    st.switch_page("データ処理")  # Streamlit 1.29以降
+                    
 def create_sidebar():
     """サイドバーの設定UI"""
+    
+    # CSS定義（サイドバー用スタイル）
+    st.markdown("""
+    <style>
+    .sidebar-target-summary-metrics {
+        background-color: #f0f2f6;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 5px 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.sidebar.header("⚙️ 設定")
     
+    # ===== 追加：データ状況表示 =====
+    if st.session_state.get('data_loaded_from_persistent', False):
+        with st.sidebar.expander("💾 データ状況", expanded=True):
+            info = get_persistent_data_info()
+            if info.get('exists'):
+                st.success("✅ 保存データ使用中")
+                st.caption(f"📊 {info.get('record_count', 0):,}件のデータ")
+                
+                if isinstance(info.get('save_timestamp'), datetime):
+                    update_time = info['save_timestamp'].strftime('%Y-%m-%d %H:%M')
+                    st.caption(f"🕐 最終更新: {update_time}")
+                
+                if st.button("🔄 データ処理タブで管理", key="goto_data_tab"):
+                    st.info("「📊 データ処理」タブでデータの更新・管理が可能です。")
+
     # デバッグ: セッション状態の型をチェック
     if st.sidebar.checkbox("🔧 デバッグ情報を表示", value=False):
         st.sidebar.write("**セッション状態の型チェック:**")
@@ -176,27 +228,34 @@ def create_sidebar():
             st.markdown("**📋 期間プリセット:**")
             preset_col1, preset_col2 = st.columns(2)
             
+            def safe_rerun():
+                """Streamlitバージョン対応のリラン"""
+                try:
+                    st.rerun()
+                except AttributeError:
+                    st.experimental_rerun()
+            
             with preset_col1:
                 if st.button("直近1ヶ月", key="preset_1month"):
                     st.session_state.analysis_start_date = max(min_date, max_date - pd.Timedelta(days=30))
                     st.session_state.analysis_end_date = max_date
-                    st.rerun()
+                    safe_rerun()
                     
                 if st.button("直近6ヶ月", key="preset_6months"):
                     st.session_state.analysis_start_date = max(min_date, max_date - pd.Timedelta(days=180))
                     st.session_state.analysis_end_date = max_date
-                    st.rerun()
+                    safe_rerun()
             
             with preset_col2:
                 if st.button("直近3ヶ月", key="preset_3months"):
                     st.session_state.analysis_start_date = max(min_date, max_date - pd.Timedelta(days=90))
                     st.session_state.analysis_end_date = max_date
-                    st.rerun()
+                    safe_rerun()
                     
                 if st.button("全期間", key="preset_all"):
                     st.session_state.analysis_start_date = min_date
                     st.session_state.analysis_end_date = max_date
-                    st.rerun()
+                    safe_rerun()
         else:
             st.info("データを処理してから期間設定が利用できます。")
 
@@ -328,11 +387,10 @@ def create_sidebar():
         monthly_revenue_estimate = monthly_target_patient_days * avg_admission_fee
         st.session_state.monthly_revenue_estimate = monthly_revenue_estimate
         
-        # 目標値の表示（修正：1列4行に変更）
+        # 目標値の表示
         st.markdown("### 📈 目標値サマリー")
         st.markdown('<div class="sidebar-target-summary-metrics">', unsafe_allow_html=True)
         
-        # ✅ 修正：2列から1列4行に変更
         st.metric(
             "延べ在院日数",
             f"{monthly_target_patient_days:,}人日",
@@ -377,7 +435,7 @@ def create_sidebar():
                     latest_admissions = latest_data['入院患者数'].sum()
                     
                     st.markdown("**最新実績 (直近日):**")
-                    st.write(f"在院患者数: {latest_total_patients:,}人")
+                    st.write(f"在院患者数: {latest_total_patients:,}人")  
                     st.write(f"入院患者数: {latest_admissions:,}人")
                     
                     # 目標との比較
@@ -398,7 +456,6 @@ def create_sidebar():
             avg_admission_fee > 0 and
             monthly_target_patient_days > 0 and 
             monthly_target_admissions > 0)
-            
 
 def create_management_dashboard_tab():
     """修正版：正しい収益達成率計算を使用"""
@@ -787,7 +844,8 @@ def get_period_display_info(selected_period):
 # def predict_monthly_completion(df_actual, period_dates):
 
 def main():
-    """メイン関数"""
+    """メイン関数（永続化対応版）"""
+    
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
         st.session_state['data_processed'] = False
@@ -796,8 +854,29 @@ def main():
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
 
+    # ===== 追加：アプリ起動時の自動データ読み込み =====
+    if not st.session_state.get('auto_load_attempted', False):
+        # データの自動読み込み試行
+        if auto_load_persistent_data():
+            # 成功時は通知なし（data_processing_tab.pyで処理）
+            pass
+        st.session_state['auto_load_attempted'] = True
+
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
+    
+    # ===== 追加：データ状況の簡易表示 =====
+    if st.session_state.get('data_loaded_from_persistent', False):
+        info = get_persistent_data_info()
+        if info.get('exists'):
+            record_count = info.get('record_count', 0)
+            last_update = info.get('save_timestamp', '')
+            if isinstance(last_update, datetime):
+                update_str = last_update.strftime('%m/%d %H:%M')
+            else:
+                update_str = str(last_update)
+            
+            st.info(f"💾 保存データを使用中: {record_count:,}件のデータ（最終更新: {update_str}）")
     
     # サイドバー設定
     settings_valid = create_sidebar()
