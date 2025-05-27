@@ -148,21 +148,6 @@ def create_sidebar():
     """, unsafe_allow_html=True)
     
     st.sidebar.header("⚙️ 設定")
-    
-    # ===== 追加：データ状況表示 =====
-    if st.session_state.get('data_loaded_from_persistent', False):
-        with st.sidebar.expander("💾 データ状況", expanded=True):
-            info = get_persistent_data_info()
-            if info.get('exists'):
-                st.success("✅ 保存データ使用中")
-                st.caption(f"📊 {info.get('record_count', 0):,}件のデータ")
-                
-                if isinstance(info.get('save_timestamp'), datetime):
-                    update_time = info['save_timestamp'].strftime('%Y-%m-%d %H:%M')
-                    st.caption(f"🕐 最終更新: {update_time}")
-                
-                if st.button("🔄 データ処理タブで管理", key="goto_data_tab"):
-                    st.info("「📊 データ処理」タブでデータの更新・管理が可能です。")
 
     # デバッグ: セッション状態の型をチェック
     if st.sidebar.checkbox("🔧 デバッグ情報を表示", value=False):
