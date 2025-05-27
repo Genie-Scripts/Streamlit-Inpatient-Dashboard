@@ -51,7 +51,6 @@ inject_global_css(1.0)  # style.pyの関数を使用
 # 削除したCSSはapp_backupに保存
 
 from pdf_output_tab import create_pdf_output_tab
-from persistent_data import auto_load_persistent_data, get_persistent_data_info
 
 # カスタムモジュールのインポート
 try:
