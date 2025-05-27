@@ -243,7 +243,7 @@ def load_single_file(uploaded_file):
         return pd.DataFrame()
 
 def process_and_save_data(uploaded_files, target_file=None):
-    """データ処理と保存（CSV対応版・デバッグ強化）"""
+    """データ処理と保存（完全修正版）"""
     try:
         with st.spinner("データを処理中..."):
             # ファイル読み込み
@@ -259,7 +259,7 @@ def process_and_save_data(uploaded_files, target_file=None):
             
             progress_bar.progress(50, "目標データを処理中...")
             
-            # ✅ 修正：目標データの処理（CSV対応・デバッグ強化）
+            # ✅ 修正：目標データの処理（完全修正版）
             target_data = None
             if target_file is not None:
                 # デバッグ情報の表示
@@ -268,8 +268,11 @@ def process_and_save_data(uploaded_files, target_file=None):
                 st.write(f"🔍 目標ファイル拡張子: {os.path.splitext(target_file.name)[1].lower()}")
                 
                 try:
-                    # ✅ 修正：CSVファイルに対応した読み込み
-                    target_data = load_single_file(target_file)
+                    # ✅ 修正：正しい変数名を使用
+                    target_file.seek(0)  # ← 修正：uploaded_file → target_file
+                    target_data = pd.read_excel(target_file, engine='openpyxl')
+                    st.write(f"🎯 Excel直接読込成功: {len(target_data)}行 × {len(target_data.columns)}列")
+                    st.write(f"🏷️ 列名: {list(target_data.columns)}")
                     
                     # 詳細なデバッグ情報
                     st.write(f"🔍 target_data type: {type(target_data)}")
