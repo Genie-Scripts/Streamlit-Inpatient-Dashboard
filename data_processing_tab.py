@@ -894,7 +894,7 @@ def show_excel_column_info(uploaded_file):
                     if engine == engines[-1]:  # 最後のエンジンでも失敗
                         raise e
                     continue
-            
+
             if df_sample is None or df_sample.empty:
                 st.warning("ファイルの内容を読み取れませんでした。")
                 return
