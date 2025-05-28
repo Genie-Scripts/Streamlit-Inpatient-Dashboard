@@ -2,7 +2,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import warnings
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -35,6 +34,7 @@ from config import (
     HOSPITAL_SETTINGS,            # 病院設備設定
     FONT_SCALE                    # 1.0
 )
+
 print("🚨 Streamlit DataFrame 安全パッチを適用中...")
 
 # 元のst.dataframe関数を保存
@@ -169,7 +169,6 @@ def safe_session_state_fix():
 # アプリ起動時にセッション状態をチェック
 if 'df' in st.session_state:
     safe_session_state_fix()
-    
 # ページ設定
 st.set_page_config(
     page_title=APP_TITLE,
@@ -186,6 +185,7 @@ inject_global_css(1.0)  # style.pyの関数を使用
 # 削除したCSSはapp_backupに保存
 
 from pdf_output_tab import create_pdf_output_tab
+from persistent_data import auto_load_persistent_data, get_persistent_data_info
 
 # カスタムモジュールのインポート
 try:
@@ -283,6 +283,21 @@ def create_sidebar():
     """, unsafe_allow_html=True)
     
     st.sidebar.header("⚙️ 設定")
+    
+    # ===== 追加：データ状況表示 =====
+    if st.session_state.get('data_loaded_from_persistent', False):
+        with st.sidebar.expander("💾 データ状況", expanded=True):
+            info = get_persistent_data_info()
+            if info.get('exists'):
+                st.success("✅ 保存データ使用中")
+                st.caption(f"📊 {info.get('record_count', 0):,}件のデータ")
+                
+                if isinstance(info.get('save_timestamp'), datetime):
+                    update_time = info['save_timestamp'].strftime('%Y-%m-%d %H:%M')
+                    st.caption(f"🕐 最終更新: {update_time}")
+                
+                if st.button("🔄 データ処理タブで管理", key="goto_data_tab"):
+                    st.info("「📊 データ処理」タブでデータの更新・管理が可能です。")
 
     # デバッグ: セッション状態の型をチェック
     if st.sidebar.checkbox("🔧 デバッグ情報を表示", value=False):
@@ -972,6 +987,14 @@ def main():
         st.session_state['df'] = None
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
+
+    # ===== 追加：アプリ起動時の自動データ読み込み =====
+    if not st.session_state.get('auto_load_attempted', False):
+        # データの自動読み込み試行
+        if auto_load_persistent_data():
+            # 成功時は通知なし（data_processing_tab.pyで処理）
+            pass
+        st.session_state['auto_load_attempted'] = True
 
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
