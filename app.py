@@ -896,7 +896,6 @@ def main():
 
     # データ処理タブ（tabs[0] - 変更なし）
     with tabs[0]:
-    with tabs[0]:
         try:
             create_data_processing_tab() # この中で integrated_preprocess_data が呼ばれ、st.session_state['df'] が設定されると仮定
             
