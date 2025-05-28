@@ -35,140 +35,6 @@ from config import (
     FONT_SCALE                    # 1.0
 )
 
-print("🚨 Streamlit DataFrame 安全パッチを適用中...")
-
-# 元のst.dataframe関数を保存
-_original_dataframe = st.dataframe
-_original_data_editor = st.data_editor if hasattr(st, 'data_editor') else None
-
-def ultra_safe_dataframe_conversion(df):
-    """
-    DataFrame を確実にArrow互換にする関数
-    """
-    if df is None or df.empty:
-        return df
-    
-    print(f"🔧 DataFrame安全変換開始: {df.shape}")
-    df_safe = df.copy()
-    
-    # すべての列を確認
-    for col in df_safe.columns:
-        col_dtype = df_safe[col].dtype
-        print(f"   列 '{col}': {col_dtype}")
-        
-        if col == '日付':
-            # 日付列の処理
-            if not pd.api.types.is_datetime64_any_dtype(df_safe[col]):
-                df_safe[col] = pd.to_datetime(df_safe[col], errors='coerce')
-        elif col_dtype == 'object':
-            # object型の列を処理
-            
-            # 数値列かどうかを判定
-            numeric_indicators = ['数', '率', '額', '円', '日', '在院', '入院', '退院', '死亡', 'Days', 'Count', 'Rate', 'Amount']
-            is_numeric_column = any(indicator in str(col) for indicator in numeric_indicators)
-            
-            if is_numeric_column:
-                print(f"   🔧 数値変換: {col}")
-                try:
-                    # 文字列に変換
-                    series_str = df_safe[col].astype(str)
-                    
-                    # 問題のある値をすべて '0' に置換
-                    problematic_values = ['-', '－', ' ', '　', 'なし', 'NA', 'N/A', 'NULL', 'null', 'nan', 'NaN', 'NaT', 'None', '']
-                    for bad_val in problematic_values:
-                        series_str = series_str.str.replace(bad_val, '0', regex=False)
-                    
-                    # 数値変換
-                    series_numeric = pd.to_numeric(series_str, errors='coerce')
-                    
-                    # NaNを0で埋める
-                    series_filled = series_numeric.fillna(0.0)
-                    
-                    # float64型に強制変換
-                    df_safe[col] = series_filled.astype('float64')
-                    print(f"   ✅ {col} → float64")
-                    
-                except Exception as e:
-                    print(f"   ❌ {col} 数値変換失敗: {e}")
-                    # 完全失敗時は全て0
-                    df_safe[col] = pd.Series([0.0] * len(df_safe), dtype='float64')
-            else:
-                # 数値でない列は文字列として統一
-                try:
-                    df_safe[col] = df_safe[col].astype(str).fillna('').replace('nan', '')
-                    print(f"   ✅ {col} → string")
-                except Exception as e:
-                    print(f"   ❌ {col} 文字列変換失敗: {e}")
-                    df_safe[col] = df_safe[col].astype(str)
-    
-    print(f"✅ DataFrame安全変換完了: {df_safe.dtypes.to_dict()}")
-    return df_safe
-
-def safe_streamlit_dataframe(data, *args, **kwargs):
-    """
-    st.dataframe の安全ラッパー
-    """
-    try:
-        if isinstance(data, pd.DataFrame):
-            print("🛡️ DataFrame安全表示開始")
-            data_safe = ultra_safe_dataframe_conversion(data)
-            result = _original_dataframe(data_safe, *args, **kwargs)
-            print("✅ DataFrame安全表示完了")
-            return result
-        else:
-            return _original_dataframe(data, *args, **kwargs)
-    except Exception as e:
-        print(f"❌ safe_streamlit_dataframe エラー: {e}")
-        # 完全にエラーの場合は、基本情報のみ表示
-        st.error(f"データ表示エラー（{e}）。基本情報のみ表示します。")
-        if isinstance(data, pd.DataFrame):
-            st.write(f"📊 データ形状: {data.shape[0]}行 × {data.shape[1]}列")
-            st.write(f"📋 列名: {list(data.columns)}")
-        return None
-
-def safe_streamlit_data_editor(data, *args, **kwargs):
-    """
-    st.data_editor の安全ラッパー
-    """
-    if _original_data_editor is None:
-        return safe_streamlit_dataframe(data, *args, **kwargs)
-    
-    try:
-        if isinstance(data, pd.DataFrame):
-            print("🛡️ DataEditor安全表示開始")
-            data_safe = ultra_safe_dataframe_conversion(data)
-            result = _original_data_editor(data_safe, *args, **kwargs)
-            print("✅ DataEditor安全表示完了")
-            return result
-        else:
-            return _original_data_editor(data, *args, **kwargs)
-    except Exception as e:
-        print(f"❌ safe_streamlit_data_editor エラー: {e}")
-        return safe_streamlit_dataframe(data, *args, **kwargs)
-
-# Streamlit関数を安全バージョンに置き換え
-st.dataframe = safe_streamlit_dataframe
-if hasattr(st, 'data_editor'):
-    st.data_editor = safe_streamlit_data_editor
-
-print("✅ Streamlit DataFrame 安全パッチ適用完了")
-
-# セッション状態のDataFrameも安全化
-def safe_session_state_fix():
-    """
-    セッション状態のDataFrameを安全化
-    """
-    if 'df' in st.session_state and st.session_state.df is not None:
-        print("🔧 セッション状態のDataFrame安全化")
-        try:
-            st.session_state.df = ultra_safe_dataframe_conversion(st.session_state.df)
-            print("✅ セッション状態DataFrame安全化完了")
-        except Exception as e:
-            print(f"❌ セッション状態DataFrame安全化エラー: {e}")
-
-# アプリ起動時にセッション状態をチェック
-if 'df' in st.session_state:
-    safe_session_state_fix()
 # ページ設定
 st.set_page_config(
     page_title=APP_TITLE,
@@ -185,7 +51,6 @@ inject_global_css(1.0)  # style.pyの関数を使用
 # 削除したCSSはapp_backupに保存
 
 from pdf_output_tab import create_pdf_output_tab
-from persistent_data import auto_load_persistent_data, get_persistent_data_info
 
 # カスタムモジュールのインポート
 try:
@@ -283,21 +148,6 @@ def create_sidebar():
     """, unsafe_allow_html=True)
     
     st.sidebar.header("⚙️ 設定")
-    
-    # ===== 追加：データ状況表示 =====
-    if st.session_state.get('data_loaded_from_persistent', False):
-        with st.sidebar.expander("💾 データ状況", expanded=True):
-            info = get_persistent_data_info()
-            if info.get('exists'):
-                st.success("✅ 保存データ使用中")
-                st.caption(f"📊 {info.get('record_count', 0):,}件のデータ")
-                
-                if isinstance(info.get('save_timestamp'), datetime):
-                    update_time = info['save_timestamp'].strftime('%Y-%m-%d %H:%M')
-                    st.caption(f"🕐 最終更新: {update_time}")
-                
-                if st.button("🔄 データ処理タブで管理", key="goto_data_tab"):
-                    st.info("「📊 データ処理」タブでデータの更新・管理が可能です。")
 
     # デバッグ: セッション状態の型をチェック
     if st.sidebar.checkbox("🔧 デバッグ情報を表示", value=False):
@@ -987,14 +837,6 @@ def main():
         st.session_state['df'] = None
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
-
-    # ===== 追加：アプリ起動時の自動データ読み込み =====
-    if not st.session_state.get('auto_load_attempted', False):
-        # データの自動読み込み試行
-        if auto_load_persistent_data():
-            # 成功時は通知なし（data_processing_tab.pyで処理）
-            pass
-        st.session_state['auto_load_attempted'] = True
 
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
