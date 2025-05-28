@@ -93,7 +93,7 @@ def efficient_duplicate_check(df_raw):
         # エラーが発生した場合は元のデータフレームを返す
         return df_raw
 
-@st.cache_data(ttl=3600, show_spinner=False)
+# @st.cache_data(ttl=3600, show_spinner=False)
 def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = None):
     start_time = time.time()
     validation_results = {
