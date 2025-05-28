@@ -94,6 +94,31 @@ def efficient_duplicate_check(df_raw):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = None):
+    # --- ここからデバッグコード (関数冒頭) ---
+    print("--- integrated_preprocess_data 関数開始 ---")
+    if df is not None and not df.empty:
+        print(f"入力DataFrameの行数: {len(df)}, 列数: {len(df.columns)}")
+        if "入院患者数（在院）" in df.columns:
+            print(f"入力時 '入院患者数（在院）' のデータ型: {df['入院患者数（在院）'].dtype}")
+            if df['入院患者数（在院）'].dtype == 'object':
+                try:
+                    hyphen_exists_input = df['入院患者数（在院）'].astype(str).str.contains('-').any()
+                    print(f"入力時 '入院患者数（在院）' にハイフンが含まれるか: {hyphen_exists_input}")
+                    if hyphen_exists_input:
+                        print("入力時ハイフンを含む行のサンプル:")
+                        print(df[df['入院患者数（在院）'].astype(str).str.contains('-')]["入院患者数（在院）"].head())
+                except Exception as e_debug_input_str_contains:
+                    print(f"入力時デバッグ中の .str.contains でエラー: {e_debug_input_str_contains}")
+            elif pd.api.types.is_numeric_dtype(df['入院患者数（在院）'].dtype):
+                print(f"入力時 '入院患者数（在院）' のNaNの数: {df['入院患者数（在院）'].isnull().sum()}")
+        else:
+            print("入力DataFrameに '入院患者数（在院）' 列が存在しません。")
+        print(f"入力DataFrameのdtypes:\n{df.dtypes}")
+    else:
+        print("入力DataFrameがNoneまたは空です。")
+    print("--- integrated_preprocess_data 関数冒頭デバッグ終了 ---")
+    # --- ここまでデバッグコード ---
+
     start_time = time.time()
     validation_results = {
         "is_valid": True,
