@@ -92,7 +92,7 @@ def efficient_duplicate_check(df_raw):
         # エラーが発生した場合は元のデータフレームを返す
         return df_raw
 
-@st.cache_data(ttl=3600, show_spinner=False)
+# @st.cache_data(ttl=3600, show_spinner=False)
 def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = None):
     # --- ここからデバッグコード (関数冒頭) ---
     print("--- integrated_preprocess_data 関数開始 ---")
@@ -230,23 +230,21 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             # )
     
         # --- 数値列の処理 ---
+        if "入院患者数（在院）" in df_processed.columns:
+            if df_processed["入院患者数（在院）"].dtype == 'object':
+                df_processed["入院患者数（在院）"] = df_processed["入院患者数（在院）"].replace(['-', '－', ' ', '　', 'なし', 'NA', 'N/A', 'NULL', 'null', 'NaT'], np.nan, regex=False) # NaTも追加
+            df_processed["入院患者数（在院）"] = pd.to_numeric(df_processed["入院患者数（在院）"], errors='coerce')
+            # ... fillna(0) ...
+
         numeric_cols_to_process = [
             "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
-            # "入院患者数（在院）" も数値として扱いたい場合はここに追加、または別途処理
         ]
-        # "入院患者数（在院）" も処理対象に含めるか、専用の処理を追加
-        if "入院患者数（在院）" in df_processed.columns:
-            # ハイフンなどをNaNに置換してから数値型に変換
-            df_processed["入院患者数（在院）"] = df_processed["入院患者数（在院）"].replace('-', np.nan)
-            df_processed["入院患者数（在院）"] = pd.to_numeric(df_processed["入院患者数（在院）"], errors='coerce')
-            # その後、必要に応じて .fillna(0) などでNaNを処理
-
         for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                # ★修正案: ハイフンなどもNaNとして扱うようにする
-                df_processed[col] = df_processed[col].replace('-', np.nan) # ハイフンをNaNに置換
+                if df_processed[col].dtype == 'object':
+                    df_processed[col] = df_processed[col].replace(['-', '－', ' ', '　', 'なし', 'NA', 'N/A', 'NULL', 'null', 'NaT'], np.nan, regex=False) # NaTも追加
                 df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce')
-
+                # ... fillna(0) ...
                 # マイナス値は許容するため、警告は出さない（必要ならログには残す）
                 # negative_vals = (df_processed[col] < 0).sum()
                 # if negative_vals > 0:
