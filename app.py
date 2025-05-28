@@ -451,124 +451,48 @@ def create_sidebar():
             monthly_target_admissions > 0)
 
 def create_management_dashboard_tab():
-    """修正版：正しい収益達成率計算を使用"""
-    if 'df' not in st.session_state or st.session_state['df'] is None:
-        st.warning("⚠️ データが読み込まれていません。先にデータ処理タブでファイルをアップロードしてください。")
-        return
-    
-    df = st.session_state['df']
-    
-    st.markdown("---")
-    # st.subheaderが表示されるかどうかも重要な手がかり
-    st.subheader("🧪 「入院患者数（在院）」列 単独テスト") 
-    logger.info("単独テスト: st.subheader 呼び出し後")
+    logger.info("create_management_dashboard_tab: ウルトラ最小版テスト開始")
+    st.header("💰 経営ダッシュボード - ウルトラ最小テスト")
 
-    if df is not None:
-        column_to_test = "入院患者数（在院）"
-        if column_to_test in df.columns:
-            test_df = df[[column_to_test]].copy()
-            logger.info(f"単独テストDF作成後 - 列 '{column_to_test}': dtype={test_df[column_to_test].dtype}, unique_values={test_df[column_to_test].unique()[:20]}")
-            
-            st.write(f"「{column_to_test}」列のみのデータフレームに対するテストを開始します:")
-            logger.info("単独テスト: st.write 呼び出し後")
+    # ステップ1：まず、st.session_state['df'] を参照せずに、このタブが基本表示できるか
+    st.write("ステップ1：基本テキスト表示テスト")
+    logger.info("ウルトラ最小版テスト: ステップ1完了。")
 
-            # テスト1: st.table() での表示 (Arrow変換を経由しない)
+    # ステップ2：st.session_state['df'] を参照してみる（まだ表示はしない）
+    # このステップでコンソールに PyArrow エラーが出るか確認
+    if 'df' in st.session_state and st.session_state.get('df') is not None:
+        df = st.session_state.get('df')
+        st.write(f"ステップ2：st.session_stateからDataFrameを取得しました。Shape: {df.shape if df is not None else 'None'}")
+        logger.info(f"ウルトラ最小版テスト: ステップ2完了。dfの型: {type(df)}")
+        
+        # ステップ3：「入院患者数（在院）」列の最初の1行だけを表示してみる
+        # このステップでコンソールに PyArrow エラーが出るか確認
+        if "入院患者数（在院）" in df.columns:
             try:
-                logger.info("単独テスト: st.table(test_df.head()) を試行")
-                st.write("テスト1: `st.table()` での表示（先頭5行）")
-                st.table(test_df.head())
-                st.success("テスト1: `st.table()` での表示に成功しました。")
-                logger.info("単独テスト: st.table(test_df.head()) の呼び出し成功")
-            except Exception as e_table:
-                logger.error(f"単独テスト (st.table) でエラー: {e_table}")
-                st.error(f"テスト1 (`st.table`) でエラーが発生: {e_table}")
+                st.write("ステップ3：「入院患者数（在院）」列の最初の値を表示テスト")
+                # 更に安全のため、コピーして、1行1列のDataFrameにする
+                # test_val_df = pd.DataFrame({'テスト値': [df["入院患者数（在院）"].iloc[0]]})
+                # test_val_df['テスト値'] = test_val_df['テスト値'].astype('float64') # 型を再確認
+                
+                # もっとシンプルに、st.writeで値だけ表示
+                val_to_display = df["入院患者数（在院）"].iloc[0]
+                st.write(f"最初の値: {val_to_display} (型: {type(val_to_display)})")
+                logger.info(f"ウルトラ最小版テスト: ステップ3完了。表示試行値: {val_to_display}")
 
-            # テスト2: st.dataframe() の直前で再度型変換 (念のため)
-            try:
-                logger.info("単独テスト: st.dataframe(test_df) を試行（再変換あり）")
-                st.write("テスト2: `st.dataframe()` での表示（表示直前に再変換）")
-                
-                # 表示直前での超明示的な型変換
-                test_df_explicit = test_df.copy() # 元のtest_dfに影響を与えないようにコピー
-                test_df_explicit[column_to_test] = pd.to_numeric(test_df_explicit[column_to_test], errors='coerce').fillna(0.0)
-                test_df_explicit[column_to_test] = test_df_explicit[column_to_test].astype('float64')
-                logger.info(f"単独テストDF再変換後 - 列 '{column_to_test}': dtype={test_df_explicit[column_to_test].dtype}, unique_values={test_df_explicit[column_to_test].unique()[:20]}")
-                
-                st.dataframe(test_df_explicit) # 再変換したデータフレームで表示
-                st.success("テスト2: `st.dataframe()` での表示（再変換後）に成功しました。")
-                logger.info("単独テスト: st.dataframe(test_df_explicit) の呼び出し成功")
-            except pyarrow.lib.ArrowInvalid as pa_error: # PyArrowエラーを明示的にキャッチ
-                logger.error(f"単独テストDF表示でPyArrowエラー発生 (st.dataframe): {pa_error}")
-                st.error(f"テスト2 (`st.dataframe`) でPyArrowエラー: {pa_error}")
-                import traceback
-                st.code(traceback.format_exc())
-            except Exception as e_df: # その他のエラー
-                logger.error(f"単独テストDF表示で一般エラー発生 (st.dataframe): {e_df}")
-                st.error(f"テスト2 (`st.dataframe`) で一般エラー: {e_df}")
-                import traceback
-                st.code(traceback.format_exc())
+                # # それでもダメなら、最終手段としてst.dataframeを試す
+                # st.write("ステップ3.1: 1行1列のDataFrameをst.dataframeで表示テスト")
+                # st.dataframe(test_val_df)
+                # logger.info("ウルトラ最小版テスト: ステップ3.1 st.dataframe呼び出し完了(Python例外なし)")
+
+            except Exception as e_step3:
+                st.error(f"ステップ3でエラー: {e_step3}")
+                logger.error(f"ウルトラ最小版テスト: ステップ3でエラー: {e_step3}", exc_info=True)
         else:
-            # このelse節のst.warningが表示されないのは、if条件がTrueだから、というのは前回確認済み
-            st.warning(f"テスト対象の「{column_to_test}」列がデータフレームに存在しません。(このメッセージは表示されないはず)")
-            logger.warning(f"単独テスト(予期せぬelse) - 「{column_to_test}」列が見つかりません。利用可能な列: " + str(df.columns.tolist()))
+            st.warning("ステップ3：テスト対象の「入院患者数（在院）」列がdfにありません。")
+            logger.warning("ウルトラ最小版テスト: ステップ3 - 「入院患者数（在院）」列なし")
     else:
-        st.warning("単独テストブロック - st.session_state['df'] が None です。(このメッセージは表示されないはず)")
-        logger.warning("単独テストブロック(予期せぬelse) - st.session_state['df'] が None です。")
-    
-    st.markdown("---")
-    # logger.info("単独テストブロック終了。これから経営ダッシュボードのメイン処理。") #区切り
-    # st.header("💰 経営ダッシュボード") # 元の処理に戻る
-    
-    # ★★★ デバッグログ追加箇所 2 ★★★
-    if "入院患者数（在院）" in df.columns:
-        logger.info(f"経営ダッシュボードタブ開始時 - 列 '入院患者数（在院）': dtype={df['入院患者数（在院）'].dtype}, unique_values={df['入院患者数（在院）'].unique()[:20]}")
-    else:
-        logger.info("経営ダッシュボードタブ開始時 - 列 '入院患者数（在院）' はdfに存在しません。")
-    # ★★★ ここまで ★★★
-    
-    st.header("💰 経営ダッシュボード")
-    
-    # 期間選択UI
-    st.markdown("### 📊 表示期間設定")
-    
-    period_options = ["直近30日", "前月完了分", "今年度"]
-    selected_period = st.radio(
-        "期間選択（平均値計算用）",
-        period_options,
-        index=0,
-        horizontal=True,
-        key="dashboard_period_selector",
-        help="日平均在院患者数、平均在院日数、日平均新入院患者数の計算期間"
-    )
-    
-    st.markdown("---")
-    
-    # ▼▼▼▼▼ ここからコメントアウト ▼▼▼▼▼
-    """
-    # metrics = calculate_dashboard_metrics(df, selected_period) # この行をコメントアウト
-    
-    # if not metrics: # metrics を使っているので、この if ブロック全体もコメントアウト
-    #     st.error("データの計算に失敗しました。")
-    #     return
-    """
-    # ▲▲▲▲▲ ここまでコメントアウト ▲▲▲▲▲    
-    # 色分けされた統一レイアウトで数値表示
-    """
-    display_unified_metrics_layout_colorized(metrics, selected_period)
-    """
-    
-# 色の定義（参考用）
-DASHBOARD_COLORS = {
-    'primary_blue': '#3498db',      # 日平均在院患者数
-    'success_green': '#27ae60',     # 病床利用率（達成時）
-    'warning_orange': '#f39c12',    # 平均在院日数
-    'danger_red': '#e74c3c',        # 延べ在院日数、推計収益
-    'info_purple': '#9b59b6',       # 日平均新入院患者数
-    'secondary_teal': '#16a085',    # 日平均収益
-    'dark_gray': '#2c3e50',         # テキスト
-    'light_gray': '#6c757d'         # サブテキスト
-}
-
+        st.warning("ステップ2/3：st.session_state['df'] が存在しないか、Noneです。")
+        logger.warning("ウルトラ最小版テスト: ステップ2/3 - dfなし")
 def calculate_dashboard_metrics(df, selected_period):
     """修正版：不足していた関数を含む完全版メトリクス計算"""
     try:
