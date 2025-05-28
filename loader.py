@@ -243,7 +243,7 @@ def process_uploaded_file(uploaded_file):
 
 def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
     """
-    複数のExcelファイルを並列処理で読み込む（修正版）
+    複数のExcelファイルを並列処理で読み込む。
     
     Parameters:
     -----------
@@ -334,12 +334,9 @@ def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
     try:
         df_raw = pd.concat(df_list, ignore_index=True)
         
-        # ✅ 修正：重複除去を削除（後段のintegrated_preprocess_dataで適切に処理される）
-        # 元のコード（削除）：
-        # from integrated_preprocessing import efficient_duplicate_check
-        # df_raw = efficient_duplicate_check(df_raw)
-        
-        print(f"重複除去処理をスキップ（後段で適切に処理されます）")
+        # 効率的な重複チェック関数を使用
+        from integrated_preprocessing import efficient_duplicate_check
+        df_raw = efficient_duplicate_check(df_raw)
         
         # 結果の出力
         end_time = time.time()
