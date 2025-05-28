@@ -684,12 +684,37 @@ def create_data_processing_tab():
                 )
                 
                 if success and df_result is not None and not df_result.empty:
-                    # ▼▼▼▼▼ この st.session_state.df への代入行を一時的に変更します ▼▼▼▼▼
-                    # st.session_state.df = df_result  # ← 元の行をコメントアウト
-                    st.session_state.df = None # ← 代わりに None を設定 (または pd.DataFrame() でも可)
-                    logger.warning("デバッグ: st.session_state['df'] への実際のデータ格納を一時的に停止し、None を設定しました。") # ログで確認
-                    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-                    st.session_state.target_data = target_data_result # ★ target_data をセッションに保存
+                    # --- ▼▼▼ データフレームの再構築処理を追加 ▼▼▼ ---
+                    logger.info("データフレームの再構築を開始します。")
+                    try:
+                        # 各列をコピーして新しいDataFrameを再構築する方法
+                        # これにより、各列が新しいSeriesオブジェクトとして作成され、
+                        # 古いメタデータや内部状態が引き継がれにくくなります。
+                        fresh_data_dict = {}
+                        for col_name in df_result.columns:
+                            fresh_data_dict[col_name] = df_result[col_name].copy() # 各列をコピー
+                        df_fresh = pd.DataFrame(fresh_data_dict)
+
+                        # 再構築後、念のため問題の列の型を再度明示的に変換・確認
+                        if "入院患者数（在院）" in df_fresh.columns:
+                            logger.info(f"再構築DF - '入院患者数（在院）' (型変換前): dtype={df_fresh['入院患者数（在院）'].dtype}")
+                            df_fresh["入院患者数（在院）"] = pd.to_numeric(df_fresh["入院患者数（在院）"], errors='coerce').fillna(0.0)
+                            df_fresh["入院患者数（在院）"] = df_fresh["入院患者数（在院）"].astype('float64') # float64型を明示
+                            logger.info(f"再構築DF - '入院患者数（在院）' (型変換後): dtype={df_fresh['入院患者数（在院）'].dtype}, unique_values={df_fresh['入院患者数（在院）'].unique()[:10]}")
+                        else:
+                            logger.warning("再構築DFに '入院患者数（在院）' 列が見つかりません。")
+                        
+                        st.session_state.df = df_fresh  # 再構築した「新しい」データフレームを格納
+                        logger.info("再構築したデータフレームを st.session_state.df に格納しました。")
+
+                    except Exception as e_recreate:
+                        logger.error(f"データフレームの再構築中にエラーが発生: {e_recreate}", exc_info=True)
+                        st.error(f"データフレームの再構築処理中にエラーが発生しました: {e_recreate}")
+                        st.session_state.df = df_result # 再構築失敗時は、元のdf_resultを格納（またはNoneにしてエラーを明確にする）
+                        logger.warning("データフレームの再構築に失敗したため、元のdf_resultを格納しました。")
+                    # --- ▲▲▲ データフレームの再構築処理ここまで ▲▲▲ ---
+                    
+                    st.session_state.target_data = target_data_result
                     st.session_state.all_results = all_results_result 
                     st.session_state.data_processed = True
                     
