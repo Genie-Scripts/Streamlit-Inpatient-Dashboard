@@ -10,6 +10,15 @@ import io
 import zipfile
 import tempfile
 import os
+import logging
+
+# ロギング設定 (既にあればこの形式に合わせるか、既存の設定を使用)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__) # app.py 用のロガーを作成
+
 try:
     import jpholiday
     JPHOLIDAY_AVAILABLE = True
@@ -449,6 +458,13 @@ def create_management_dashboard_tab():
     
     df = st.session_state['df']
     
+    # ★★★ デバッグログ追加箇所 2 ★★★
+    if "入院患者数（在院）" in df.columns:
+        logger.info(f"経営ダッシュボードタブ開始時 - 列 '入院患者数（在院）': dtype={df['入院患者数（在院）'].dtype}, unique_values={df['入院患者数（在院）'].unique()[:20]}")
+    else:
+        logger.info("経営ダッシュボードタブ開始時 - 列 '入院患者数（在院）' はdfに存在しません。")
+    # ★★★ ここまで ★★★
+    
     st.header("💰 経営ダッシュボード")
     
     # 期間選択UI
@@ -880,13 +896,22 @@ def main():
 
     # データ処理タブ（tabs[0] - 変更なし）
     with tabs[0]:
+    with tabs[0]:
         try:
-            create_data_processing_tab()
+            create_data_processing_tab() # この中で integrated_preprocess_data が呼ばれ、st.session_state['df'] が設定されると仮定
             
             # データ処理後のマッピング初期化
             if (st.session_state.get('data_processed', False) and 
                 st.session_state.get('df') is not None):
-                df = st.session_state['df']
+                df = st.session_state['df'] # df に st.session_state['df'] を代入
+                
+                # ★★★ デバッグログ追加箇所 1 ★★★
+                if "入院患者数（在院）" in df.columns:
+                    logger.info(f"main()後データ処理完了直後 - 列 '入院患者数（在院）': dtype={df['入院患者数（在院）'].dtype}, unique_values={df['入院患者数（在院）'].unique()[:20]}")
+                else:
+                    logger.info("main()後データ処理完了直後 - 列 '入院患者数（在院）' はdfに存在しません。")
+                # ★★★ ここまで ★★★
+                
                 target_data = st.session_state.get('target_data')
                 
                 # マッピングの初期化
@@ -903,6 +928,16 @@ def main():
     # データ処理済みの場合のみ他のタブを有効化
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         
+        # ★★★ デバッグログ追加箇所 1 (代替) ★★★
+        # もし上記の箇所でログが出ない（st.session_state['df']がまだNoneの）場合、
+        # この if ブロックの直下に移動しても良いかもしれません。
+        # df_check = st.session_state['df']
+        # if "入院患者数（在院）" in df_check.columns:
+        #     logger.info(f"main()後データ処理確認後 - 列 '入院患者数（在院）': dtype={df_check['入院患者数（在院）'].dtype}, unique_values={df_check['入院患者数（在院）'].unique()[:20]}")
+        # else:
+        #     logger.info("main()後データ処理確認後 - 列 '入院患者数（在院）' はdfに存在しません。")
+        # ★★★ ここまで ★★★
+
         # 経営ダッシュボードタブ（tabs[1] - 変更なし）
         with tabs[1]:
             try:
