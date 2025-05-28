@@ -104,8 +104,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         df_processed["病棟コード"] = df_processed["病棟コード"].astype(str)
 
         if '診療科名' in df_processed.columns:
-            df_processed['診療科名'] = df_processed['診療科名'].astype(str)
-            df_processed['診療科名'] = df_processed['診療科名'].replace('nan', '空白診療科')
+            df_processed['診療科名'] = df_processed['診療科名'].fillna("空白診療科").astype(str)
             df_processed['診療科名'] = df_processed['診療科名'].apply(lambda x: x if x in major_departments_list else 'その他')
             validation_results["info"].append(f"診療科名を主要診療科（{len(major_departments_list)}件）と「その他」に集約しました。「空白」も「その他」に含まれます。")
 
