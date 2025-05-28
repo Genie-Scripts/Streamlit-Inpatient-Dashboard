@@ -8,6 +8,17 @@ import os
 import tempfile
 import gc
 import psutil
+# ▼▼▼▼▼ 以下のロギング設定を追加 ▼▼▼▼▼
+import logging
+
+# ロギング設定 (app.py と同様)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__) # data_processing_tab.py 用のロガーを作成
+# ▲▲▲▲▲ ここまで追加 ▲▲▲▲▲
+
 from integrated_preprocessing import (
     integrated_preprocess_data, calculate_file_hash, efficient_duplicate_check
 )
