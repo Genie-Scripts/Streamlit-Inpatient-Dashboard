@@ -278,18 +278,55 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             df_processed = add_weekday_flag(df_processed) # 既存のadd_weekday_flag関数を呼び出す
         else:
             validation_results["errors"].append("「日付」列がないため、平日/休日フラグを追加できません。")
-            
+
         gc.collect()
         end_time = time.time()
         validation_results["info"].append(f"データ前処理時間: {end_time - start_time:.2f}秒")
         validation_results["info"].append(f"処理後のレコード数: {len(df_processed)}")
         if not df_processed.empty:
             validation_results["info"].append(f"データ期間: {df_processed['日付'].min().strftime('%Y/%m/%d')} - {df_processed['日付'].max().strftime('%Y/%m/%d')}")
-        
+
         if df_processed.empty: # 最終的に空になった場合はエラーとする
             validation_results["is_valid"] = False
             validation_results["errors"].append("前処理の結果、有効なデータが残りませんでした。")
+            # --- デバッグコード挿入箇所 ---
+            print("--- integrated_preprocess_data デバッグ開始 (空のDataFrameが返される直前) ---")
+            print("df_processed は空です。")
+            print(f"validation_results: {validation_results}")
+            print("--- integrated_preprocess_data デバッグ終了 ---")
             return None, validation_results
+
+        # --- ここからデバッグコードを挿入 ---
+        print("--- integrated_preprocess_data デバッグ開始 (正常終了直前) ---")
+        if "入院患者数（在院）" in df_processed.columns:
+            print(f"列 '入院患者数（在院）' のデータ型 (処理後): {df_processed['入院患者数（在院）'].dtype}")
+            # object型の場合、ハイフンが残っているか確認
+            if df_processed['入院患者数（在院）'].dtype == 'object':
+                try:
+                    # .astype(str) を使って、列内の全要素を文字列として扱えるようにする
+                    hyphen_exists = df_processed['入院患者数（在院）'].astype(str).str.contains('-').any()
+                    print(f"列 '入院患者数（在院）' にハイフンが含まれるか (処理後): {hyphen_exists}")
+                    if hyphen_exists:
+                        print("処理後もハイフンを含む行のサンプル:")
+                        print(df_processed[df_processed['入院患者数（在院）'].astype(str).str.contains('-')]["入院患者数（在院）"].head())
+                except Exception as e_debug_str_contains:
+                    print(f"デバッグ中の .str.contains でエラー: {e_debug_str_contains}")
+
+            # 数値型の場合でも、NaNの数を確認
+            elif pd.api.types.is_numeric_dtype(df_processed['入院患者数（在院）'].dtype):
+                 print(f"列 '入院患者数（在院）' のNaNの数 (処理後): {df_processed['入院患者数（在院）'].isnull().sum()}")
+
+            # ユニークな値も確認してみる
+            try:
+                unique_values = df_processed['入院患者数（在院）'].unique()
+                print(f"列 '入院患者数（在院）' のユニークな値 (上位10件、処理後): {unique_values[:10]}")
+            except Exception as e_debug_unique:
+                print(f"デバッグ中の .unique() でエラー: {e_debug_unique}")
+        else:
+            print("列 '入院患者数（在院）' がdf_processedに存在しません (処理後)。")
+        print(f"df_processed.dtypes (処理後):\n{df_processed.dtypes}") # 全列のデータ型を表示
+        print("--- integrated_preprocess_data デバッグ終了 ---")
+        # --- ここまでデバッグコード ---
 
         return df_processed, validation_results
 
@@ -299,9 +336,15 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         validation_results["is_valid"] = False
         validation_results["errors"].append(f"データの前処理中に予期せぬエラーが発生しました: {str(e)}")
         validation_results["errors"].append(f"詳細: {error_detail}")
-        print(f"前処理エラー: {error_detail}")
+        print(f"前処理エラー: {error_detail}") # このprintは維持
+        # --- デバッグコード挿入箇所 (例外発生時) ---
+        print("--- integrated_preprocess_data デバッグ開始 (例外発生によりNoneが返される直前) ---")
+        # ここでは df_processed が不定な状態の可能性があるので、アクセスは慎重に
+        print(f"発生した例外: {e}")
+        print(f"validation_results: {validation_results}")
+        print("--- integrated_preprocess_data デバッグ終了 ---")
         return None, validation_results
-
+        
 def add_weekday_flag(df):
     """
     平日/休日の判定フラグを追加する
