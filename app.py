@@ -458,6 +458,33 @@ def create_management_dashboard_tab():
     
     df = st.session_state['df']
     
+    # ★★★ 「問題の列のみでのシンプルな表示テスト」ここから ★★★
+    st.markdown("---") # テストセクションの区切り線
+    st.subheader("🧪 「入院患者数（在院）」列 単独テスト")
+
+    if "入院患者数（在院）" in df.columns:
+        # 問題の列だけを抽出して新しいデータフレームを作成 (必ず .copy() を付けて独立させる)
+        test_df = df[["入院患者数（在院）"]].copy() 
+        
+        # テスト用データフレームの状態をログに出力（最終確認）
+        logger.info(f"単独テストDF作成後 - 列 '入院患者数（在院）': dtype={test_df['入院患者数（在院）'].dtype}, unique_values={test_df['入院患者数（在院）'].unique()[:20]}")
+        
+        try:
+            st.write("以下のデータフレーム（「入院患者数（在院）」列のみ）を表示します:")
+            st.dataframe(test_df) # このシンプルな表示でエラーが発生するか確認
+            st.success("単独テストDFの表示に成功しました。")
+        except Exception as e_test:
+            logger.error(f"単独テストDF表示でエラー: {e_test}")
+            st.error(f"「入院患者数（在院）」列単独での表示テスト中にエラーが発生しました: {e_test}")
+            import traceback
+            st.code(traceback.format_exc()) # エラーの詳細を画面にも表示
+    else:
+        st.warning("テスト対象の「入院患者数（在院）」列がデータフレームに存在しません。")
+    
+    st.markdown("---") # テストセクションの区切り線
+    # ★★★ 「問題の列のみでのシンプルな表示テスト」ここまで ★★★
+
+    
     # ★★★ デバッグログ追加箇所 2 ★★★
     if "入院患者数（在院）" in df.columns:
         logger.info(f"経営ダッシュボードタブ開始時 - 列 '入院患者数（在院）': dtype={df['入院患者数（在院）'].dtype}, unique_values={df['入院患者数（在院）'].unique()[:20]}")
