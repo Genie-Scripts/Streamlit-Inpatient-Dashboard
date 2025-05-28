@@ -543,13 +543,15 @@ def create_management_dashboard_tab():
     
     st.markdown("---")
     
-    # ✅ 修正版のメトリクス計算を使用
-    metrics = calculate_dashboard_metrics(df, selected_period)
+    # ▼▼▼▼▼ ここからコメントアウト ▼▼▼▼▼
+    """
+    # metrics = calculate_dashboard_metrics(df, selected_period) # この行をコメントアウト
     
-    if not metrics:
-        st.error("データの計算に失敗しました。")
-        return
-    
+    # if not metrics: # metrics を使っているので、この if ブロック全体もコメントアウト
+    #     st.error("データの計算に失敗しました。")
+    #     return
+    """
+    # ▲▲▲▲▲ ここまでコメントアウト ▲▲▲▲▲    
     # 色分けされた統一レイアウトで数値表示
     """
     display_unified_metrics_layout_colorized(metrics, selected_period)
