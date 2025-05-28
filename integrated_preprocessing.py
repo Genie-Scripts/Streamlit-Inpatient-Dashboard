@@ -92,6 +92,58 @@ def efficient_duplicate_check(df_raw):
         # エラーが発生した場合は元のデータフレームを返す
         return df_raw
 
+def safe_numeric_conversion(series, column_name="unknown"):
+    """
+    安全な数値変換関数
+    
+    Args:
+        series (pd.Series): 変換対象のシリーズ
+        column_name (str): 列名（デバッグ用）
+        
+    Returns:
+        pd.Series: 数値に変換されたシリーズ
+    """
+    try:
+        print(f"--- safe_numeric_conversion 開始: {column_name} ---")
+        print(f"変換前データ型: {series.dtype}")
+        print(f"変換前サンプル: {series.head().tolist()}")
+        
+        # Step 1: 文字列型の場合、置換処理を実行
+        if series.dtype == 'object':
+            # 一般的な非数値文字列を NaN に置換
+            non_numeric_values = ['-', '－', ' ', '　', 'なし', 'NA', 'N/A', 'NULL', 'null', 'NaT', '', 'nan', 'Nan', 'NAN']
+            series_cleaned = series.replace(non_numeric_values, np.nan, regex=False)
+            print(f"置換後サンプル: {series_cleaned.head().tolist()}")
+        else:
+            series_cleaned = series.copy()
+        
+        # Step 2: 数値変換を実行
+        series_numeric = pd.to_numeric(series_cleaned, errors='coerce')
+        print(f"数値変換後データ型: {series_numeric.dtype}")
+        
+        # Step 3: NaN の個数をチェック
+        nan_count = series_numeric.isnull().sum()
+        total_count = len(series_numeric)
+        print(f"NaN個数: {nan_count}/{total_count} ({nan_count/total_count*100:.1f}%)")
+        
+        # Step 4: NaN を 0 で埋める
+        series_filled = series_numeric.fillna(0)
+        print(f"0埋め後データ型: {series_filled.dtype}")
+        print(f"0埋め後サンプル: {series_filled.head().tolist()}")
+        
+        # Step 5: 最終的に数値型であることを確認
+        if not pd.api.types.is_numeric_dtype(series_filled):
+            print(f"警告: {column_name} が数値型になりませんでした。強制的にfloat64に変換します。")
+            series_filled = series_filled.astype('float64', errors='ignore')
+        
+        print(f"--- safe_numeric_conversion 完了: {column_name} (最終型: {series_filled.dtype}) ---")
+        return series_filled
+        
+    except Exception as e:
+        print(f"safe_numeric_conversion エラー ({column_name}): {e}")
+        # エラー時は全て0の数値シリーズを返す
+        return pd.Series([0.0] * len(series), dtype='float64')
+
 # @st.cache_data(ttl=3600, show_spinner=False)
 def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = None):
     # --- ここからデバッグコード (関数冒頭) ---
@@ -229,51 +281,50 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
                 # f"重複データ {rows_dropped_due_to_duplicates} 行を削除しました"
             # )
     
-        # --- 数値列の処理 ---
-        if "入院患者数（在院）" in df_processed.columns:
-            if df_processed["入院患者数（在院）"].dtype == 'object':
-                df_processed["入院患者数（在院）"] = df_processed["入院患者数（在院）"].replace(['-', '－', ' ', '　', 'なし', 'NA', 'N/A', 'NULL', 'null', 'NaT'], np.nan, regex=False) # NaTも追加
-            df_processed["入院患者数（在院）"] = pd.to_numeric(df_processed["入院患者数（在院）"], errors='coerce')
-            # ... fillna(0) ...
-
+        # --- 修正版：数値列の処理 ---
+        print("--- 数値列処理開始 ---")
+        
+        # 処理対象の数値列を定義
         numeric_cols_to_process = [
-            "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
+            "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数", "入院患者数（在院）"
         ]
+        
+        # 各数値列を安全に変換
         for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                if df_processed[col].dtype == 'object':
-                    df_processed[col] = df_processed[col].replace(['-', '－', ' ', '　', 'なし', 'NA', 'N/A', 'NULL', 'null', 'NaT'], np.nan, regex=False) # NaTも追加
-                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce')
-                # ... fillna(0) ...
-                # マイナス値は許容するため、警告は出さない（必要ならログには残す）
-                # negative_vals = (df_processed[col] < 0).sum()
-                # if negative_vals > 0:
-                #     validation_results["info"].append(f"'{col}'列にマイナスの値が {negative_vals} 件ありました。これらは集計に含まれます。")
-
-                na_vals_before_fill = df_processed[col].isna().sum()
-                if na_vals_before_fill > 0:
-                    df_processed[col] = df_processed[col].fillna(0) # NaNを0で補完
-                    validation_results["info"].append(f"数値列'{col}'の欠損値 {na_vals_before_fill} 件を0で補完しました。")
+                print(f"数値変換開始: {col}")
+                initial_nan_count = df_processed[col].isnull().sum()
+                
+                # 安全な数値変換を実行
+                df_processed[col] = safe_numeric_conversion(df_processed[col], col)
+                
+                final_nan_count = df_processed[col].isnull().sum()
+                
+                validation_results["info"].append(
+                    f"数値列'{col}': 変換前NaN={initial_nan_count}, 変換後NaN={final_nan_count}, 最終型={df_processed[col].dtype}"
+                )
             else:
                 # 数値列が存在しない場合は0で埋めた列を作成
-                df_processed[col] = 0
+                df_processed[col] = 0.0
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
-
+        
+        print("--- 数値列処理完了 ---")
     
         # --- 列名の統一処理を修正 --- 
         # 在院患者数 -> 入院患者数（在院）へのリネーム
         if "在院患者数" in df_processed.columns:
             # リネーム前に値をコピー (データ保全)
-            df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
-            validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
+            if "入院患者数（在院）" not in df_processed.columns:
+                df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
+                validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
             # 元の列も残す (互換性のため)
-            # df_processed.rename(columns={"在院患者数": "入院患者数（在院）"}, inplace=True)
+            
         elif "入院患者数（在院）" not in df_processed.columns:
             # いずれもない場合は明示的なエラー
             validation_results["errors"].append("「在院患者数」または「入院患者数（在院）」列のいずれも存在しません。")
-            df_processed["入院患者数（在院）"] = 0 # エラー回避
+            df_processed["入院患者数（在院）"] = 0.0 # エラー回避
             # 在院患者数も作成 (互換性のため)
-            df_processed["在院患者数"] = 0
+            df_processed["在院患者数"] = 0.0
     
         # --- 派生指標の計算 ---
         # 総入院患者数 (入院患者数 + 緊急入院患者数)
@@ -281,20 +332,20 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             df_processed["総入院患者数"] = df_processed["入院患者数"] + df_processed["緊急入院患者数"]
         else:
             validation_results["warnings"].append("「入院患者数」または「緊急入院患者数」列がないため、「総入院患者数」は計算できませんでした。")
-            df_processed["総入院患者数"] = 0 # エラー回避のため0で列作成
+            df_processed["総入院患者数"] = 0.0 # エラー回避のため0で列作成
 
         # 総退院患者数 (退院患者数 + 死亡患者数)
         if "退院患者数" in df_processed.columns and "死亡患者数" in df_processed.columns:
             df_processed["総退院患者数"] = df_processed["退院患者数"] + df_processed["死亡患者数"]
         else:
             validation_results["warnings"].append("「退院患者数」または「死亡患者数」列がないため、「総退院患者数」は計算できませんでした。")
-            df_processed["総退院患者数"] = 0 # エラー回避のため0で列作成
+            df_processed["総退院患者数"] = 0.0 # エラー回避のため0で列作成
 
         # 新入院患者数 (総入院患者数と同じと仮定)
         if "総入院患者数" in df_processed.columns:
             df_processed["新入院患者数"] = df_processed["総入院患者数"]
         else:
-            df_processed["新入院患者数"] = 0
+            df_processed["新入院患者数"] = 0.0
 
         # 平日/休日フラグの追加
         if '日付' in df_processed.columns:
