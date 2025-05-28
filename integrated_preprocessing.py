@@ -213,18 +213,12 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         
         for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                # '-' や空文字を NaN に変換
-                df_processed[col] = df_processed[col].replace(['-', ''], np.nan)
-                # 数値変換（エラーは NaN に）
-                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce')
-                # 欠損補完
-                na_vals_before_fill = df_processed[col].isna().sum()
-                if na_vals_before_fill > 0:
-                    df_processed[col] = df_processed[col].fillna(0)
-                    validation_results["info"].append(f"数値列'{col}'の欠損値 {na_vals_before_fill} 件を0で補完しました。")
+                # 強制的に文字列に変換してから '-' や空文字列を除去
+                df_processed[col] = df_processed[col].astype(str).replace(['-', '', 'nan'], np.nan)
+                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0).astype(float)
             else:
-                df_processed[col] = 0
-            validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
+                df_processed[col] = 0.0
+                validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
     
         # --- 列名の統一処理を修正 --- 
         # 在院患者数 -> 入院患者数（在院）へのリネーム
