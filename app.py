@@ -458,32 +458,66 @@ def create_management_dashboard_tab():
     
     df = st.session_state['df']
     
-    # ★★★ 「問題の列のみでのシンプルな表示テスト」ここから ★★★
-    st.markdown("---") # テストセクションの区切り線
-    st.subheader("🧪 「入院患者数（在院）」列 単独テスト")
+    st.markdown("---")
+    # st.subheaderが表示されるかどうかも重要な手がかり
+    st.subheader("🧪 「入院患者数（在院）」列 単独テスト") 
+    logger.info("単独テスト: st.subheader 呼び出し後")
 
-    if "入院患者数（在院）" in df.columns:
-        # 問題の列だけを抽出して新しいデータフレームを作成 (必ず .copy() を付けて独立させる)
-        test_df = df[["入院患者数（在院）"]].copy() 
-        
-        # テスト用データフレームの状態をログに出力（最終確認）
-        logger.info(f"単独テストDF作成後 - 列 '入院患者数（在院）': dtype={test_df['入院患者数（在院）'].dtype}, unique_values={test_df['入院患者数（在院）'].unique()[:20]}")
-        
-        try:
-            st.write("以下のデータフレーム（「入院患者数（在院）」列のみ）を表示します:")
-            st.dataframe(test_df) # このシンプルな表示でエラーが発生するか確認
-            st.success("単独テストDFの表示に成功しました。")
-        except Exception as e_test:
-            logger.error(f"単独テストDF表示でエラー: {e_test}")
-            st.error(f"「入院患者数（在院）」列単独での表示テスト中にエラーが発生しました: {e_test}")
-            import traceback
-            st.code(traceback.format_exc()) # エラーの詳細を画面にも表示
+    if df is not None:
+        column_to_test = "入院患者数（在院）"
+        if column_to_test in df.columns:
+            test_df = df[[column_to_test]].copy()
+            logger.info(f"単独テストDF作成後 - 列 '{column_to_test}': dtype={test_df[column_to_test].dtype}, unique_values={test_df[column_to_test].unique()[:20]}")
+            
+            st.write(f"「{column_to_test}」列のみのデータフレームに対するテストを開始します:")
+            logger.info("単独テスト: st.write 呼び出し後")
+
+            # テスト1: st.table() での表示 (Arrow変換を経由しない)
+            try:
+                logger.info("単独テスト: st.table(test_df.head()) を試行")
+                st.write("テスト1: `st.table()` での表示（先頭5行）")
+                st.table(test_df.head())
+                st.success("テスト1: `st.table()` での表示に成功しました。")
+                logger.info("単独テスト: st.table(test_df.head()) の呼び出し成功")
+            except Exception as e_table:
+                logger.error(f"単独テスト (st.table) でエラー: {e_table}")
+                st.error(f"テスト1 (`st.table`) でエラーが発生: {e_table}")
+
+            # テスト2: st.dataframe() の直前で再度型変換 (念のため)
+            try:
+                logger.info("単独テスト: st.dataframe(test_df) を試行（再変換あり）")
+                st.write("テスト2: `st.dataframe()` での表示（表示直前に再変換）")
+                
+                # 表示直前での超明示的な型変換
+                test_df_explicit = test_df.copy() # 元のtest_dfに影響を与えないようにコピー
+                test_df_explicit[column_to_test] = pd.to_numeric(test_df_explicit[column_to_test], errors='coerce').fillna(0.0)
+                test_df_explicit[column_to_test] = test_df_explicit[column_to_test].astype('float64')
+                logger.info(f"単独テストDF再変換後 - 列 '{column_to_test}': dtype={test_df_explicit[column_to_test].dtype}, unique_values={test_df_explicit[column_to_test].unique()[:20]}")
+                
+                st.dataframe(test_df_explicit) # 再変換したデータフレームで表示
+                st.success("テスト2: `st.dataframe()` での表示（再変換後）に成功しました。")
+                logger.info("単独テスト: st.dataframe(test_df_explicit) の呼び出し成功")
+            except pyarrow.lib.ArrowInvalid as pa_error: # PyArrowエラーを明示的にキャッチ
+                logger.error(f"単独テストDF表示でPyArrowエラー発生 (st.dataframe): {pa_error}")
+                st.error(f"テスト2 (`st.dataframe`) でPyArrowエラー: {pa_error}")
+                import traceback
+                st.code(traceback.format_exc())
+            except Exception as e_df: # その他のエラー
+                logger.error(f"単独テストDF表示で一般エラー発生 (st.dataframe): {e_df}")
+                st.error(f"テスト2 (`st.dataframe`) で一般エラー: {e_df}")
+                import traceback
+                st.code(traceback.format_exc())
+        else:
+            # このelse節のst.warningが表示されないのは、if条件がTrueだから、というのは前回確認済み
+            st.warning(f"テスト対象の「{column_to_test}」列がデータフレームに存在しません。(このメッセージは表示されないはず)")
+            logger.warning(f"単独テスト(予期せぬelse) - 「{column_to_test}」列が見つかりません。利用可能な列: " + str(df.columns.tolist()))
     else:
-        st.warning("テスト対象の「入院患者数（在院）」列がデータフレームに存在しません。")
+        st.warning("単独テストブロック - st.session_state['df'] が None です。(このメッセージは表示されないはず)")
+        logger.warning("単独テストブロック(予期せぬelse) - st.session_state['df'] が None です。")
     
-    st.markdown("---") # テストセクションの区切り線
-    # ★★★ 「問題の列のみでのシンプルな表示テスト」ここまで ★★★
-
+    st.markdown("---")
+    # logger.info("単独テストブロック終了。これから経営ダッシュボードのメイン処理。") #区切り
+    # st.header("💰 経営ダッシュボード") # 元の処理に戻る
     
     # ★★★ デバッグログ追加箇所 2 ★★★
     if "入院患者数（在院）" in df.columns:
