@@ -898,47 +898,75 @@ def show_excel_column_info(uploaded_file):
             if df_sample is None or df_sample.empty:
                 st.warning("ファイルの内容を読み取れませんでした。")
                 return
-            
+
+            # --- ここから追加/修正 ---
+            # 表示用のdf_sample_display を作成し、クレンジングを行う
+            df_sample_display = df_sample.copy()
+
+            # クレンジング対象の列を指定 (エラーメッセージに出ている列は必須)
+            # EXCEL_DTYPES で float が指定されている列も対象に含めるとより堅牢
+            cols_to_clean_in_sample = []
+            potential_numeric_cols = ["在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数", "入院患者数（在院）"]
+            for col_name in potential_numeric_cols:
+                if col_name in df_sample_display.columns:
+                    cols_to_clean_in_sample.append(col_name)
+
+            for col in cols_to_clean_in_sample:
+                # object型でないと .str アクセサが使えない場合があるので、先に文字列に変換することを検討
+                # ただし、元々数値型である列を文字列にするとパフォーマンスに影響する可能性も考慮
+                if df_sample_display[col].dtype == 'object':
+                    # ハイフンやその他の非数値的な表現を np.nan に置換
+                    df_sample_display[col] = df_sample_display[col].replace(['-', '－', ' ', '　', 'なし', 'NA', 'N/A', 'NULL'], np.nan, regex=False)
+                # pd.to_numeric で数値に変換し、変換できないものは NaN にする
+                df_sample_display[col] = pd.to_numeric(df_sample_display[col], errors='coerce')
+                # 表示上、NaNのままでも良いし、0で埋めても良い (ここではNaNのままにしておく)
+                # 必要であれば .fillna(0) を追加
+
+            # --- ここまで追加/修正 ---
+
             st.subheader(f"📋 {uploaded_file.name} の列名確認")
-            
+
             # ファイル基本情報
             file_size_mb = len(file_bytes) / (1024 * 1024)
-            st.info(f"ファイルサイズ: {file_size_mb:.2f} MB | 行数（サンプル）: {len(df_sample)} | 列数: {len(df_sample.columns)}")
-            
+            # クレンジング後のdf_sample_displayの情報を表示
+            st.info(f"ファイルサイズ: {file_size_mb:.2f} MB | 行数（サンプル）: {len(df_sample_display)} | 列数: {len(df_sample_display.columns)}")
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.write("**検出された列名:**")
-                for i, col in enumerate(df_sample.columns):
+                # クレンジング後のdf_sample_displayの列情報を表示
+                for i, col in enumerate(df_sample_display.columns):
                     # 列のデータ型も表示
-                    dtype_str = str(df_sample[col].dtype)
+                    dtype_str = str(df_sample_display[col].dtype)
                     st.write(f"{i+1}. {col} ({dtype_str})")
-            
+
             with col2:
                 st.write("**期待される列名:**")
                 expected = [
                     "病棟コード", "診療科名", "日付", "在院患者数",
                     "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
                 ]
-                
+
                 matched_columns = []
-                for col in expected:
-                    if col in df_sample.columns:
-                        st.write(f"✅ {col}")
-                        matched_columns.append(col)
+                # クレンジング後のdf_sample_displayの列で比較
+                for col_expected in expected:
+                    if col_expected in df_sample_display.columns:
+                        st.write(f"✅ {col_expected}")
+                        matched_columns.append(col_expected)
                     else:
                         # 類似の列名を検索
-                        similar_cols = [c for c in df_sample.columns if col.replace('患者数', '') in c or col.replace('数', '') in c]
+                        similar_cols = [c for c in df_sample_display.columns if col_expected.replace('患者数', '') in c or col_expected.replace('数', '') in c]
                         if similar_cols:
-                            st.write(f"❓ {col} (類似: {similar_cols[0]})")
+                            st.write(f"❓ {col_expected} (類似: {similar_cols[0]})")
                         else:
-                            st.write(f"❌ {col}")
-            
+                            st.write(f"❌ {col_expected}")
+
             # 利用可能性の判定（改善版）
             available_count = len(matched_columns)
             essential_columns = ["病棟コード", "診療科名", "日付"]  # 必須列
-            essential_count = sum(1 for col in essential_columns if col in matched_columns)
-            
+            essential_count = sum(1 for col_essential in essential_columns if col_essential in matched_columns)
+
             if essential_count >= 2 and available_count >= 4:
                 st.success(f"✅ このファイルは完全に利用可能です（{available_count}/{len(expected)}列が一致）")
             elif essential_count >= 2:
@@ -947,41 +975,44 @@ def show_excel_column_info(uploaded_file):
             else:
                 st.error(f"❌ このファイルは利用できません（必須列が不足: {essential_count}/3）")
                 st.info("このファイルは処理をスキップされます。")
-            
+
             # データ品質チェック
             st.write("**データ品質チェック:**")
             quality_issues = []
-            
-            for col in matched_columns:
-                null_count = df_sample[col].isnull().sum()
+
+            # クレンジング後のdf_sample_displayでチェック
+            for col_match in matched_columns:
+                # pd.to_numeric で数値化された列は .isnull() で欠損を確認できる
+                null_count = df_sample_display[col_match].isnull().sum()
                 if null_count > 0:
-                    quality_issues.append(f"'{col}': {null_count}個の欠損値")
-            
+                    quality_issues.append(f"'{col_match}': {null_count}個の欠損値（数値変換後）")
+
             if quality_issues:
                 st.warning("品質上の問題:")
                 for issue in quality_issues:
                     st.write(f"  • {issue}")
             else:
                 st.success("サンプルデータに品質上の問題は見つかりませんでした。")
-            
+
             # サンプルデータの表示（改善版）
             st.markdown("---")
             st.write("**📊 サンプルデータ（最初の3行）:**")
-            
+
             # 詳細表示の切り替え
             show_details = st.checkbox(f"詳細データを表示 - {uploaded_file.name}", key=f"show_details_{uploaded_file.name}")
-            
+
             if show_details:
-                st.dataframe(df_sample, use_container_width=True)
-                
+                st.dataframe(df_sample_display, use_container_width=True) # クレンジング済みのDataFrameを使用
+
                 # 統計情報（数値列のみ）
-                numeric_cols = df_sample.select_dtypes(include=[np.number]).columns
-                if len(numeric_cols) > 0:
+                # クレンジング後のdf_sample_displayから数値列を選択
+                numeric_cols_display = df_sample_display.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols_display) > 0:
                     st.write("**数値列の基本統計:**")
-                    st.dataframe(df_sample[numeric_cols].describe(), use_container_width=True)
+                    st.dataframe(df_sample_display[numeric_cols_display].describe(), use_container_width=True) # クレンジング済みのDataFrameを使用
             else:
                 # 簡易表示
-                st.dataframe(df_sample.head(2), use_container_width=True)
+                st.dataframe(df_sample_display.head(2), use_container_width=True) # クレンジング済みのDataFrameを使用
             
         finally:
             if os.path.exists(temp_path):
