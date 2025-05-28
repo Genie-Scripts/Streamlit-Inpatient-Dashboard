@@ -673,7 +673,11 @@ def create_data_processing_tab():
                 )
                 
                 if success and df_result is not None and not df_result.empty:
-                    st.session_state.df = df_result
+                    # ▼▼▼▼▼ この st.session_state.df への代入行を一時的に変更します ▼▼▼▼▼
+                    # st.session_state.df = df_result  # ← 元の行をコメントアウト
+                    st.session_state.df = None # ← 代わりに None を設定 (または pd.DataFrame() でも可)
+                    logger.warning("デバッグ: st.session_state['df'] への実際のデータ格納を一時的に停止し、None を設定しました。") # ログで確認
+                    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                     st.session_state.target_data = target_data_result # ★ target_data をセッションに保存
                     st.session_state.all_results = all_results_result 
                     st.session_state.data_processed = True
