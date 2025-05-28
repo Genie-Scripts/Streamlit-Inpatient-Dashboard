@@ -205,7 +205,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
                 f"重複データ {rows_dropped_due_to_duplicates} 行を削除しました"
             )
     
-        # 数値列の処理
+        # --- 数値列の処理（より堅牢な形式で再実装） ---
         numeric_cols_to_process = [
             "在院患者数", "入院患者数", "緊急入院患者数",
             "退院患者数", "死亡患者数", "入院患者数（在院）"
@@ -213,9 +213,16 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
 
         for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                # 強制的に文字列に変換してから '-' や空文字列を除去
-                df_processed[col] = df_processed[col].astype(str).replace(['-', '', 'nan'], np.nan)
-                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0).astype(float)
+                df_processed[col] = (
+                    pd.to_numeric(
+                        df_processed[col].astype(str).replace(
+                            ['-', '', ' ', 'nan', 'NaN', 'None'], np.nan
+                        ),
+                        errors='coerce'
+                    )
+                    .fillna(0)
+                    .astype(float)
+                )
             else:
                 df_processed[col] = 0.0
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
