@@ -2,34 +2,6 @@
 import streamlit as st
 import pandas as pd
 
-def safe_date_filter(df, start_date=None, end_date=None):
-    """安全な日付フィルタリング"""
-    try:
-        if df is None or df.empty:
-            return df
-            
-        df_result = df.copy()
-        
-        if '日付' not in df_result.columns:
-            return df_result
-        
-        # 日付列をdatetime型に変換
-        df_result['日付'] = pd.to_datetime(df_result['日付'])
-        
-        if start_date is not None:
-            start_date_pd = pd.to_datetime(start_date)
-            df_result = df_result[df_result['日付'] >= start_date_pd]
-        
-        if end_date is not None:
-            end_date_pd = pd.to_datetime(end_date)
-            df_result = df_result[df_result['日付'] <= end_date_pd]
-        
-        return df_result
-        
-    except Exception as e:
-        print(f"日付フィルタリングエラー: {e}")
-        return df
-        
 # ===============================================================================
 # 診療科関連の関数
 # ===============================================================================
