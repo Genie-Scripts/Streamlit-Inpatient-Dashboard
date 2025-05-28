@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
 import logging
 
-
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
