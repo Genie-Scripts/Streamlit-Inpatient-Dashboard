@@ -213,13 +213,19 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
 
         for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                # 強制的に文字列に変換してから '-' や空文字列を除去
-                df_processed[col] = df_processed[col].astype(str).replace(['-', '', 'nan'], np.nan)
-                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0).astype(float)
+                df_processed[col] = (
+                    pd.to_numeric(
+                        df_processed[col].astype(str).replace(
+                            ['-', '', ' ', 'nan', 'NaN', 'None'], np.nan
+                        ),
+                        errors='coerce'
+                    )
+                    .fillna(0)
+                    .astype(float)
+                )
             else:
                 df_processed[col] = 0.0
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
-
         return df_processed, validation_results
     
         # --- 列名の統一処理を修正 --- 
