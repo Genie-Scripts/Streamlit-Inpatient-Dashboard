@@ -1,9 +1,0 @@
-[build-system]
-requires = [
-    "setuptools>=60.0.0", # setuptools のバージョンを requirements.txt と合わせる
-    "wheel",
-    "Cython>=0.29,!=0.29.18,!=0.29.31",
-    "numpy>=1.21.2"
-]
-build-backend = "setuptools.build_meta"
-backend-path = ["."]
