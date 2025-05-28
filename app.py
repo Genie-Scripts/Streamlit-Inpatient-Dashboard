@@ -581,11 +581,16 @@ def calculate_dashboard_metrics(df, selected_period):
         fixed_end_date = latest_date
         
         total_beds = st.session_state.get('total_beds', 612)
+        
+        """
         fixed_kpis = calculate_kpis(df, fixed_start_date, fixed_end_date, total_beds=total_beds)
         
         if fixed_kpis and fixed_kpis.get("error"):
             st.error(f"固定期間のKPI計算エラー: {fixed_kpis['error']}")
-            return None
+        return None
+        """
+        fixed_kpis = {} # 後続の処理でエラーが出ないようにダミーの空辞書を代入 (またはNone)
+        # ▲▲▲▲▲ ここまで ▲▲▲▲▲
         
         # 2. 平均値計算用期間データの計算
         period_start_date, period_end_date = get_period_dates(df, selected_period)
