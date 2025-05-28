@@ -551,7 +551,9 @@ def create_management_dashboard_tab():
         return
     
     # 色分けされた統一レイアウトで数値表示
+    """
     display_unified_metrics_layout_colorized(metrics, selected_period)
+    """
     
 # 色の定義（参考用）
 DASHBOARD_COLORS = {
