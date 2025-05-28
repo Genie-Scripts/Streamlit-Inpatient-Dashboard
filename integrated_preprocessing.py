@@ -216,6 +216,10 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             if col in df_processed.columns:
                 # 変更点: pd.to_numeric を使用して、より堅牢な数値変換を行う
                 df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0.0)
+                
+                # ★デバッグ1: 各数値列の処理直後の状態を確認
+                if col == "在院患者数" or col == "入院患者数（在院）":
+                    logger.info(f"デバッグ1 - 列 '{col}': dtype={df_processed[col].dtype}, unique_values={df_processed[col].unique()[:20]}") # ユニークな値を最大20件表示
             else:
                 df_processed[col] = 0.0 # 列が存在しない場合は0.0で初期化（float型）
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0.0で補完されました。")
@@ -223,16 +227,13 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         # --- 列名の統一処理を修正 --- 
         # 在院患者数 -> 入院患者数（在院）へのリネーム
         if "在院患者数" in df_processed.columns:
-            # リネーム前に値をコピー (データ保全)
             df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
             validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
-            # 元の列も残す (互換性のため)
-            # df_processed.rename(columns={"在院患者数": "入院患者数（在院）"}, inplace=True)
+            # ★デバッグ2: コピー直後の「入院患者数（在院）」列の状態を確認
+            logger.info(f"デバッグ2 - 列 '入院患者数（在院）' (コピー後): dtype={df_processed['入院患者数（在院）'].dtype}, unique_values={df_processed['入院患者数（在院）'].unique()[:20]}")
         elif "入院患者数（在院）" not in df_processed.columns:
-            # いずれもない場合は明示的なエラー
             validation_results["errors"].append("「在院患者数」または「入院患者数（在院）」列のいずれも存在しません。")
-            df_processed["入院患者数（在院）"] = 0 # エラー回避
-            # 在院患者数も作成 (互換性のため)
+            df_processed["入院患者数（在院）"] = 0 
             df_processed["在院患者数"] = 0
     
         # --- 派生指標の計算 ---
@@ -269,6 +270,12 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         if not df_processed.empty:
             validation_results["info"].append(f"データ期間: {df_processed['日付'].min().strftime('%Y/%m/%d')} - {df_processed['日付'].max().strftime('%Y/%m/%d')}")
         
+        # ★デバッグ3: 関数返却直前の「入院患者数（在院）」列の状態を確認
+        if "入院患者数（在院）" in df_processed.columns:
+            logger.info(f"デバッグ3 - 列 '入院患者数（在院）' (返却前): dtype={df_processed['入院患者数（在院）'].dtype}, unique_values={df_processed['入院患者数（在院）'].unique()[:20]}")
+        else:
+            logger.info("デバッグ3 - 列 '入院患者数（在院）' は返却前のdf_processedに存在しません。")
+
         if df_processed.empty: # 最終的に空になった場合はエラーとする
             validation_results["is_valid"] = False
             validation_results["errors"].append("前処理の結果、有効なデータが残りませんでした。")
