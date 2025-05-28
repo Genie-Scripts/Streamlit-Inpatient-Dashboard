@@ -214,15 +214,10 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
 
         for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                df_processed[col] = (
-                    df_processed[col]
-                    .astype(str)
-                    .replace(['-', '', ' ', 'nan', 'NaN', 'N/A', 'None'], np.nan)
-                    .astype(float)
-                    .fillna(0.0)
-                )
+                # 変更点: pd.to_numeric を使用して、より堅牢な数値変換を行う
+                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0.0)
             else:
-                df_processed[col] = 0.0
+                df_processed[col] = 0.0 # 列が存在しない場合は0.0で初期化（float型）
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0.0で補完されました。")
     
         # --- 列名の統一処理を修正 --- 
