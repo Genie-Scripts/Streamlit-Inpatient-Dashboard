@@ -14,7 +14,6 @@ from integrated_preprocessing import (
 from loader import read_excel_cached, process_uploaded_file
 from forecast import generate_filtered_summaries
 
-
 # --- 定数 ---
 EXCEL_USE_COLUMNS = [
     "病棟コード", "診療科名", "日付", "在院患者数",
