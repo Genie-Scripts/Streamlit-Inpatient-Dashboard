@@ -1,22 +1,74 @@
-setuptools>=60.0.0  # setuptools を先頭にし、比較的新しいバージョンを指定
-streamlit
-Cython>=0.29,!=0.29.18,!=0.29.31
-numpy==1.24.3 # 引き続きバージョン固定を試す
-pandas>=0.19
-scipy>=1.3.2
-joblib>=0.11
-scikit-learn>=0.22
-statsmodels>=0.13.2
-urllib3
-packaging>=17.1
-plotly
-matplotlib
-openpyxl
-python-dateutil
-psutil
-pillow
-reportlab
-jpholiday
-xlsxwriter>=3.0.0
-# pytz は zoneinfo を推奨
-pmdarima==2.0.4
+# ===== コア フレームワーク =====
+streamlit>=1.29.0
+pandas>=2.1.0
+numpy>=1.24.0
+
+# ===== データ可視化 =====
+plotly>=5.17.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# ===== データ処理・分析 =====
+openpyxl>=3.1.2          # Excelファイル(.xlsx)の読み書き
+xlrd>=2.0.1              # 古いExcelファイル形式(.xls)の読み込み
+xlsxwriter>=3.1.9        # Excel書き込み（データ出力用）
+pyarrow>=14.0.0          # Parquetファイル処理（高速データキャッシュ）
+fastparquet>=2023.10.1   # Parquet処理の最適化
+
+# ===== 時系列・統計分析 =====
+statsmodels>=0.14.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
+jpholiday>=0.1.8         # 日本の祝日判定
+python-dateutil>=2.8.2
+
+# ===== PDF生成・レポート =====
+reportlab>=4.0.0
+pillow>=10.0.0
+pypdf2>=3.0.1
+fpdf2>=2.7.6
+
+# ===== システム監視・パフォーマンス =====
+psutil>=5.9.6            # システムリソース監視
+memory-profiler>=0.61.0  # メモリ使用量プロファイリング
+cachetools>=5.3.2        # キャッシュ機能拡張
+
+# ===== 並列処理・高速化 =====
+numba>=0.58.1           # 数値計算高速化
+joblib>=1.3.2           # 並列処理ユーティリティ
+
+# ===== ファイル処理・圧縮 =====
+chardet>=5.2.0          # 文字エンコーディング検出
+
+# ===== UI/UX 拡張 =====
+streamlit-aggrid>=0.3.4    # 高機能データグリッド
+streamlit-plotly-events>=0.0.6  # Plotlyインタラクション
+streamlit-option-menu>=0.3.6    # カスタムメニュー
+
+# ===== データ品質・バリデーション =====
+pandera>=0.17.2             # データフレーム検証
+
+# ===== ロギング・監視 =====
+loguru>=0.7.2           # 高機能ログライブラリ
+watchdog>=3.0.0         # ファイル監視
+
+# ===== 開発・テスト用（オプション） =====
+pytest>=7.4.0          # テストフレームワーク
+pytest-cov>=4.1.0      # カバレッジ測定
+black>=23.9.0           # コードフォーマッター
+isort>=5.12.0           # インポート整理
+flake8>=6.1.0           # リンター
+
+# ===== 機械学習・予測（拡張機能） =====
+xgboost>=1.7.6          # 勾配ブースティング
+lightgbm>=4.1.0         # 軽量勾配ブースティング
+prophet>=1.1.4          # 時系列予測（Facebook Prophet）
+
+# ===== データベース接続（将来の拡張用） =====
+sqlalchemy>=2.0.23      # データベースORM
+psycopg2-binary>=2.9.8  # PostgreSQL接続
+pymongo>=4.6.0          # MongoDB接続
+
+# ===== セキュリティ =====
+cryptography>=41.0.7    # 暗号化機能
+bcrypt>=4.1.1           # パスワードハッシュ化
