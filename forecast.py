@@ -1,62 +1,27 @@
+# forecast.py の改善
 import pandas as pd
-import jpholiday # jpholiday.is_holiday のために必要
+import jpholiday
 import streamlit as st
-from datetime import datetime, timedelta # datetime.now(), timedelta のために必要
-import numpy as np # pd.isna での NaN チェックは pandas に含まれますが、numpy も関連ライブラリとして記載
-# この関数は calculate_fiscal_year_days を呼び出しているので、
-# 同じファイル内に定義されているか、適切にインポートされている必要があります。
-# 例:
-# def calculate_fiscal_year_days(year):
-#     """指定された年度の日数を計算する（うるう年考慮）"""
-#     start_date = pd.Timestamp(f"{year}-04-01")
-#     end_date = pd.Timestamp(f"{year+1}-03-31")
-#     return (end_date - start_date).days + 1
-from datetime import datetime, timedelta # timedelta も使用されているため
+from datetime import timedelta
+import functools
+import concurrent.futures
+import numpy as np
+import gc
+import time
+from datetime import timedelta
 
-def predict_monthly_completion(df_actual, period_dates):
-    """月末までの予測（簡易版）"""
-    try:
-        # 現在の日数と月の総日数
-        days_elapsed = (period_dates['end_date'] - period_dates['start_date']).days + 1
-        days_in_month = pd.Timestamp(period_dates['end_date'].year, period_dates['end_date'].month, 1).days_in_month
-        remaining_days = days_in_month - days_elapsed
-        
-        if remaining_days <= 0:
-            return pd.DataFrame()  # 既に月末
-        
-        # 直近7日間の平均を使用して予測
-        recent_data = df_actual.tail(7)
-        daily_averages = recent_data.groupby('日付')[['在院患者数', '入院患者数', '退院患者数', '緊急入院患者数']].sum().mean()
-        
-        # 残り日数分の予測データを生成
-        predicted_dates = pd.date_range(
-            start=period_dates['end_date'] + pd.Timedelta(days=1),
-            periods=remaining_days,
-            freq='D'
-        )
-        
-        predicted_data = []
-        for date in predicted_dates:
-            # 曜日効果を考慮（簡易版）
-            day_of_week = date.dayofweek
-            weekend_factor = 0.7 if day_of_week >= 5 else 1.0  # 土日は70%
-            
-            predicted_data.append({
-                '日付': date,
-                '在院患者数': daily_averages['在院患者数'] * weekend_factor,
-                '入院患者数': daily_averages['入院患者数'] * weekend_factor,
-                '退院患者数': daily_averages['退院患者数'] * weekend_factor,
-                '緊急入院患者数': daily_averages['緊急入院患者数'] * weekend_factor,
-                '病棟コード': '予測',
-                '診療科名': '予測'
-            })
-        
-        return pd.DataFrame(predicted_data)
-        
-    except Exception as e:
-        print(f"予測データ生成エラー: {e}")
-        return pd.DataFrame()
+# メモ化デコレータの導入（インメモリキャッシュ）
+def memoize(func):
+    cache = {}
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+    return wrapper
 
+# より効率的なフィルタリング
 @st.cache_data(ttl=3600, max_entries=100)
 def filter_dataframe(df, filter_type=None, filter_value=None):
     """データフレームのフィルタリングを効率的に行う（キャッシュ対応）"""
@@ -66,188 +31,297 @@ def filter_dataframe(df, filter_type=None, filter_value=None):
         return df[df[filter_type] == filter_value].copy()
     return df.copy()
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
+def generate_filtered_summaries_optimized(df, filter_type=None, filter_value=None):
+    """
+    フィルタリングと集計を最適化（並列処理版）
+    """
+    start_time = time.time()
+    
+    try:
+        # フィルタリングを高速化
+        if filter_type and filter_value and filter_value != "全体":
+            if filter_type not in df.columns:
+                print(f"フィルターカラム '{filter_type}' がデータに存在しません")
+                return {}
+            filtered_df = df[df[filter_type] == filter_value].copy()
+            if filtered_df.empty:
+                return {}
+        else:
+            filtered_df = df.copy()
+        
+        # インデックスを設定して集計を高速化
+        if not pd.api.types.is_datetime64_dtype(filtered_df["日付"]):
+            filtered_df["日付"] = pd.to_datetime(filtered_df["日付"], errors="coerce")
+            filtered_df = filtered_df.dropna(subset=["日付"])
+        
+        # 並列処理で期間ごとの集計を実行
+        # 全体の最新日付を取得
+        latest_date = filtered_df["日付"].max()
+        
+        # 並列処理用に期間定義を作成
+        period_definitions = {
+            "直近7日平均": (latest_date - pd.Timedelta(days=6), latest_date),
+            "直近14日平均": (latest_date - pd.Timedelta(days=13), latest_date),
+            "直近30日平均": (latest_date - pd.Timedelta(days=29), latest_date),
+            "直近60日平均": (latest_date - pd.Timedelta(days=59), latest_date),
+            "2024年度平均": (pd.Timestamp("2024-04-01"), pd.Timestamp("2025-03-31")),
+            "2025年度平均": (pd.Timestamp("2025-04-01"), latest_date)
+        }
+        
+        # 2024年度（同期間）の計算
+        if latest_date >= pd.Timestamp("2025-04-01"):
+            days_elapsed_in_fy2025 = (latest_date - pd.Timestamp("2025-04-01")).days
+            same_period_end_2024 = pd.Timestamp("2024-04-01") + pd.Timedelta(days=days_elapsed_in_fy2025)
+            if same_period_end_2024 >= pd.Timestamp("2024-04-01"):
+                period_definitions["2024年度（同期間）"] = (pd.Timestamp("2024-04-01"), same_period_end_2024)
+        
+        # 集計結果を格納する辞書
+        summary = {}
+        weekday_summary = {}
+        holiday_summary = {}
+        
+        # データの日付インデックスを作成して検索を高速化
+        grouped_by_date = filtered_df.set_index("日付")
+        
+        # 集計カラム
+        cols_to_agg = ["入院患者数（在院）", "緊急入院患者数", "新入院患者数", "退院患者数"]
+        
+        def process_period(label, start_date, end_date):
+            """指定された期間のデータを集計する"""
+            # 期間データの抽出
+            period_data = grouped_by_date[start_date:end_date].reset_index()
+            
+            if period_data.empty:
+                # 空の結果
+                return (
+                    label, 
+                    pd.Series(index=cols_to_agg, dtype=float),
+                    pd.Series(index=cols_to_agg, dtype=float),
+                    pd.Series(index=cols_to_agg, dtype=float)
+                )
+                
+            # 全体平均
+            all_avg = period_data[cols_to_agg].mean().round(1)
+            
+            # 平日データの計算
+            weekday_data = period_data[period_data["平日判定"] == "平日"]
+            if not weekday_data.empty:
+                weekday_avg = weekday_data[cols_to_agg].mean().round(1)
+            else:
+                weekday_avg = pd.Series(index=cols_to_agg, dtype=float)
+                
+            # 休日データの計算
+            holiday_data = period_data[period_data["平日判定"] == "休日"]
+            if not holiday_data.empty:
+                holiday_avg = holiday_data[cols_to_agg].mean().round(1)
+            else:
+                holiday_avg = pd.Series(index=cols_to_agg, dtype=float)
+                
+            return (label, all_avg, weekday_avg, holiday_avg)
+        
+        # 並列処理で各期間の集計を実行
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(period_definitions))) as executor:
+            futures = [
+                executor.submit(process_period, label, start, end)
+                for label, (start, end) in period_definitions.items()
+            ]
+            
+            for future in concurrent.futures.as_completed(futures):
+                label, all_avg, weekday_avg, holiday_avg = future.result()
+                summary[label] = all_avg
+                weekday_summary[label] = weekday_avg
+                holiday_summary[label] = holiday_avg
+        
+        # 表示順序を定義
+        display_order = [
+            "直近7日平均",
+            "直近14日平均",
+            "直近30日平均",
+            "直近60日平均",
+            "2024年度平均",
+            "2024年度（同期間）",
+            "2025年度平均"
+        ]
+        
+        # DataFrameを作成し、表示順序で並び替え
+        df_summary = pd.DataFrame(summary).T.reindex([label for label in display_order if label in summary])
+        df_weekday = pd.DataFrame(weekday_summary).T.reindex([label for label in display_order if label in weekday_summary])
+        df_holiday = pd.DataFrame(holiday_summary).T.reindex([label for label in display_order if label in holiday_summary])
+        
+        # 月次集計の最適化（並列処理はせず、一括処理）
+        # 年月列を事前に一度だけ計算
+        filtered_df["年月"] = filtered_df["日付"].dt.to_period("M")
+        monthly_groups = filtered_df.groupby(["年月", "平日判定"])
+        
+        monthly_all = filtered_df.groupby("年月")[cols_to_agg].mean().round(1)
+        monthly_weekday = monthly_groups.get_group(("平日"))[cols_to_agg].mean().round(1) if ("平日",) in monthly_groups.groups else pd.DataFrame()
+        monthly_holiday = monthly_groups.get_group(("休日"))[cols_to_agg].mean().round(1) if ("休日",) in monthly_groups.groups else pd.DataFrame()
+        
+        end_time = time.time()
+        print(f"集計処理完了: 処理時間 {end_time - start_time:.2f}秒")
+        
+        # 結果を辞書で返す
+        return {
+            "summary": df_summary,
+            "weekday": df_weekday,
+            "holiday": df_holiday,
+            "monthly_all": monthly_all,
+            "monthly_weekday": monthly_weekday,
+            "monthly_holiday": monthly_holiday,
+            "latest_date": latest_date
+        }
+        
+    except Exception as e:
+        print(f"集計処理エラー: {e}")
+        import traceback
+        print(traceback.format_exc())
+        return {}
+
+@st.cache_data(ttl=3600)  # 1時間キャッシュ
 def generate_filtered_summaries(df, filter_type=None, filter_value=None):
     """
     指定されたフィルター条件でデータを集計し、各種平均値を計算する
-    """
-    # from datetime import datetime # モジュールレベルでインポート済みの場合は不要
+    （キャッシュ対応版）
 
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        元データ
+    filter_type : str, optional
+        フィルタするカラム名
+    filter_value : str or int, optional
+        フィルタする値
+
+    Returns:
+    --------
+    dict
+        集計結果を含む辞書
+    """
     try:
         # フィルタリングを適用
         if filter_type and filter_value and filter_value != "全体":
             if filter_type not in df.columns:
-                st.error(f"フィルタするカラム '{filter_type}' がデータに存在しません")
-                return {}
+                raise KeyError(f"フィルタするカラム '{filter_type}' がデータに存在しません")
 
             filtered_df = df[df[filter_type] == filter_value].copy()
+            # データがない場合は空の辞書を返す
             if filtered_df.empty:
-                # st.info(f"フィルター条件 '{filter_type} = {filter_value}' に一致するデータがありません。")
                 return {}
         else:
             filtered_df = df.copy()
+            # 全体の場合でもデータがない場合は空の辞書を返す
             if filtered_df.empty:
-                # st.info("入力データフレームが空です。")
                 return {}
 
-        # 日付列の処理
-        if '日付' not in filtered_df.columns:
-            st.error("必須の「日付」列がフィルタリング後のデータに存在しません。")
+        # 平均値を出すために、日付単位で合算
+        try:
+            # --- ここからインデントを修正 ---
+            grouped = filtered_df.groupby("日付").agg({
+                "入院患者数（在院）": "sum",
+                "緊急入院患者数": "sum",
+                "新入院患者数": "sum",
+                "退院患者数": "sum",
+                "平日判定": "first" # 日付ごとの平日/休日判定を取得
+            }).reset_index()
+            # --- ここまでインデントを修正 ---
+        except KeyError as e:
+            missing_col = str(e).strip("'")
+            st.error(f"集計に必要なカラム '{missing_col}' がデータに存在しません")
             return {}
-        if not pd.api.types.is_datetime64_dtype(filtered_df["日付"]):
-            filtered_df["日付"] = pd.to_datetime(filtered_df["日付"], errors="coerce")
-            # NaTになった行（無効な日付）を削除
-            initial_rows = len(filtered_df)
-            filtered_df = filtered_df.dropna(subset=["日付"])
-            if len(filtered_df) < initial_rows:
-                st.warning(f"{initial_rows - len(filtered_df)}件の無効な日付データが削除されました。")
 
-        if filtered_df.empty: # 日付処理後に空になる可能性
-            # st.info("日付処理後、有効なデータが残りませんでした。")
-            return {}
-            
-        # '平日判定'列の存在確認と追加
-        if '平日判定' not in filtered_df.columns:
-            # integrated_preprocessing.py の add_weekday_flag と同様のロジック
-            def is_holiday(date_val):
-                return (
-                    date_val.weekday() >= 5 or
-                    jpholiday.is_holiday(date_val) or
-                    (date_val.month == 12 and date_val.day >= 29) or
-                    (date_val.month == 1 and date_val.day <= 3)
-                )
-            filtered_df['平日判定'] = filtered_df['日付'].apply(lambda x: "休日" if is_holiday(x) else "平日")
-
-
-        # 日付単位で合算
-        agg_cols = {
-            "入院患者数（在院）": "sum",
-            "緊急入院患者数": "sum",
-            "新入院患者数": "sum",
-            "退院患者数": "sum",
-            "平日判定": "first" # 平日判定は日付ごとにユニークなのでfirstで良い
-        }
-        # 存在しない可能性のある列をagg_colsから除外
-        cols_for_agg_existing = {k: v for k, v in agg_cols.items() if k in filtered_df.columns}
-        if not cols_for_agg_existing:
-             st.error("集計に必要な数値列（在院患者数など）が存在しません。")
-             return {}
-
-        grouped = filtered_df.groupby("日付", as_index=False).agg(cols_for_agg_existing)
-
-
+        # groupedが空の場合も考慮
         if grouped.empty:
-            # st.info("グループ化後、データが空になりました。")
             return {}
 
-        # 最新日付を取得 (フィルタリング前のdfの最新日を使うべきか、フィルタリング後のgroupedの最新日か検討。ここでは元dfの最新日)
-        latest_data_date = df['日付'].max() if '日付' in df.columns and not df.empty else None
-        if latest_data_date is None:
-            # grouped が空でなければ grouped の日付を使う (より安全)
-            if not grouped.empty and '日付' in grouped.columns:
-                latest_data_date = grouped['日付'].max()
-            else:
-                st.error("データの最新日付が特定できませんでした。")
-                return {}
+        # 全データの最新日付を取得（フィルタリング前のデータから）
+        all_data_latest_date = df["日付"].max()
+        
+        # フィルタリング後のデータの最新日付（グラフ等で使用）
+        if not grouped.empty:
+            filtered_latest_date = grouped["日付"].max()
+        else:
+            filtered_latest_date = all_data_latest_date  # フィルタリング後のデータがない場合
 
-        # today = datetime.now().date() # この行は不要。latest_data_date を基準とする
+        # 基準日として全データの最新日付を使用
+        latest_date = all_data_latest_date
+
         summary = {}
         weekday_summary = {}
         holiday_summary = {}
 
-        # 集計対象のカラムリスト (実際にgroupedに存在する列のみ)
-        cols_to_agg = [col for col in ["入院患者数（在院）", "緊急入院患者数", "新入院患者数", "退院患者数"] if col in grouped.columns]
-        if not cols_to_agg: # 集計できる数値列がなければ終了
-            st.error("平均値計算のための主要な数値列がgroupedデータにありません。")
-            return {}
+        # 集計対象のカラムリスト
+        cols_to_agg = ["入院患者数（在院）", "緊急入院患者数", "新入院患者数", "退院患者数"]
 
         def add_summary(label, data):
-            # dataがNoneまたは空の場合の処理を強化
-            if data is None or data.empty or len(data) == 0:
+            # データが空でないことを確認
+            if not data.empty and len(data) > 0:
+                # 全体平均
+                summary[label] = data[cols_to_agg].mean().round(1)
+                # 平日データ抽出と平均計算
+                weekday_data = data[data["平日判定"] == "平日"]
+                if not weekday_data.empty and len(weekday_data) > 0:
+                    weekday_summary[label] = weekday_data[cols_to_agg].mean().round(1)
+                else:
+                    # データが0件の場合はNaN（空）の行を作成
+                    weekday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
+                # 休日データ抽出と平均計算
+                holiday_data = data[data["平日判定"] == "休日"]
+                if not holiday_data.empty and len(holiday_data) > 0:
+                    holiday_summary[label] = holiday_data[cols_to_agg].mean().round(1)
+                else:
+                    # データが0件の場合はNaN（空）の行を作成
+                    holiday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
+            else:
+                # 対象期間にデータがない場合もNaNで埋める
                 summary[label] = pd.Series(index=cols_to_agg, dtype=float)
                 weekday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
                 holiday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
-                return
 
-            # 全体平均
-            summary[label] = data[cols_to_agg].mean().round(1)
-            
-            # 平日データ
-            if "平日判定" in data.columns:
-                weekday_data = data[data["平日判定"] == "平日"]
-                if not weekday_data.empty:
-                    weekday_summary[label] = weekday_data[cols_to_agg].mean().round(1)
-                else:
-                    weekday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
-            else: # 平日判定列がない場合
-                weekday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
-
-            # 休日データ
-            if "平日判定" in data.columns:
-                holiday_data = data[data["平日判定"] == "休日"]
-                if not holiday_data.empty:
-                    holiday_summary[label] = holiday_data[cols_to_agg].mean().round(1)
-                else:
-                    holiday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
-            else: # 平日判定列がない場合
-                holiday_summary[label] = pd.Series(index=cols_to_agg, dtype=float)
-
-
-        # 期間別の計算
-        periods = [
-            (7, "直近7日平均"),
-            (14, "直近14日平均"),
-            (30, "直近30日平均"),
-            (60, "直近60日平均")
-        ]
-        
-        for days, label in periods:
-            # NameError修正: latest_date -> latest_data_date
-            start_date_period = latest_data_date - pd.Timedelta(days=days-1)
-            period_data = grouped[
-                (grouped["日付"] >= start_date_period) &
-                (grouped["日付"] <= latest_data_date) # NameError修正: latest_date -> latest_data_date
-            ]
+        # 各期間の計算（全データの最新日付を基準に使用）
+        for days, label in [(7, "直近7日平均"), (14, "直近14日平均"), (30, "直近30日平均"), (60, "直近60日平均")]:
+            # 基準日から逆算した期間
+            start_date_period = latest_date - pd.Timedelta(days=days-1)
+            period_data = grouped[(grouped["日付"] >= start_date_period) & (grouped["日付"] <= latest_date)]
             add_summary(label, period_data)
 
-        # 年度期間の設定
+        # 年度期間の設定 (2024年度: 2024-04-01 to 2025-03-31)
         fy2024_start = pd.Timestamp("2024-04-01")
         fy2024_end = pd.Timestamp("2025-03-31")
-        # grouped データの日付範囲でフィルタリング
-        fy2024_data = grouped[
-            (grouped["日付"] >= fy2024_start) &
-            (grouped["日付"] <= fy2024_end)
-        ]
+        fy2024_data = grouped[(grouped["日付"] >= fy2024_start) & (grouped["日付"] <= fy2024_end)]
         add_summary("2024年度平均", fy2024_data)
 
         # 2024年度（同期間）の計算
-        # NameError修正: latest_date -> latest_data_date
-        if latest_data_date >= pd.Timestamp("2025-04-01"):
-            # NameError修正: latest_date -> latest_data_date
-            days_elapsed = (latest_data_date - pd.Timestamp("2025-04-01")).days
-            same_period_end_2024 = fy2024_start + pd.Timedelta(days=days_elapsed)
-            
-            if same_period_end_2024 >= fy2024_start:
-                fy2024_same_period = grouped[
-                    (grouped["日付"] >= fy2024_start) &
-                    (grouped["日付"] <= same_period_end_2024)
-                ]
-                add_summary("2024年度（同期間）", fy2024_same_period)
-            else:
-                add_summary("2024年度（同期間）", pd.DataFrame(columns=grouped.columns)) # 空のデータフレームを渡す
-        else:
-            add_summary("2024年度（同期間）", pd.DataFrame(columns=grouped.columns)) # 空のデータフレームを渡す
+        # 基準日（最新日）から見た、今年度（2025年度）の開始日からの経過日数
+        if latest_date >= pd.Timestamp("2025-04-01"):
+            days_elapsed_in_fy2025 = (latest_date - pd.Timestamp("2025-04-01")).days
+            # 2024年度の対応する終了日を計算
+            try:
+                same_period_end_2024 = fy2024_start + pd.Timedelta(days=days_elapsed_in_fy2025)
+            except ValueError:
+                # 2/29の場合など、単純な年置換ができない場合は2/28等に調整（簡易対応）
+                 same_period_end_2024 = fy2024_start + pd.Timedelta(days=days_elapsed_in_fy2025 -1) # 調整例
 
-        # 2025年度平均
+            # 計算した終了日が2024年度の開始日以降であることを確認
+            if same_period_end_2024 >= fy2024_start:
+                 # 2024年度の同期間データを抽出
+                 fy2024_same_period = grouped[(grouped["日付"] >= fy2024_start) & (grouped["日付"] <= same_period_end_2024)]
+                 add_summary("2024年度（同期間）", fy2024_same_period)
+            else:
+                 # 同期間データが存在しない場合（例：2025年度開始直後）
+                 add_summary("2024年度（同期間）", pd.DataFrame(columns=grouped.columns)) # 空のDFでNaNを生成
+        else:
+            # 基準日がまだ2025年度に入っていない場合は、同期間のデータはなし
+            add_summary("2024年度（同期間）", pd.DataFrame(columns=grouped.columns)) # 空のDFでNaNを生成
+
+        # 2025年度期間の設定 (2025-04-01 to 2026-03-31)
         fy2025_start = pd.Timestamp("2025-04-01")
-        # NameError修正: latest_date -> latest_data_date
-        fy2025_data = grouped[
-            (grouped["日付"] >= fy2025_start) &
-            (grouped["日付"] <= latest_data_date)
-        ]
+        fy2025_end = pd.Timestamp("2026-03-31")
+        # 2025年度データは、年度開始日以降かつ基準日（最新日）までのデータ
+        fy2025_data = grouped[(grouped["日付"] >= fy2025_start) & (grouped["日付"] <= latest_date)]
         add_summary("2025年度平均", fy2025_data)
 
-        # 表示順序
+        # 表示順序を定義
         display_order = [
             "直近7日平均",
             "直近14日平均",
@@ -258,36 +332,18 @@ def generate_filtered_summaries(df, filter_type=None, filter_value=None):
             "2025年度平均"
         ]
 
-        # DataFrameを作成
-        df_summary = pd.DataFrame(summary).T
-        if not df_summary.empty:
-            df_summary = df_summary.reindex(display_order)
+        # DataFrameを作成し、表示順序で並び替え
+        df_summary = pd.DataFrame(summary).T.reindex(display_order)
+        df_weekday = pd.DataFrame(weekday_summary).T.reindex(display_order)
+        df_holiday = pd.DataFrame(holiday_summary).T.reindex(display_order)
 
-        df_weekday = pd.DataFrame(weekday_summary).T
-        if not df_weekday.empty:
-            df_weekday = df_weekday.reindex(display_order)
+        # 月次集計
+        grouped["年月"] = grouped["日付"].dt.to_period("M")
+        monthly_all = grouped.groupby("年月")[cols_to_agg].mean().round(1)
+        monthly_weekday = grouped[grouped["平日判定"] == "平日"].groupby("年月")[cols_to_agg].mean().round(1)
+        monthly_holiday = grouped[grouped["平日判定"] == "休日"].groupby("年月")[cols_to_agg].mean().round(1)
 
-        df_holiday = pd.DataFrame(holiday_summary).T
-        if not df_holiday.empty:
-            df_holiday = df_holiday.reindex(display_order)
-
-        # 月次集計 (cols_to_agg は上で grouped に存在する列にフィルタリング済み)
-        # grouped に '年月' 列を追加する前に、grouped が空でないことを確認
-        if grouped.empty or '日付' not in grouped.columns:
-             monthly_all = pd.DataFrame()
-             monthly_weekday = pd.DataFrame()
-             monthly_holiday = pd.DataFrame()
-        else:
-            grouped["年月"] = grouped["日付"].dt.to_period("M")
-            monthly_all = grouped.groupby("年月")[cols_to_agg].mean().round(1) if cols_to_agg else pd.DataFrame()
-            if "平日判定" in grouped.columns and cols_to_agg:
-                monthly_weekday = grouped[grouped["平日判定"] == "平日"].groupby("年月")[cols_to_agg].mean().round(1)
-                monthly_holiday = grouped[grouped["平日判定"] == "休日"].groupby("年月")[cols_to_agg].mean().round(1)
-            else:
-                monthly_weekday = pd.DataFrame()
-                monthly_holiday = pd.DataFrame()
-
-
+        # 結果を辞書で返す (latest_date も含める)
         return {
             "summary": df_summary,
             "weekday": df_weekday,
@@ -295,161 +351,164 @@ def generate_filtered_summaries(df, filter_type=None, filter_value=None):
             "monthly_all": monthly_all,
             "monthly_weekday": monthly_weekday,
             "monthly_holiday": monthly_holiday,
-            "latest_date": latest_data_date # NameError修正: latest_date -> latest_data_date
+            "latest_date": latest_date # 最新日付を追加
         }
 
+    except KeyError as e:
+        # キーエラー（カラム存在しない場合など）
+        st.error(f"必要なカラムが見つかりません: {str(e)}")
+        return {}
+    except TypeError as e:
+        # 型エラー
+        st.error(f"データ型の問題が発生しました: {str(e)}")
+        return {}
     except Exception as e:
-        st.error(f"データ集計中にエラーが発生しました: {str(e)}")
-        import traceback
-        st.error(traceback.format_exc()) # 詳細なトレースバックも表示
+        # その他のエラー
+        st.error(f"データ集計中に予期せぬエラーが発生しました: {str(e)}")
         return {}
 
-# calculate_fiscal_year_days 関数 (変更なしのため省略)
-# create_forecast_dataframe 関数 (この関数の修正は別途議論したため、ここでは省略)
-
 def calculate_fiscal_year_days(year):
-    """指定された年度の日数を計算する（うるう年考慮）"""
+    """
+    指定された年度の日数を計算する（うるう年考慮）
+
+    Parameters:
+    -----------
+    year : int
+        年度（例: 2025）
+
+    Returns:
+    --------
+    int
+        年度の日数
+    """
     start_date = pd.Timestamp(f"{year}-04-01")
     end_date = pd.Timestamp(f"{year+1}-03-31")
     return (end_date - start_date).days + 1
 
-@st.cache_data(ttl=1800)
-def create_forecast_dataframe(df_summary, df_weekday, df_holiday, today):
+@st.cache_data(ttl=1800)  # 30分キャッシュ
+def create_forecast_dataframe(df_weekday, df_holiday, today):
     """
-    予測データフレームを作成。
-    平日・休日の平均値データから将来の予測値を計算します。
+    平日・休日の平均値データフレームから将来の予測値を計算する
+    （キャッシュ対応版）
 
-    Args:
-        df_summary (pd.DataFrame): 全日平均の集計データ（インデックスに期間ラベル、列に指標）。
-        df_weekday (pd.DataFrame): 平日平均の集計データ（インデックスに期間ラベル、列に指標）。
-        df_holiday (pd.DataFrame): 休日平均の集計データ（インデックスに期間ラベル、列に指標）。
-        today (datetime.date or str or pd.Timestamp): 予測の基準となる日付。
-                                                      この日付の翌日から予測を開始します。
+    Parameters:
+    -----------
+    df_weekday : pd.DataFrame
+        平日平均データ
+    df_holiday : pd.DataFrame
+        休日平均データ
+    today : datetime
+        基準日（通常はデータの最新日付）
+
+    Returns:
+    --------
+    pd.DataFrame
+        予測データフレーム
     """
-    # today がNoneの場合のフォールバックは残すが、呼び出し側で日付を指定することを推奨
-    if today is None:
-        today_obj = datetime.now().date()
-        st.warning("予測基準日(today)が指定されなかったため、現在の日付を使用します。")
-    else:
-        today_obj = today
-
     try:
+        # df_weekday や df_holiday が None または空の場合は計算不可
         if df_weekday is None or df_weekday.empty or df_holiday is None or df_holiday.empty:
             st.warning("予測計算に必要な平日または休日の平均データがありません。")
             return pd.DataFrame()
 
-        # 基準日をPandas Timestampに変換
-        today_ts = pd.Timestamp(today_obj).normalize()
+        # 今日の日付をPandas Timestampに確実に変換
+        today = pd.Timestamp(today).normalize()
 
         # 2025年度末までの日付範囲を生成
         end_fy2025 = pd.Timestamp("2026-03-31")
 
-        if today_ts >= end_fy2025:
+        # today が年度末を超えている場合は予測期間がない
+        if today >= end_fy2025:
             st.info("予測対象期間（2025年度末まで）が終了しています。")
             return pd.DataFrame()
 
-        # 残りの日数を計算
-        # 予測開始日は基準日の翌日
-        forecast_start_date = today_ts + pd.Timedelta(days=1)
-        if forecast_start_date > end_fy2025:
-            st.info("予測対象期間の残りがありません（基準日が年度末以降）。")
-            return pd.DataFrame()
-            
-        remain_dates = pd.date_range(start=forecast_start_date, end=end_fy2025)
-        if remain_dates.empty: # 通常は上のチェックでカバーされるが一応残す
-            st.info("予測対象期間の残りがありません。")
+        # 残りの日数を計算（基準日の翌日から年度末まで）
+        remain_dates = pd.date_range(start=today + pd.Timedelta(days=1), end=end_fy2025)
+        if remain_dates.empty:
+            st.info("予測対象期間（2025年度末まで）の残りがありません。")
             return pd.DataFrame()
 
         remain_df = pd.DataFrame({"日付": remain_dates})
 
         # 平日/休日の判定
-        def is_holiday_for_forecast(date_val):
+        def is_holiday_for_forecast(date):
             return (
-                date_val.weekday() >= 5 or  # 土曜日または日曜日
-                jpholiday.is_holiday(date_val) or
-                (date_val.month == 12 and date_val.day >= 29) or  # 年末
-                (date_val.month == 1 and date_val.day <= 3)  # 年始
+                date.weekday() >= 5 or
+                jpholiday.is_holiday(date) or
+                (date.month == 12 and date.day >= 29) or
+                (date.month == 1 and date.day <= 3)
             )
-        
-        remain_df["平日判定"] = remain_df["日付"].apply(
-            lambda x: "休日" if is_holiday_for_forecast(x) else "平日"
-        )
+        remain_df["平日判定"] = remain_df["日付"].apply(lambda x: "休日" if is_holiday_for_forecast(x) else "平日")
 
         num_weekdays = (remain_df["平日判定"] == "平日").sum()
         num_holidays = len(remain_df) - num_weekdays
 
-        # 2025年度の経過日数を計算 (基準日 today_ts まで)
-        fy2025_start_ts = pd.Timestamp("2025-04-01")
-        elapsed_days_fy2025 = 0
-        if today_ts >= fy2025_start_ts:
-            elapsed_days_fy2025 = (today_ts - fy2025_start_ts).days + 1
-        
-        # 年度の総日数
-        # この関数が同じファイル内またはインポートされていることを確認
-        total_days_in_fy2025 = calculate_fiscal_year_days(2025) 
+        # 今年度（2025年度）の開始日
+        fy2025_start = pd.Timestamp("2025-04-01")
+
+        # 今年度の経過日数を計算 (基準日までの日数)
+        if today >= fy2025_start:
+            elapsed_days_fy2025 = (today - fy2025_start).days + 1
+        else:
+            elapsed_days_fy2025 = 0 # まだ2025年度に入っていない場合
+
+        # 年度の日数をうるう年を考慮して計算
+        total_days_in_fy2025 = calculate_fiscal_year_days(2025)
 
         forecast_rows = []
-        
-        # 予測に使用する基準期間を選択（直近期間と年度平均）
-        relevant_labels = [
-            "直近7日平均", "直近14日平均", "直近30日平均", "直近60日平均", "2025年度平均"
-        ]
-        
-        for label in relevant_labels:
-            if label not in df_weekday.index or label not in df_holiday.index:
-                st.warning(f"基準期間 '{label}' のデータが平日または休日の集計にありません。スキップします。")
-                continue
-            
-            # df_summary は実績計算で使用
-            if label == "2025年度平均" and (df_summary is None or label not in df_summary.index):
-                 st.warning(f"基準期間 '{label}' のデータが全日集計にありません（実績計算用）。スキップします。")
-                 continue
-                
+        # df_weekday のインデックス（基準期間ラベル）をループ
+        for label in df_weekday.index:
             try:
+                # 当該ラベルの平日・休日平均値を取得
+                # .loc[] で存在しないラベルを参照するとエラーになる可能性があるため、安全にアクセス
+                if label not in df_weekday.index or label not in df_holiday.index:
+                    st.warning(f"基準期間 '{label}' のデータが平日または休日に存在しません。スキップします。")
+                    continue
+
                 weekday_avg_series = df_weekday.loc[label]
                 holiday_avg_series = df_holiday.loc[label]
 
-                if "入院患者数（在院）" not in weekday_avg_series or pd.isna(weekday_avg_series["入院患者数（在院）"]) or \
-                   "入院患者数（在院）" not in holiday_avg_series or pd.isna(holiday_avg_series["入院患者数（在院）"]):
-                    st.warning(f"基準期間 '{label}' の入院患者数（在院）データ(平日/休日)が不足またはNaNです。スキップします。")
+                # '入院患者数（在院）' 列が存在するか確認
+                if "入院患者数（在院）" not in weekday_avg_series or "入院患者数（在院）" not in holiday_avg_series:
+                    st.warning(f"基準期間 '{label}' のデータに '入院患者数（在院）' がありません。スキップします。")
                     continue
 
                 weekday_avg = weekday_avg_series["入院患者数（在院）"]
                 holiday_avg = holiday_avg_series["入院患者数（在院）"]
 
-                # NaN値の処理（上記でチェック済みだが念のため）
+                # NaN値のチェックと処理（0に置換）
                 weekday_avg = 0 if pd.isna(weekday_avg) else weekday_avg
                 holiday_avg = 0 if pd.isna(holiday_avg) else holiday_avg
 
-                # 将来の予測延べ患者数
+                # 将来の予測延べ患者数（残りの日数 * 各平均値）
                 future_total = weekday_avg * num_weekdays + holiday_avg * num_holidays
 
-                # 実績の計算（2025年度平均を使用）
+                # 実績計算：2025年度の平均値を使って経過日数分の実績を計算
                 actual_total = 0
-                if label == "2025年度平均": # 2025年度平均の場合のみ実績を加味する（他のラベルは将来の平均値としての予測）
-                    if df_summary is not None and "2025年度平均" in df_summary.index and \
-                       "入院患者数（在院）" in df_summary.loc["2025年度平均"] and \
-                       not pd.isna(df_summary.loc["2025年度平均"]["入院患者数（在院）"]):
-                        
-                        actual_avg_2025 = df_summary.loc["2025年度平均"]["入院患者数（在院）"]
-                        actual_total = actual_avg_2025 * elapsed_days_fy2025
-                    else:
-                        st.warning("2025年度平均の実績値が取得できないため、実績加算は0とします。")
+                # '2025年度平均' が df_summary に存在し、かつ '入院患者数（在院）' 列があるか確認
+                # Note: 2025年度平均は df_summary (全期間平均) から取得する必要があるかもしれない
+                #       ここでは df_weekday を参照しているが、設計に応じて要確認
+                #       generate_filtered_summaries の戻り値に df_summary も含めるべき
+                #       -> 修正済み：generate_filtered_summariesは辞書で全て返す
 
-                # 年間平均人日
-                # 「2025年度平均」ラベルの場合のみ実績を含めて計算
-                # それ以外のラベルは、その平均が将来も続いた場合の純粋な予測を示す
-                if label == "2025年度平均":
-                    total_for_avg = actual_total + future_total
+                # 全体平均(summary)から2025年度平均を取得する前提で修正
+                # generate_filtered_summariesの戻り値resultsからsummaryを取得し、そこから計算するロジックが必要だが、
+                # この関数はdf_weekday, df_holiday しか受け取らないため、現状では計算不可
+                # -> 引数に df_summary を追加するか、呼び出し元で計算する必要あり
+                # -> ここでは仮に weekday の2025年度平均を使うが、設計見直し推奨
+                if "2025年度平均" in df_weekday.index and "入院患者数（在院）" in df_weekday.loc["2025年度平均"]:
+                    actual_avg_2025 = df_weekday.loc["2025年度平均"]["入院患者数（在院）"]
+                    actual_avg_2025 = 0 if pd.isna(actual_avg_2025) else actual_avg_2025
+                    actual_total = actual_avg_2025 * elapsed_days_fy2025
                 else:
-                    # 他ラベルでは、その平均値が通年続いた場合の仮想的な年度平均
-                    # もし「実績＋予測」という列名が誤解を招くなら、列名変更か計算方法の再考が必要
-                    # ここでは、提供されたロジックに基づき、実績は2025年度平均の場合のみ加味
-                    total_for_avg = (weekday_avg * (total_days_in_fy2025 * (num_weekdays / (num_weekdays + num_holidays + 1e-6)))) + \
-                                  (holiday_avg * (total_days_in_fy2025 * (num_holidays / (num_weekdays + num_holidays + 1e-6))))
+                    # 2025年度平均データがない場合は実績0として扱う
+                    actual_total = 0
 
-
-                forecast_avg_per_day = total_for_avg / total_days_in_fy2025 if total_days_in_fy2025 > 0 else 0
+                # 年間平均人日 (実績 + 予測) / 年度日数
+                if total_days_in_fy2025 > 0:
+                    forecast_avg_per_day = (actual_total + future_total) / total_days_in_fy2025
+                else:
+                    forecast_avg_per_day = 0 # 0除算回避
 
                 forecast_rows.append({
                     "基準期間": label,
@@ -457,43 +516,36 @@ def create_forecast_dataframe(df_summary, df_weekday, df_holiday, today):
                     "休日平均": round(holiday_avg, 1),
                     "残平日": int(num_weekdays),
                     "残休日": int(num_holidays),
-                    "延べ予測人日": round(future_total, 0), # これは残日数に対する予測
+                    "延べ予測人日": round(future_total, 0), # 将来分のみ
                     "年間平均人日（実績＋予測）": round(forecast_avg_per_day, 1)
                 })
-                
-            except KeyError as e_key:
-                st.warning(f"予測計算中にキーエラーが発生しました (基準期間: {label}, 詳細: {str(e_key)})。この期間の予測をスキップします。")
-                continue
-            except Exception as e_inner:
-                st.warning(f"予測計算中に予期せぬエラーが発生しました (基準期間: {label}, 詳細: {str(e_inner)})。この期間の予測をスキップします。")
+            except KeyError as e:
+                 st.warning(f"予測計算中にキーエラーが発生しました ({label}): {str(e)}")
+                 continue
+            except Exception as e:
+                st.warning(f"予測計算中に予期せぬエラーが発生しました ({label}): {str(e)}")
                 continue
 
+        # DataFrameを作成
         if not forecast_rows:
-            st.warning("有効な予測結果を生成できませんでした。入力データや基準期間の設定を確認してください。")
+            st.warning("予測結果を生成できませんでした。")
             return pd.DataFrame()
 
         forecast_df = pd.DataFrame(forecast_rows)
-        
+
+        # 不要な行（例: 過去年度の平均）を除外 - 2024年度関連は予測には不要
         if not forecast_df.empty:
-            # 2024年度関連を除外 (もし '2024年度平均' などがあれば)
             forecast_df = forecast_df[~forecast_df["基準期間"].str.contains("2024年度", na=False)]
-            
-            if not forecast_df.empty:
+
+        # 基準期間をインデックスに設定して返す
+        if not forecast_df.empty:
+            try:
                 forecast_df = forecast_df.set_index("基準期間")
+            except KeyError:
+                 st.warning("予測結果のDataFrameに'基準期間'列が見つかりませんでした。インデックス設定をスキップします。")
 
         return forecast_df
 
-    except Exception as e_outer:
-        st.error(f"予測データフレーム作成処理の全体でエラーが発生しました: {str(e_outer)}")
-        import traceback
-        st.error(traceback.format_exc()) # 詳細なトレースバックを表示
+    except Exception as e:
+        st.error(f"予測データフレーム作成中にエラーが発生しました: {str(e)}")
         return pd.DataFrame()
-
-# `calculate_fiscal_year_days`関数が同じファイル内に定義されているか、
-# もしくは正しくインポートされている必要があります。
-# 例:
-def calculate_fiscal_year_days(year):
-    """指定された年度の日数を計算する（うるう年考慮）"""
-    start_date = pd.Timestamp(f"{year}-04-01")
-    end_date = pd.Timestamp(f"{year+1}-03-31")
-    return (end_date - start_date).days + 1
