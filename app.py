@@ -1536,7 +1536,135 @@ def main():
                         st.info("PDF出力機能は開発中です。")
                 except Exception as e:
                     st.error(f"出力機能でエラーが発生しました: {str(e)}")
+
+def debug_cumulative_data():
+    """積算データ問題の診断"""
+    if not st.session_state.get('data_processed', False):
+        st.warning("データを処理してから診断してください")
+        return
+    
+    df = st.session_state.get('df')
+    if df is None:
+        st.error("データが見つかりません")
+        return
+    
+    st.header("🔍 積算データ診断")
+    
+    # 基本情報
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("データ件数", f"{len(df):,}")
+    with col2:
+        st.metric("期間", f"{df['日付'].nunique()}日")
+    with col3:
+        st.metric("最新日付", df['日付'].max().strftime('%Y-%m-%d'))
+    
+    # 在院患者数の分析
+    if '在院患者数' in df.columns:
+        st.subheader("📊 在院患者数の分析")
+        
+        # 日別集計
+        daily_data = df.groupby('日付')['在院患者数'].sum().reset_index()
+        daily_data = daily_data.sort_values('日付')
+        
+        # 最初の10日分を表示
+        st.write("**最初の10日分のデータ:**")
+        sample_data = daily_data.head(10).copy()
+        
+        # 累積計算（問題のある方法）
+        sample_data['累積_在院患者数'] = sample_data['在院患者数'].cumsum()
+        
+        # 差分計算（増減確認）
+        sample_data['前日差分'] = sample_data['在院患者数'].diff()
+        
+        st.dataframe(sample_data)
+        
+        # 統計情報
+        st.write("**統計情報:**")
+        stats_col1, stats_col2, stats_col3 = st.columns(3)
+        
+        with stats_col1:
+            st.metric("最小値", f"{daily_data['在院患者数'].min():,.0f}")
+            st.metric("最大値", f"{daily_data['在院患者数'].max():,.0f}")
+        
+        with stats_col2:
+            st.metric("平均値", f"{daily_data['在院患者数'].mean():.1f}")
+            st.metric("中央値", f"{daily_data['在院患者数'].median():.1f}")
+        
+        with stats_col3:
+            # 単調増加チェック
+            is_monotonic = daily_data['在院患者数'].is_monotonic_increasing
+            st.metric("単調増加？", "はい" if is_monotonic else "いいえ")
             
+            if is_monotonic:
+                st.error("⚠️ データが単調増加しています！累積データの可能性が高いです")
+            else:
+                st.success("✅ 正常なデータパターンです")
+        
+        # グラフ比較
+        st.subheader("📈 グラフ比較")
+        
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        
+        # サンプルデータ（最初の30日）
+        sample_30_days = daily_data.head(30)
+        
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=['❌ 累積グラフ（間違い）', '✅ 実際の値（正解）'],
+            vertical_spacing=0.15
+        )
+        
+        # 上：累積グラフ（問題のある表示）
+        cumulative_values = sample_30_days['在院患者数'].cumsum()
+        fig.add_trace(
+            go.Scatter(
+                x=sample_30_days['日付'],
+                y=cumulative_values,
+                mode='lines',
+                name='累積値（間違い）',
+                line=dict(color='red', width=2)
+            ),
+            row=1, col=1
+        )
+        
+        # 下：実際の値
+        fig.add_trace(
+            go.Scatter(
+                x=sample_30_days['日付'],
+                y=sample_30_days['在院患者数'],
+                mode='lines+markers',
+                name='実際の値（正解）',
+                line=dict(color='blue', width=2),
+                marker=dict(size=4)
+            ),
+            row=2, col=1
+        )
+        
+        fig.update_layout(
+            title='現在のデータ：累積 vs 実際の値',
+            height=600,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 結論
+        if is_monotonic:
+            st.error("🚨 **結論: データが累積値になっています**")
+            st.write("**修正が必要な場所:**")
+            st.write("1. データ前処理関数")
+            st.write("2. グラフ作成関数")
+            st.write("3. データ集計処理")
+        else:
+            st.success("✅ **結論: データは正常です**")
+            st.write("問題はグラフ作成コードにあります")
+
+# main() 関数の最後（フッターの直前）に追加
+if st.sidebar.checkbox("🔍 積算データ診断"):
+    debug_cumulative_data()
+
     # フッター
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 2, 1])
