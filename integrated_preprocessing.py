@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
 import logging
 
-
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +40,7 @@ def efficient_duplicate_check(df_raw):
     
     # メモリ使用量最適化のための型変換
     # カーディナリティが低い文字列列をカテゴリ型に変換
+    # ここは変換先なので問題なし
     for col in df_raw.select_dtypes(include=['object']).columns:
         try:
             # カーディナリティ（ユニーク値の比率）が低い列のみカテゴリ型に変換
@@ -92,53 +92,6 @@ def efficient_duplicate_check(df_raw):
         # エラーが発生した場合は元のデータフレームを返す
         return df_raw
 
-def clean_numeric_column(series, col_name):
-    """
-    数値列をクリーンアップする関数
-    
-    Args:
-        series (pd.Series): クリーンアップ対象の列
-        col_name (str): 列名（ログ用）
-        
-    Returns:
-        pd.Series: クリーンアップされた数値列
-    """
-    original_count = len(series)
-    
-    # 文字列の場合は前処理
-    if series.dtype == 'object':
-        # 一般的な非数値文字列を置換
-        series = series.astype(str).replace({
-            '-': np.nan,
-            '－': np.nan,
-            '―': np.nan,
-            'ー': np.nan,
-            '': np.nan,
-            ' ': np.nan,
-            'nan': np.nan,
-            'NaN': np.nan,
-            'NULL': np.nan,
-            'null': np.nan
-        })
-    
-    # 数値変換（エラーは NaN に変換）
-    numeric_series = pd.to_numeric(series, errors='coerce')
-    
-    # 変換結果の確認
-    nan_count = numeric_series.isna().sum()
-    negative_count = (numeric_series < 0).sum()
-    
-    if nan_count > 0:
-        logger.info(f"列 '{col_name}': {nan_count}/{original_count} 件の非数値データをNaNに変換")
-    
-    if negative_count > 0:
-        logger.info(f"列 '{col_name}': {negative_count} 件のマイナス値を検出（そのまま保持）")
-    
-    # NaN を 0 で置換
-    cleaned_series = numeric_series.fillna(0)
-    
-    return cleaned_series
-
 @st.cache_data(ttl=3600, show_spinner=False)
 def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = None):
     start_time = time.time()
@@ -181,6 +134,8 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         # 必要な列の確認
         expected_cols = ["病棟コード", "診療科名", "日付", "在院患者数",
                          "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"]
+        # 必須は「病棟コード」と「日付」のみとする（診療科名は後で処理）
+        essential_cols_for_dropna = ["病棟コード", "日付"]
 
         # 利用可能な列のみを対象とする
         available_cols = [col for col in df.columns if col in expected_cols]
@@ -239,69 +194,6 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         else:
             validation_results["warnings"].append("「診療科名」列が存在しないため、診療科集約をスキップしました。")
         
-        # --- 数値列の処理（修正版） ---
-        # 基本的な数値列
-        basic_numeric_cols = [
-            "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
-        ]
-        
-        for col in basic_numeric_cols:
-            if col in df_processed.columns:
-                df_processed[col] = clean_numeric_column(df_processed[col], col)
-            else:
-                # 数値列が存在しない場合は0で埋めた列を作成
-                df_processed[col] = 0
-                validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
-    
-        # --- 列名の統一処理（修正版） --- 
-        # 在院患者数 -> 入院患者数（在院）へのコピー
-        if "在院患者数" in df_processed.columns:
-            # 既にクリーンアップされた数値データをコピー
-            df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
-            validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
-        elif "入院患者数（在院）" not in df_processed.columns:
-            # いずれもない場合は0で作成
-            df_processed["入院患者数（在院）"] = 0
-            df_processed["在院患者数"] = 0  # 互換性のため
-            validation_results["warnings"].append("「在院患者数」または「入院患者数（在院）」列のいずれも存在しないため、0で補完しました。")
-        
-        # 新しく作成された列も数値型であることを確認
-        if "入院患者数（在院）" in df_processed.columns:
-            df_processed["入院患者数（在院）"] = clean_numeric_column(df_processed["入院患者数（在院）"], "入院患者数（在院）")
-    
-        # --- 派生指標の計算 ---
-        # 総入院患者数 (入院患者数 + 緊急入院患者数)
-        if "入院患者数" in df_processed.columns and "緊急入院患者数" in df_processed.columns:
-            df_processed["総入院患者数"] = df_processed["入院患者数"] + df_processed["緊急入院患者数"]
-        else:
-            validation_results["warnings"].append("「入院患者数」または「緊急入院患者数」列がないため、「総入院患者数」は計算できませんでした。")
-            df_processed["総入院患者数"] = 0
-
-        # 総退院患者数 (退院患者数 + 死亡患者数)
-        if "退院患者数" in df_processed.columns and "死亡患者数" in df_processed.columns:
-            df_processed["総退院患者数"] = df_processed["退院患者数"] + df_processed["死亡患者数"]
-        else:
-            validation_results["warnings"].append("「退院患者数」または「死亡患者数」列がないため、「総退院患者数」は計算できませんでした。")
-            df_processed["総退院患者数"] = 0
-
-        # 新入院患者数 (総入院患者数と同じと仮定)
-        if "総入院患者数" in df_processed.columns:
-            df_processed["新入院患者数"] = df_processed["総入院患者数"]
-        else:
-            df_processed["新入院患者数"] = 0
-
-        # 派生指標も数値型であることを確認
-        derived_numeric_cols = ["総入院患者数", "総退院患者数", "新入院患者数"]
-        for col in derived_numeric_cols:
-            if col in df_processed.columns:
-                df_processed[col] = clean_numeric_column(df_processed[col], col)
-
-        # 平日/休日フラグの追加
-        if '日付' in df_processed.columns:
-            df_processed = add_weekday_flag(df_processed)
-        else:
-            validation_results["errors"].append("「日付」列がないため、平日/休日フラグを追加できません。")
-        
         # 新しい効率的な重複チェック関数を呼び出す
         initial_rows = len(df_processed)
         df_processed = efficient_duplicate_check(df_processed)
@@ -311,20 +203,75 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             validation_results["info"].append(
                 f"重複データ {rows_dropped_due_to_duplicates} 行を削除しました"
             )
-            
-        # 最終的なデータ型チェック
-        numeric_columns_to_verify = [
-            "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数",
-            "入院患者数（在院）", "総入院患者数", "総退院患者数", "新入院患者数"
+    
+        # --- 数値列の処理 ---
+        numeric_cols_to_process = [
+            "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
         ]
-        
-        for col in numeric_columns_to_verify:
+        for col in numeric_cols_to_process:
             if col in df_processed.columns:
-                if not pd.api.types.is_numeric_dtype(df_processed[col]):
-                    logger.warning(f"列 '{col}' が数値型ではありません: {df_processed[col].dtype}")
-                    # 強制的に数値型に変換
-                    df_processed[col] = clean_numeric_column(df_processed[col], col)
-                    validation_results["info"].append(f"列 '{col}' を数値型に変換しました。")
+                # 非数値データをNaNに変換（エラーを抑制し、後でまとめて処理）
+                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce')
+                    
+                # マイナス値は許容するため、警告は出さない（必要ならログには残す）
+                # negative_vals = (df_processed[col] < 0).sum()
+                # if negative_vals > 0:
+                #     validation_results["info"].append(f"'{col}'列にマイナスの値が {negative_vals} 件ありました。これらは集計に含まれます。")
+    
+                # 数値列のNaNを0で埋める (調整データでNaNが意図しない0になる可能性に注意)
+                # ご指示「病棟コード以外の空白は無視」から、数値列のNaNは0として扱うのが適切か、
+                # あるいは調整項目としてそのまま（NaNのまま）にして後段の集計でよしなに扱うか検討が必要。
+                # ここでは一旦0で埋めるが、調整の性質によっては要再考。
+                na_vals_before_fill = df_processed[col].isna().sum()
+                if na_vals_before_fill > 0:
+                    df_processed[col] = df_processed[col].fillna(0)
+                    validation_results["info"].append(f"数値列'{col}'の欠損値 {na_vals_before_fill} 件を0で補完しました。")
+            else:
+                # 数値列が存在しない場合は0で埋めた列を作成（後段の計算エラーを防ぐため）
+                df_processed[col] = 0
+                validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
+    
+        # --- 列名の統一処理を修正 --- 
+        # 在院患者数 -> 入院患者数（在院）へのリネーム
+        if "在院患者数" in df_processed.columns:
+            # リネーム前に値をコピー (データ保全)
+            df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
+            validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
+            # 元の列も残す (互換性のため)
+            # df_processed.rename(columns={"在院患者数": "入院患者数（在院）"}, inplace=True)
+        elif "入院患者数（在院）" not in df_processed.columns:
+            # いずれもない場合は明示的なエラー
+            validation_results["errors"].append("「在院患者数」または「入院患者数（在院）」列のいずれも存在しません。")
+            df_processed["入院患者数（在院）"] = 0 # エラー回避
+            # 在院患者数も作成 (互換性のため)
+            df_processed["在院患者数"] = 0
+    
+        # --- 派生指標の計算 ---
+        # 総入院患者数 (入院患者数 + 緊急入院患者数)
+        if "入院患者数" in df_processed.columns and "緊急入院患者数" in df_processed.columns:
+            df_processed["総入院患者数"] = df_processed["入院患者数"] + df_processed["緊急入院患者数"]
+        else:
+            validation_results["warnings"].append("「入院患者数」または「緊急入院患者数」列がないため、「総入院患者数」は計算できませんでした。")
+            df_processed["総入院患者数"] = 0 # エラー回避のため0で列作成
+
+        # 総退院患者数 (退院患者数 + 死亡患者数)
+        if "退院患者数" in df_processed.columns and "死亡患者数" in df_processed.columns:
+            df_processed["総退院患者数"] = df_processed["退院患者数"] + df_processed["死亡患者数"]
+        else:
+            validation_results["warnings"].append("「退院患者数」または「死亡患者数」列がないため、「総退院患者数」は計算できませんでした。")
+            df_processed["総退院患者数"] = 0 # エラー回避のため0で列作成
+
+        # 新入院患者数 (総入院患者数と同じと仮定)
+        if "総入院患者数" in df_processed.columns:
+            df_processed["新入院患者数"] = df_processed["総入院患者数"]
+        else:
+            df_processed["新入院患者数"] = 0
+
+        # 平日/休日フラグの追加
+        if '日付' in df_processed.columns:
+            df_processed = add_weekday_flag(df_processed) # 既存のadd_weekday_flag関数を呼び出す
+        else:
+            validation_results["errors"].append("「日付」列がないため、平日/休日フラグを追加できません。")
             
         gc.collect()
         end_time = time.time()
@@ -333,7 +280,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         if not df_processed.empty:
             validation_results["info"].append(f"データ期間: {df_processed['日付'].min().strftime('%Y/%m/%d')} - {df_processed['日付'].max().strftime('%Y/%m/%d')}")
         
-        if df_processed.empty:
+        if df_processed.empty: # 最終的に空になった場合はエラーとする
             validation_results["is_valid"] = False
             validation_results["errors"].append("前処理の結果、有効なデータが残りませんでした。")
             return None, validation_results
@@ -346,7 +293,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         validation_results["is_valid"] = False
         validation_results["errors"].append(f"データの前処理中に予期せぬエラーが発生しました: {str(e)}")
         validation_results["errors"].append(f"詳細: {error_detail}")
-        logger.error(f"前処理エラー: {error_detail}")
+        print(f"前処理エラー: {error_detail}")
         return None, validation_results
 
 def add_weekday_flag(df):
@@ -374,7 +321,7 @@ def add_weekday_flag(df):
     # 平日/休日フラグを追加
     df["平日判定"] = df["日付"].apply(lambda x: "休日" if is_holiday(x) else "平日")
     
-    return df
+    return df  # この行がインデントされていることを確認
     
 def calculate_file_hash(file_content_bytes):
     """
@@ -403,7 +350,7 @@ def calculate_file_hash(file_content_bytes):
             # 通常のハッシュ計算
             return hashlib.md5(file_content_bytes).hexdigest()
     except Exception as e:
-        logger.error(f"ファイルハッシュ計算エラー: {str(e)}")
+        print(f"ファイルハッシュ計算エラー: {str(e)}")
         # エラー時にはファイルサイズとタイムスタンプの組み合わせを返す
         file_size = len(file_content_bytes)
         timestamp = int(time.time())
@@ -440,7 +387,7 @@ def read_excel_cached(file_content_bytes, sheet_name=0, usecols=None, dtype=None
             temp_path = temp_file.name
 
         # 読み込み時のパラメータをログ出力（デバッグ用）
-        logger.info(f"Excel読込: usecols={usecols}, dtype={dtype}")
+        print(f"Excel読込: usecols={usecols}, dtype={dtype}")
         
         # Excelファイルの読み込み
         df = pd.read_excel(
@@ -453,15 +400,15 @@ def read_excel_cached(file_content_bytes, sheet_name=0, usecols=None, dtype=None
         
         # 基本的な検証
         if df.empty:
-            logger.warning(f"読み込まれたExcelファイルが空です: sheet_name={sheet_name}")
+            print(f"警告: 読み込まれたExcelファイルが空です: sheet_name={sheet_name}")
             return None
             
         return df
     except Exception as e:
         # 詳細なエラーメッセージをログに出力
-        logger.error(f"Excel読込エラー: {str(e)}")
+        print(f"Excel読込エラー: {str(e)}")
         import traceback
-        logger.error(traceback.format_exc())
+        print(traceback.format_exc())
         return None
     finally:
         # 確実に一時ファイルを削除
@@ -469,7 +416,7 @@ def read_excel_cached(file_content_bytes, sheet_name=0, usecols=None, dtype=None
             try:
                 os.unlink(temp_path)
             except Exception as e:
-                logger.error(f"一時ファイル削除エラー: {str(e)}")
+                print(f"一時ファイル削除エラー: {str(e)}")
 
 
 def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
@@ -502,15 +449,15 @@ def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
     # base_fileとnew_filesをファイルリストに追加
     if base_file:  # base_fileがNoneでない場合
         files_to_process.append(base_file)
-        logger.info(f"基本ファイルを処理リストに追加: {base_file.name}")
+        print(f"基本ファイルを処理リストに追加: {base_file.name}")
     
     if new_files:  # new_filesがNoneでない、かつ空でない場合
         files_to_process.extend(new_files)
-        logger.info(f"追加ファイル{len(new_files)}件を処理リストに追加")
+        print(f"追加ファイル{len(new_files)}件を処理リストに追加")
 
     # 処理対象ファイルがない場合は空のデータフレームを返す
     if not files_to_process:
-        logger.info("処理対象ファイルがありません。")
+        print("処理対象ファイルがありません。")
         return pd.DataFrame()
 
     # ファイル内容をメモリに読み込む
@@ -522,13 +469,13 @@ def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
             file_contents.append((file_obj.name, file_content))
             file_obj.seek(0)  # ファイルポインタを戻す
             file_size = len(file_content) / (1024 * 1024)  # MBに変換
-            logger.info(f"ファイル読込: {file_obj.name} ({file_size:.2f} MB)")
+            print(f"ファイル読込: {file_obj.name} ({file_size:.2f} MB)")
         except Exception as e:
-            logger.error(f"ファイル読込エラー ({file_obj.name}): {str(e)}")
+            print(f"ファイル読込エラー ({file_obj.name}): {str(e)}")
 
     # 並列処理の設定（最大ワーカー数を制限）
     max_workers = min(4, len(file_contents)) if file_contents else 1
-    logger.info(f"並列処理ワーカー数: {max_workers}")
+    print(f"並列処理ワーカー数: {max_workers}")
     
     # 並列処理でExcelファイルを読み込む
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -547,18 +494,18 @@ def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
                 if df is not None and not df.empty:
                     df_list.append(df)
                     rows, cols = df.shape
-                    logger.info(f"ファイル '{file_name}' の読込成功: {rows}行 × {cols}列")
+                    print(f"ファイル '{file_name}' の読込成功: {rows}行 × {cols}列")
                     successful_files += 1
                 else:
-                    logger.warning(f"ファイル '{file_name}' の読込結果が空です")
+                    print(f"ファイル '{file_name}' の読込結果が空です")
             except Exception as e:
-                logger.error(f"ファイル '{file_name}' の処理中にエラー: {str(e)}")
+                print(f"ファイル '{file_name}' の処理中にエラー: {str(e)}")
                 import traceback
-                logger.error(traceback.format_exc())
+                print(traceback.format_exc())
 
     # 読み込み結果の確認
     if not df_list:
-        logger.warning("読み込み可能なExcelデータがありません。")
+        print("読み込み可能なExcelデータがありません。")
         return pd.DataFrame()
 
     # データフレームの結合
@@ -571,9 +518,9 @@ def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
         # 結果の出力
         end_time = time.time()
         rows, cols = df_raw.shape
-        logger.info(f"データ読込完了: {successful_files}/{len(file_contents)}ファイル成功, {rows}行 × {cols}列, 処理時間: {end_time - start_time:.2f}秒")
+        print(f"データ読込完了: {successful_files}/{len(file_contents)}ファイル成功, {rows}行 × {cols}列, 処理時間: {end_time - start_time:.2f}秒")
         
         return df_raw
     except Exception as e:
-        logger.error(f"データフレーム結合エラー: {str(e)}")
+        print(f"データフレーム結合エラー: {str(e)}")
         return pd.DataFrame()
