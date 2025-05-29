@@ -15,6 +15,13 @@ import psutil
 import time
 from pdf_output_tab import create_pdf_output_tab
 
+# ページ設定（最初に配置）
+st.set_page_config(
+    page_title="入退院分析ダッシュボード",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # カスタムモジュールのインポート
 try:
