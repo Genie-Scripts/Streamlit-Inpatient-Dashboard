@@ -47,7 +47,7 @@ except ImportError as e:
     FORECAST_AVAILABLE = False
     st.stop()
 
-# 必要なライブラリの確認と警告
+# 必要なライブラリの確認と警告（重複削除・統合版）
 def check_forecast_dependencies():
     """予測機能に必要な依存関係をチェック"""
     missing_libs = []
@@ -76,44 +76,6 @@ def check_forecast_dependencies():
         )
     
     return len(missing_libs) == 0
-
-# ページ設定
-st.set_page_config(
-    page_title="入退院分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-def check_forecast_dependencies():
-    """予測機能に必要な依存関係をチェック"""
-    missing_libs = []
-    
-    try:
-        import statsmodels
-    except ImportError:
-        missing_libs.append("statsmodels")
-    
-    try:
-        import pmdarima
-    except ImportError:
-        missing_libs.append("pmdarima")
-    
-    try:
-        import jpholiday
-    except ImportError:
-        missing_libs.append("jpholiday")
-    
-    if missing_libs:
-        st.sidebar.warning(
-            f"予測機能の完全な動作には以下のライブラリが必要です:\n"
-            f"{', '.join(missing_libs)}\n\n"
-            f"インストール方法:\n"
-            f"```\npip install {' '.join(missing_libs)}\n```"
-        )
-    
-    return len(missing_libs) == 0
-
 
 # load_and_process_files 関数を作成（app.py内に定義）
 def load_and_process_files(files):
