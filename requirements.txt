@@ -1,22 +1,59 @@
-setuptools>=60.0.0  # setuptools を先頭にし、比較的新しいバージョンを指定
-streamlit
+# =============================================================================
+# 修正版 requirements.txt - PyArrowエラー完全解決版
+# =============================================================================
+
+# 基盤ライブラリ
+setuptools>=65.0.0
+
+# 🔧 【重要】PyArrowを明示的に追加（StreamlitのPyArrowエラー解決）
+pyarrow>=10.0.0,<15.0.0
+
+# 🔧 【重要】Streamlitを安定版に固定
+streamlit>=1.28.0,<1.40.0
+
+# ビルドツール
 Cython>=0.29,!=0.29.18,!=0.29.31
-numpy==1.24.3 # 引き続きバージョン固定を試す
-pandas>=0.19
-scipy>=1.3.2
-joblib>=0.11
-scikit-learn>=0.22
+
+# 🔧 【修正】NumPy/Pandasの互換性を確保
+numpy==1.24.3
+# 🔧 【重要修正】pandasを新しいバージョンに（古すぎる>=0.19を修正）
+pandas>=1.5.3,<2.2.0
+
+# 科学計算ライブラリ
+scipy>=1.9.0
+joblib>=1.0.0
+scikit-learn>=1.0.0
+
+# 統計・時系列分析
 statsmodels>=0.13.2
-urllib3
-packaging>=17.1
-plotly
-matplotlib
-openpyxl
-python-dateutil
-psutil
-pillow
-reportlab
-jpholiday
-xlsxwriter>=3.0.0
-# pytz は zoneinfo を推奨
 pmdarima==2.0.4
+
+# 可視化
+plotly>=5.0.0
+matplotlib>=3.5.0
+
+# ファイル処理
+openpyxl>=3.0.0
+xlsxwriter>=3.0.0
+
+# ユーティリティ
+python-dateutil>=2.8.0
+psutil>=5.8.0
+pillow>=8.0.0
+packaging>=17.1
+urllib3>=1.26.0
+
+# PDF出力
+reportlab>=3.6.0
+
+# 日本関連
+jpholiday>=0.1.8
+
+# =============================================================================
+# 🔧 主要な修正点:
+# 1. pyarrow を明示的に追加（最重要）
+# 2. streamlit のバージョンを安定版に固定
+# 3. pandas>=0.19 → pandas>=1.5.3 に更新（numpy 1.24.3との互換性確保）
+# 4. 各ライブラリのバージョンを2023年時点の安定版に更新
+# 5. バージョン範囲を現実的な範囲に調整
+# =============================================================================
