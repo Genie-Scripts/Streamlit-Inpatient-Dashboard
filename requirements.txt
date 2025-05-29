@@ -1,59 +1,61 @@
-# =============================================================================
-# 修正版 requirements.txt - PyArrowエラー完全解決版
-# =============================================================================
-
-# 基盤ライブラリ
-setuptools>=65.0.0
-
-# 🔧 【重要】PyArrowを明示的に追加（StreamlitのPyArrowエラー解決）
-pyarrow>=10.0.0,<15.0.0
-
-# 🔧 【重要】Streamlitを安定版に固定
-streamlit>=1.28.0,<1.40.0
-
-# ビルドツール
-Cython>=0.29,!=0.29.18,!=0.29.31
-
-# 🔧 【修正】NumPy/Pandasの互換性を確保
+altair==5.5.0
+attrs==25.3.0
+blinker==1.9.0
+cachetools==5.5.2
+certifi==2025.4.26
+chardet==5.2.0
+charset-normalizer==3.4.2
+click==8.2.1
+contourpy==1.3.2
+cycler==0.12.1
+Cython==3.1.1
+et_xmlfile==2.0.0
+fonttools==4.58.1
+gitdb==4.0.12
+GitPython==3.1.44
+idna==3.10
+Jinja2==3.1.6
+joblib==1.5.1
+jpholiday==1.0.2
+jsonschema==4.24.0
+jsonschema-specifications==2025.4.1
+kiwisolver==1.4.8
+markdown-it-py==3.0.0
+MarkupSafe==3.0.2
+matplotlib==3.10.3
+mdurl==0.1.2
+narwhals==1.41.0
 numpy==1.24.3
-# 🔧 【重要修正】pandasを新しいバージョンに（古すぎる>=0.19を修正）
-pandas>=1.5.3,<2.2.0
-
-# 科学計算ライブラリ
-scipy>=1.9.0
-joblib>=1.0.0
-scikit-learn>=1.0.0
-
-# 統計・時系列分析
-statsmodels>=0.13.2
+openpyxl==3.1.5
+packaging==23.2
+pandas==2.2.3
+patsy==1.0.1
+pillow==10.4.0
+plotly==6.1.2
 pmdarima==2.0.4
-
-# 可視化
-plotly>=5.0.0
-matplotlib>=3.5.0
-
-# ファイル処理
-openpyxl>=3.0.0
-xlsxwriter>=3.0.0
-
-# ユーティリティ
-python-dateutil>=2.8.0
-psutil>=5.8.0
-pillow>=8.0.0
-packaging>=17.1
-urllib3>=1.26.0
-
-# PDF出力
-reportlab>=3.6.0
-
-# 日本関連
-jpholiday>=0.1.8
-
-# =============================================================================
-# 🔧 主要な修正点:
-# 1. pyarrow を明示的に追加（最重要）
-# 2. streamlit のバージョンを安定版に固定
-# 3. pandas>=0.19 → pandas>=1.5.3 に更新（numpy 1.24.3との互換性確保）
-# 4. 各ライブラリのバージョンを2023年時点の安定版に更新
-# 5. バージョン範囲を現実的な範囲に調整
-# =============================================================================
+protobuf==4.25.8
+psutil==7.0.0
+pyarrow==12.0.1
+pydeck==0.9.1
+Pygments==2.19.1
+pyparsing==3.2.3
+python-dateutil==2.9.0.post0
+pytz==2025.2
+referencing==0.36.2
+reportlab==4.4.1
+requests==2.32.3
+rich==13.9.4
+rpds-py==0.25.1
+scikit-learn==1.6.1
+scipy==1.15.3
+six==1.17.0
+smmap==5.0.2
+statsmodels==0.14.4
+streamlit==1.32.2
+tenacity==8.5.0
+threadpoolctl==3.6.0
+toml==0.10.2
+tornado==6.5.1
+typing_extensions==4.13.2
+tzdata==2025.2
+urllib3==2.4.0
