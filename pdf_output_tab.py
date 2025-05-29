@@ -199,62 +199,52 @@ def create_individual_print_section(df, target_data):
 def execute_batch_pdf_generation(df, target_data, batch_pdf_mode_ui, pdf_orientation_landscape_ui,
                                 use_parallel_processing_ui, max_pdf_workers_ui, fast_mode_enabled_ui,
                                 mode_arg_for_batch, reports_to_generate):
+    """一括PDF生成の実行"""
     if reports_to_generate == 0:
         st.warning("出力対象が選択されていないか、対象データがありません。")
         return
 
     progress_bar_placeholder = st.empty()
     status_text_placeholder = st.empty()
-
+    
     def ui_progress_callback(value, text):
         try:
-            progress_bar_placeholder.progress(min(100, int(value)), text=text) # valueが100を超えないように
-        except Exception as e_ui:
-            # UI更新のエラーは無視するか、軽いログに留める
-            # logger.debug(f"UI progress update error: {e_ui}")
+            progress_bar_placeholder.progress(value, text=text)
+        except Exception:
             pass
-
 
     try:
         from batch_processor import batch_generate_pdfs_full_optimized
-        # from pdf_generator import register_fonts # batch_processor に移動または app.py で一度だけ呼ぶ
-        # register_fonts() # アプリ起動時に一度だけ呼ぶのが望ましい
-
+        
         status_text_placeholder.info(
             f"一括PDF生成を開始します... 対象: {batch_pdf_mode_ui}, "
             f"向き: {'横' if pdf_orientation_landscape_ui else '縦'}, "
             f"並列処理: {'有効' if use_parallel_processing_ui else '無効'} (ワーカー: {max_pdf_workers_ui}), "
             f"高速モード: {'有効' if fast_mode_enabled_ui else '無効'}"
         )
-
+        
         overall_start_time = time.time()
-
-        # zip_file_bytes_io, failed_pdf_info = batch_generate_pdfs_full_optimized(...) # failed_pdf_info を受け取る
-        zip_file_bytes_io, failed_pdf_details = batch_generate_pdfs_full_optimized( # 変数名を統一
-            df=df.copy(), # メインのdfはコピーして渡す
+        
+        zip_file_bytes_io = batch_generate_pdfs_full_optimized(
+            df=df.copy(),
             mode=mode_arg_for_batch,
             landscape=pdf_orientation_landscape_ui,
-            target_data=target_data.copy() if target_data is not None else None, # target_dataもコピー
+            target_data=target_data.copy() if target_data is not None else None,
             progress_callback=ui_progress_callback,
             use_parallel=use_parallel_processing_ui,
             max_workers=max_pdf_workers_ui if use_parallel_processing_ui else 1,
             fast_mode=fast_mode_enabled_ui
         )
-
+        
         overall_end_time = time.time()
         duration_sec = overall_end_time - overall_start_time
+        
+        progress_bar_placeholder.empty()
+        status_text_placeholder.empty()
 
-        progress_bar_placeholder.empty() # プログレスバーをクリア
-        status_text_placeholder.empty() # ステータステキストをクリア
-
-        # 成功したPDFの数を計算 (ZIPファイルが空でないかで判断)
-        # より正確には batch_generate_pdfs_mp_optimized から成功数を返す
-        # ここでは、失敗情報がなければ全て成功とみなすか、ZIPの内容で判断
-        num_successful_pdfs = reports_to_generate - len(failed_pdf_details)
-
-        if zip_file_bytes_io and zip_file_bytes_io.getbuffer().nbytes > 22: # ZIPファイルが空でないことを確認 (空のZIPは約22バイト)
+        if zip_file_bytes_io and zip_file_bytes_io.getbuffer().nbytes > 22:
             zip_filename = f"入院患者数予測_一括_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}{'_横' if pdf_orientation_landscape_ui else '_縦'}.zip"
-
+            
             col_dl_btn, col_dl_info = st.columns([1, 2])
             with col_dl_btn:
                 st.download_button(
@@ -262,39 +252,26 @@ def execute_batch_pdf_generation(df, target_data, batch_pdf_mode_ui, pdf_orienta
                     data=zip_file_bytes_io.getvalue(),
                     file_name=zip_filename,
                     mime="application/zip",
-                    key="download_batch_zip_final_button_v2", # キーを更新
+                    key="download_batch_zip_final_button",
                     use_container_width=True
                 )
             with col_dl_info:
-                st.success(f"{num_successful_pdfs}件のPDF生成に成功しました。(処理時間: {duration_sec:.1f}秒)")
+                st.success(f"一括PDF生成完了！ (処理時間: {duration_sec:.1f}秒)")
                 st.caption(f"ファイル名: {zip_filename}")
-                st.caption(f"ZIPサイズ: {zip_file_bytes_io.getbuffer().nbytes / (1024*1024):.2f} MB")
-
-            del zip_file_bytes_io # メモリ解放
+                st.caption(f"サイズ: {zip_file_bytes_io.getbuffer().nbytes / (1024*1024):.2f} MB")
+            
+            del zip_file_bytes_io
             gc.collect()
-        elif num_successful_pdfs > 0 : # ZIPが空でも一部成功している場合（個別保存など別の方法で対応する場合）
-             st.info(f"{num_successful_pdfs}件のPDFは内部的に生成されましたが、ZIPファイルの作成に問題があった可能性があります。")
-        else: # 全て失敗した場合
-            st.error("PDFファイルの生成に失敗しました。詳細はログを確認してください。")
-
-
-        # 失敗したPDFの情報があれば表示
-        if failed_pdf_details:
-            st.warning(f"{len(failed_pdf_details)}件のPDF生成に失敗しました。")
-            with st.expander("失敗したPDFリストと理由"):
-                for item in failed_pdf_details:
-                    st.markdown(f"- **{item['name']}**: `{item['reason']}`")
-        elif num_successful_pdfs == reports_to_generate and num_successful_pdfs > 0 :
-             st.success("全ての一括PDF生成が完了しました！")
-
+        else:
+            st.error("PDFファイルの生成に失敗しました。")
 
     except Exception as ex:
-        # メインの呼び出し側でもエラーをキャッチ
-        logger.error(f"一括PDF生成の実行中に予期せぬエラー: {ex}", exc_info=True)
-        st.error(f"一括PDF生成で予期せぬエラーが発生しました: {ex}")
-        # st.error(traceback.format_exc()) # これはデバッグ時のみ
-        if progress_bar_placeholder: progress_bar_placeholder.empty()
-        if status_text_placeholder: status_text_placeholder.empty()
+        st.error(f"一括PDF生成でエラーが発生しました: {ex}")
+        st.error(traceback.format_exc())
+        if progress_bar_placeholder:
+            progress_bar_placeholder.empty()
+        if status_text_placeholder:
+            status_text_placeholder.empty()
 
 def generate_and_preview_pdf(df, target_data, print_target, target_code, target_name, print_orientation):
     """PDF生成とプレビュー"""
