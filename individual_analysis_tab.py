@@ -311,9 +311,14 @@ def display_individual_analysis_tab():
         # --- 在院患者数予測 ---
         st.markdown("##### 在院患者数予測")
         if create_forecast_dataframe and \
-           current_results_data.get("weekday") is not None and \
-           current_results_data.get("holiday") is not None:
-            forecast_df_ind = create_forecast_dataframe(current_results_data["weekday"], current_results_data["holiday"], latest_data_date)
+            current_results_data.get("weekday") is not None and \
+            current_results_data.get("holiday") is not None:
+            forecast_df_ind = create_forecast_dataframe(
+                current_results_data.get("summary"),  # df_summary を渡す
+                current_results_data.get("weekday"),
+                current_results_data.get("holiday"),
+                latest_data_date  # today 引数
+            )
             if forecast_df_ind is not None and not forecast_df_ind.empty:
                 display_df_ind = forecast_df_ind.copy()
                 if "年間平均人日（実績＋予測）" in display_df_ind.columns:
@@ -342,8 +347,12 @@ def display_individual_analysis_tab():
         
         pdf_forecast_df_data = pd.DataFrame() # 初期化
         if create_forecast_dataframe and current_results_data.get("weekday") is not None and current_results_data.get("holiday") is not None:
-             pdf_forecast_df_data = create_forecast_dataframe(current_results_data["weekday"], current_results_data["holiday"], latest_data_date)
-
+             pdf_forecast_df_data = create_forecast_dataframe(
+                current_results_data.get("summary"),  # df_summary を渡す
+                current_results_data.get("weekday"),
+                current_results_data.get("holiday"),
+                latest_data_date  # today 引数
+            )
         with pdf_col1:
             if create_pdf and st.button("📄 縦向きPDF出力", key="ind_single_pdf_button_widget", use_container_width=True):
                 with st.spinner(f'{current_filter_title_display}の縦向きPDFを生成中...'):
