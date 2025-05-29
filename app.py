@@ -1,3 +1,4 @@
+# ★ 最初に必要な基本インポートのみ
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,7 +6,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
-import jpholiday
 import io
 import zipfile
 import tempfile
@@ -13,64 +13,8 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import psutil
 import time
-from pdf_output_tab import create_pdf_output_tab
 
-
-# カスタムモジュールのインポート
-try:
-    from integrated_preprocessing import integrated_preprocess_data
-    from loader import load_files, read_excel_cached
-    from revenue_dashboard_tab import create_revenue_dashboard_section
-    from analysis_tabs import create_detailed_analysis_tab, create_data_tables_tab, create_output_prediction_tab
-    from data_processing_tab import create_data_processing_tab
-    
-    # 予測機能のインポート（新規追加）
-    from forecast_analysis_tab import display_forecast_analysis_tab
-    FORECAST_AVAILABLE = True
-
-except ImportError as e:
-    st.error(f"必要なモジュールのインポートに失敗しました: {e}")
-    st.error("以下のファイルが存在することを確認してください：")
-    st.error("- integrated_preprocessing.py")
-    st.error("- loader.py") 
-    st.error("- revenue_dashboard_tab.py")
-    st.error("- analysis_tabs.py")
-    st.error("- data_processing_tab.py")
-    st.error("- forecast_analysis_tab.py (予測機能)")  # 追加
-    FORECAST_AVAILABLE = False
-    st.stop()
-
-# 必要なライブラリの確認と警告
-def check_forecast_dependencies():
-    """予測機能に必要な依存関係をチェック"""
-    missing_libs = []
-    
-    try:
-        import statsmodels
-    except ImportError:
-        missing_libs.append("statsmodels")
-    
-    try:
-        import pmdarima
-    except ImportError:
-        missing_libs.append("pmdarima")
-    
-    try:
-        import jpholiday
-    except ImportError:
-        missing_libs.append("jpholiday")
-    
-    if missing_libs:
-        st.sidebar.warning(
-            f"予測機能の完全な動作には以下のライブラリが必要です:\n"
-            f"{', '.join(missing_libs)}\n\n"
-            f"インストール方法:\n"
-            f"```\npip install {' '.join(missing_libs)}\n```"
-        )
-    
-    return len(missing_libs) == 0
-
-# ページ設定
+# ★ 最優先でページ設定（他の一切のStreamlitコマンドより前）
 st.set_page_config(
     page_title="入退院分析ダッシュボード",
     page_icon="🏥",
@@ -78,8 +22,55 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ★ ページ設定後に条件付きインポート
+try:
+    import jpholiday
+    JPHOLIDAY_AVAILABLE = True
+except ImportError:
+    JPHOLIDAY_AVAILABLE = False
+
+# ★ カスタムモジュールのインポート（エラーハンドリング付き）
+FORECAST_AVAILABLE = False
+import_errors = []
+
+try:
+    from pdf_output_tab import create_pdf_output_tab
+except ImportError as e:
+    import_errors.append(f"PDF出力機能: {e}")
+
+try:
+    from integrated_preprocessing import integrated_preprocess_data
+    from loader import load_files, read_excel_cached
+    from data_processing_tab import create_data_processing_tab
+except ImportError as e:
+    import_errors.append(f"データ処理機能: {e}")
+
+try:
+    from revenue_dashboard_tab import create_revenue_dashboard_section
+except ImportError as e:
+    import_errors.append(f"収益ダッシュボード機能: {e}")
+
+try:
+    from analysis_tabs import create_detailed_analysis_tab, create_data_tables_tab, create_output_prediction_tab
+except ImportError as e:
+    import_errors.append(f"分析機能: {e}")
+
+try:
+    from forecast_analysis_tab import display_forecast_analysis_tab
+    FORECAST_AVAILABLE = True
+except ImportError as e:
+    import_errors.append(f"予測機能: {e}")
+    FORECAST_AVAILABLE = False
+
+# ★ インポートエラーがある場合は警告表示（ページ設定後なので問題なし）
+if import_errors:
+    st.sidebar.warning("⚠️ 一部機能が利用できません:")
+    for error in import_errors:
+        st.sidebar.error(error)
+
+# ★ 依存関係チェック関数（Streamlitコマンドを使わない版）
 def check_forecast_dependencies():
-    """予測機能に必要な依存関係をチェック"""
+    """予測機能に必要な依存関係をチェック（Streamlitコマンドなし）"""
     missing_libs = []
     
     try:
@@ -92,11 +83,13 @@ def check_forecast_dependencies():
     except ImportError:
         missing_libs.append("pmdarima")
     
-    try:
-        import jpholiday
-    except ImportError:
+    if not JPHOLIDAY_AVAILABLE:
         missing_libs.append("jpholiday")
     
+    return len(missing_libs) == 0, missing_libs
+
+def display_forecast_dependencies_warning(missing_libs):
+    """予測機能の依存関係警告を表示（分離した関数）"""
     if missing_libs:
         st.sidebar.warning(
             f"予測機能の完全な動作には以下のライブラリが必要です:\n"
@@ -104,9 +97,6 @@ def check_forecast_dependencies():
             f"インストール方法:\n"
             f"```\npip install {' '.join(missing_libs)}\n```"
         )
-    
-    return len(missing_libs) == 0
-
 
 # load_and_process_files 関数を作成（app.py内に定義）
 def load_and_process_files(files):
@@ -715,7 +705,7 @@ def create_sidebar():
             avg_admission_fee > 0 and
             monthly_target_patient_days > 0 and 
             monthly_target_admissions > 0)
-            
+
 def create_management_dashboard_tab():
     """経営ダッシュボードタブの作成（期間選択機能付き）"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
@@ -1362,8 +1352,6 @@ def main():
         st.session_state['data_processed'] = False
     if 'df' not in st.session_state:
         st.session_state['df'] = None
-
-    # 予測関連のセッションステート初期化（新規追加）
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
     if 'forecast_annual_summary_df' not in st.session_state:
@@ -1380,18 +1368,17 @@ def main():
     if not settings_valid:
         st.stop()
     
-    # メインタブ（6タブ構成に変更 - 予測分析タブを追加）
+    # メインタブ
     if FORECAST_AVAILABLE:
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 データ処理",
             "💰 経営ダッシュボード", 
-            "🔮 予測分析",         # 新規追加
+            "🔮 予測分析",
             "📈 詳細分析",
             "📋 データテーブル",
             "📄 出力・予測"
         ])
     else:
-        # 予測機能が利用できない場合は従来の5タブ
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 データ処理",
             "💰 経営ダッシュボード", 
@@ -1402,21 +1389,21 @@ def main():
 
     # データ処理タブ
     with tab1:
-        # data_processing_tab.pyの関数を使用
         try:
-            create_data_processing_tab()
-            
-            # 最新データ日付の更新（予測機能用）
-            if (st.session_state.get('data_processed', False) and 
-                st.session_state.get('df') is not None):
-                df = st.session_state['df']
-                if '日付' in df.columns:
-                    latest_date = df['日付'].max()
-                    st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
-                    
+            if 'create_data_processing_tab' in globals():
+                create_data_processing_tab()
+                
+                # 最新データ日付の更新
+                if (st.session_state.get('data_processed', False) and 
+                    st.session_state.get('df') is not None):
+                    df = st.session_state['df']
+                    if '日付' in df.columns:
+                        latest_date = df['日付'].max()
+                        st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
+            else:
+                st.error("データ処理機能が利用できません。")
         except Exception as e:
             st.error(f"データ処理タブでエラーが発生しました: {str(e)}")
-            st.info("データ処理機能に問題があります。開発者に連絡してください。")
     
     # データが処理されている場合のみ他のタブを有効化
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
@@ -1425,13 +1412,20 @@ def main():
         with tab2:
             create_management_dashboard_tab()
         
-        # 予測分析タブ（新規追加）
+        # 予測分析タブ
         if FORECAST_AVAILABLE:
             with tab3:
-                # 依存関係のチェック
-                deps_ok = check_forecast_dependencies()
+                deps_ok, missing_libs = check_forecast_dependencies()
                 
-                if not deps_ok:
+                # 依存関係警告の表示
+                display_forecast_dependencies_warning(missing_libs)
+                
+                if deps_ok:
+                    try:
+                        display_forecast_analysis_tab()
+                    except Exception as e:
+                        st.error(f"予測分析でエラーが発生しました: {str(e)}")
+                else:
                     st.info("📋 予測機能を使用するには上記のライブラリをインストールしてください。")
                     st.markdown("""
                     ### 🔮 予測機能について
@@ -1449,50 +1443,68 @@ def main():
                     
                     各モデルで年度末までの患者数を予測し、年度総患者数を算出します。
                     """)
-                else:
-                    display_forecast_analysis_tab()
             
-            # 詳細分析タブ（インデックス調整）
+            # 詳細分析タブ
             with tab4:
                 try:
-                    create_detailed_analysis_tab()
+                    if 'create_detailed_analysis_tab' in globals():
+                        create_detailed_analysis_tab()
+                    else:
+                        st.info("詳細分析機能は開発中です。")
                 except Exception as e:
                     st.error(f"詳細分析タブでエラーが発生しました: {str(e)}")
-                    st.info("詳細分析機能は開発中です。")
             
-            # データテーブルタブ（インデックス調整）
+            # データテーブルタブ
             with tab5:
                 try:
-                    create_data_tables_tab()
+                    if 'create_data_tables_tab' in globals():
+                        create_data_tables_tab()
+                    else:
+                        st.info("データテーブル機能は開発中です。")
                 except Exception as e:
                     st.error(f"データテーブルタブでエラーが発生しました: {str(e)}")
-                    st.info("データテーブル機能は開発中です。")
             
-            # 出力・予測タブ（インデックス調整）
+            # 出力タブ
             with tab6:
-                create_pdf_output_tab()
+                try:
+                    if 'create_pdf_output_tab' in globals():
+                        create_pdf_output_tab()
+                    else:
+                        st.info("PDF出力機能は開発中です。")
+                except Exception as e:
+                    st.error(f"出力タブでエラーが発生しました: {str(e)}")
         
         else:
-            # 予測機能が利用できない場合（従来の構成）
+            # 予測機能が利用できない場合
             with tab3:
                 try:
-                    create_detailed_analysis_tab()
+                    if 'create_detailed_analysis_tab' in globals():
+                        create_detailed_analysis_tab()
+                    else:
+                        st.info("詳細分析機能は開発中です。")
                 except Exception as e:
                     st.error(f"詳細分析タブでエラーが発生しました: {str(e)}")
-                    st.info("詳細分析機能は開発中です。")
             
             with tab4:
                 try:
-                    create_data_tables_tab()
+                    if 'create_data_tables_tab' in globals():
+                        create_data_tables_tab()
+                    else:
+                        st.info("データテーブル機能は開発中です。")
                 except Exception as e:
                     st.error(f"データテーブルタブでエラーが発生しました: {str(e)}")
-                    st.info("データテーブル機能は開発中です。")
             
             with tab5:  
-                create_pdf_output_tab()
+                try:
+                    if 'create_pdf_output_tab' in globals():
+                        create_pdf_output_tab()
+                    else:
+                        st.info("PDF出力機能は開発中です。")
+                except Exception as e:
+                    st.error(f"出力タブでエラーが発生しました: {str(e)}")
     
     else:
-        # データ未処理の場合の表示（調整）
+        # データ未処理の場合の表示
         with tab2:
             st.info("💰 データを読み込み後、収益管理ダッシュボードが利用可能になります。")
         
@@ -1504,14 +1516,26 @@ def main():
             with tab5:
                 st.info("📋 データを読み込み後、データテーブルが利用可能になります。")
             with tab6:
-                create_pdf_output_tab()
+                try:
+                    if 'create_pdf_output_tab' in globals():
+                        create_pdf_output_tab()
+                    else:
+                        st.info("PDF出力機能は開発中です。")
+                except Exception as e:
+                    st.error(f"出力機能でエラーが発生しました: {str(e)}")
         else:
             with tab3:
                 st.info("📈 データを読み込み後、詳細分析が利用可能になります。")
             with tab4:
                 st.info("📋 データを読み込み後、データテーブルが利用可能になります。")
             with tab5:  
-                create_pdf_output_tab()
+                try:
+                    if 'create_pdf_output_tab' in globals():
+                        create_pdf_output_tab()
+                    else:
+                        st.info("PDF出力機能は開発中です。")
+                except Exception as e:
+                    st.error(f"出力機能でエラーが発生しました: {str(e)}")
             
     # フッター
     st.markdown("---")
