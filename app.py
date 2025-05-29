@@ -10,15 +10,6 @@ import io
 import zipfile
 import tempfile
 import os
-import logging
-
-# ロギング設定 (既にあればこの形式に合わせるか、既存の設定を使用)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__) # app.py 用のロガーを作成
-
 try:
     import jpholiday
     JPHOLIDAY_AVAILABLE = True
@@ -60,6 +51,7 @@ inject_global_css(1.0)  # style.pyの関数を使用
 # 削除したCSSはapp_backupに保存
 
 from pdf_output_tab import create_pdf_output_tab
+from persistent_data import auto_load_persistent_data, get_persistent_data_info
 
 # カスタムモジュールのインポート
 try:
@@ -157,6 +149,21 @@ def create_sidebar():
     """, unsafe_allow_html=True)
     
     st.sidebar.header("⚙️ 設定")
+    
+    # ===== 追加：データ状況表示 =====
+    if st.session_state.get('data_loaded_from_persistent', False):
+        with st.sidebar.expander("💾 データ状況", expanded=True):
+            info = get_persistent_data_info()
+            if info.get('exists'):
+                st.success("✅ 保存データ使用中")
+                st.caption(f"📊 {info.get('record_count', 0):,}件のデータ")
+                
+                if isinstance(info.get('save_timestamp'), datetime):
+                    update_time = info['save_timestamp'].strftime('%Y-%m-%d %H:%M')
+                    st.caption(f"🕐 最終更新: {update_time}")
+                
+                if st.button("🔄 データ処理タブで管理", key="goto_data_tab"):
+                    st.info("「📊 データ処理」タブでデータの更新・管理が可能です。")
 
     # デバッグ: セッション状態の型をチェック
     if st.sidebar.checkbox("🔧 デバッグ情報を表示", value=False):
@@ -458,74 +465,6 @@ def create_management_dashboard_tab():
     
     df = st.session_state['df']
     
-    st.markdown("---")
-    # st.subheaderが表示されるかどうかも重要な手がかり
-    st.subheader("🧪 「入院患者数（在院）」列 単独テスト") 
-    logger.info("単独テスト: st.subheader 呼び出し後")
-
-    if df is not None:
-        column_to_test = "入院患者数（在院）"
-        if column_to_test in df.columns:
-            test_df = df[[column_to_test]].copy()
-            logger.info(f"単独テストDF作成後 - 列 '{column_to_test}': dtype={test_df[column_to_test].dtype}, unique_values={test_df[column_to_test].unique()[:20]}")
-            
-            st.write(f"「{column_to_test}」列のみのデータフレームに対するテストを開始します:")
-            logger.info("単独テスト: st.write 呼び出し後")
-
-            # テスト1: st.table() での表示 (Arrow変換を経由しない)
-            try:
-                logger.info("単独テスト: st.table(test_df.head()) を試行")
-                st.write("テスト1: `st.table()` での表示（先頭5行）")
-                st.table(test_df.head())
-                st.success("テスト1: `st.table()` での表示に成功しました。")
-                logger.info("単独テスト: st.table(test_df.head()) の呼び出し成功")
-            except Exception as e_table:
-                logger.error(f"単独テスト (st.table) でエラー: {e_table}")
-                st.error(f"テスト1 (`st.table`) でエラーが発生: {e_table}")
-
-            # テスト2: st.dataframe() の直前で再度型変換 (念のため)
-            try:
-                logger.info("単独テスト: st.dataframe(test_df) を試行（再変換あり）")
-                st.write("テスト2: `st.dataframe()` での表示（表示直前に再変換）")
-                
-                # 表示直前での超明示的な型変換
-                test_df_explicit = test_df.copy() # 元のtest_dfに影響を与えないようにコピー
-                test_df_explicit[column_to_test] = pd.to_numeric(test_df_explicit[column_to_test], errors='coerce').fillna(0.0)
-                test_df_explicit[column_to_test] = test_df_explicit[column_to_test].astype('float64')
-                logger.info(f"単独テストDF再変換後 - 列 '{column_to_test}': dtype={test_df_explicit[column_to_test].dtype}, unique_values={test_df_explicit[column_to_test].unique()[:20]}")
-                
-                st.dataframe(test_df_explicit) # 再変換したデータフレームで表示
-                st.success("テスト2: `st.dataframe()` での表示（再変換後）に成功しました。")
-                logger.info("単独テスト: st.dataframe(test_df_explicit) の呼び出し成功")
-            except pyarrow.lib.ArrowInvalid as pa_error: # PyArrowエラーを明示的にキャッチ
-                logger.error(f"単独テストDF表示でPyArrowエラー発生 (st.dataframe): {pa_error}")
-                st.error(f"テスト2 (`st.dataframe`) でPyArrowエラー: {pa_error}")
-                import traceback
-                st.code(traceback.format_exc())
-            except Exception as e_df: # その他のエラー
-                logger.error(f"単独テストDF表示で一般エラー発生 (st.dataframe): {e_df}")
-                st.error(f"テスト2 (`st.dataframe`) で一般エラー: {e_df}")
-                import traceback
-                st.code(traceback.format_exc())
-        else:
-            # このelse節のst.warningが表示されないのは、if条件がTrueだから、というのは前回確認済み
-            st.warning(f"テスト対象の「{column_to_test}」列がデータフレームに存在しません。(このメッセージは表示されないはず)")
-            logger.warning(f"単独テスト(予期せぬelse) - 「{column_to_test}」列が見つかりません。利用可能な列: " + str(df.columns.tolist()))
-    else:
-        st.warning("単独テストブロック - st.session_state['df'] が None です。(このメッセージは表示されないはず)")
-        logger.warning("単独テストブロック(予期せぬelse) - st.session_state['df'] が None です。")
-    
-    st.markdown("---")
-    # logger.info("単独テストブロック終了。これから経営ダッシュボードのメイン処理。") #区切り
-    # st.header("💰 経営ダッシュボード") # 元の処理に戻る
-    
-    # ★★★ デバッグログ追加箇所 2 ★★★
-    if "入院患者数（在院）" in df.columns:
-        logger.info(f"経営ダッシュボードタブ開始時 - 列 '入院患者数（在院）': dtype={df['入院患者数（在院）'].dtype}, unique_values={df['入院患者数（在院）'].unique()[:20]}")
-    else:
-        logger.info("経営ダッシュボードタブ開始時 - 列 '入院患者数（在院）' はdfに存在しません。")
-    # ★★★ ここまで ★★★
-    
     st.header("💰 経営ダッシュボード")
     
     # 期間選択UI
@@ -543,19 +482,15 @@ def create_management_dashboard_tab():
     
     st.markdown("---")
     
-    # ▼▼▼▼▼ ここからコメントアウト ▼▼▼▼▼
-    """
-    # metrics = calculate_dashboard_metrics(df, selected_period) # この行をコメントアウト
+    # ✅ 修正版のメトリクス計算を使用
+    metrics = calculate_dashboard_metrics(df, selected_period)
     
-    # if not metrics: # metrics を使っているので、この if ブロック全体もコメントアウト
-    #     st.error("データの計算に失敗しました。")
-    #     return
-    """
-    # ▲▲▲▲▲ ここまでコメントアウト ▲▲▲▲▲    
+    if not metrics:
+        st.error("データの計算に失敗しました。")
+        return
+    
     # 色分けされた統一レイアウトで数値表示
-    """
     display_unified_metrics_layout_colorized(metrics, selected_period)
-    """
     
 # 色の定義（参考用）
 DASHBOARD_COLORS = {
@@ -919,6 +854,14 @@ def main():
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
 
+    # ===== 追加：アプリ起動時の自動データ読み込み =====
+    if not st.session_state.get('auto_load_attempted', False):
+        # データの自動読み込み試行
+        if auto_load_persistent_data():
+            # 成功時は通知なし（data_processing_tab.pyで処理）
+            pass
+        st.session_state['auto_load_attempted'] = True
+
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
     
@@ -962,20 +905,12 @@ def main():
     # データ処理タブ（tabs[0] - 変更なし）
     with tabs[0]:
         try:
-            create_data_processing_tab() # この中で integrated_preprocess_data が呼ばれ、st.session_state['df'] が設定されると仮定
+            create_data_processing_tab()
             
             # データ処理後のマッピング初期化
             if (st.session_state.get('data_processed', False) and 
                 st.session_state.get('df') is not None):
-                df = st.session_state['df'] # df に st.session_state['df'] を代入
-                
-                # ★★★ デバッグログ追加箇所 1 ★★★
-                if "入院患者数（在院）" in df.columns:
-                    logger.info(f"main()後データ処理完了直後 - 列 '入院患者数（在院）': dtype={df['入院患者数（在院）'].dtype}, unique_values={df['入院患者数（在院）'].unique()[:20]}")
-                else:
-                    logger.info("main()後データ処理完了直後 - 列 '入院患者数（在院）' はdfに存在しません。")
-                # ★★★ ここまで ★★★
-                
+                df = st.session_state['df']
                 target_data = st.session_state.get('target_data')
                 
                 # マッピングの初期化
@@ -992,16 +927,6 @@ def main():
     # データ処理済みの場合のみ他のタブを有効化
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         
-        # ★★★ デバッグログ追加箇所 1 (代替) ★★★
-        # もし上記の箇所でログが出ない（st.session_state['df']がまだNoneの）場合、
-        # この if ブロックの直下に移動しても良いかもしれません。
-        # df_check = st.session_state['df']
-        # if "入院患者数（在院）" in df_check.columns:
-        #     logger.info(f"main()後データ処理確認後 - 列 '入院患者数（在院）': dtype={df_check['入院患者数（在院）'].dtype}, unique_values={df_check['入院患者数（在院）'].unique()[:20]}")
-        # else:
-        #     logger.info("main()後データ処理確認後 - 列 '入院患者数（在院）' はdfに存在しません。")
-        # ★★★ ここまで ★★★
-
         # 経営ダッシュボードタブ（tabs[1] - 変更なし）
         with tabs[1]:
             try:
