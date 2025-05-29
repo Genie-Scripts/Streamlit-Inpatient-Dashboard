@@ -31,7 +31,7 @@ packaging==23.2
 pandas==2.2.3
 patsy==1.0.1
 pillow==10.4.0
-plotly>=5.15.0
+plotly==5.15.0
 pmdarima==2.0.4
 protobuf==4.25.8
 psutil==7.0.0
