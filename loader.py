@@ -9,7 +9,6 @@ from io import BytesIO
 import time  # time モジュールを追加
 import gc  # gc モジュールを追加
 
-
 def calculate_file_hash(file_content_bytes):
     """
     ファイルのハッシュ値を計算して一意の識別子を作成
