@@ -564,6 +564,7 @@ def create_sidebar_data_settings():
                     st.error(f"読み込みエラー: {e}")
 
 def create_sidebar():
+    """サイドバーの設定UI（改修版）"""
     # データ設定セクション
     create_sidebar_data_settings()
     
@@ -572,58 +573,7 @@ def create_sidebar():
     
     # 期間設定セクション（統合版）
     create_sidebar_period_settings()
-
-    # 基本設定セクション（従来と同じ）
-    with st.sidebar.expander("🏥 基本設定", expanded=True):        if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
-            df = st.session_state.df
-            min_date = df['日付'].min().date()
-            max_date = df['日付'].max().date()
-            
-            # デフォルト期間設定
-            default_start = max(min_date, max_date - pd.Timedelta(days=DEFAULT_ANALYSIS_DAYS))
-            default_end = max_date
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                start_date = st.date_input(
-                    "開始日",
-                    value=st.session_state.get('analysis_start_date', default_start),
-                    min_value=min_date,
-                    max_value=max_date,
-                    help="分析開始日を選択してください"
-                )
-                st.session_state.analysis_start_date = start_date
-                
-            with col2:
-                end_date = st.date_input(
-                    "終了日",
-                    value=st.session_state.get('analysis_end_date', default_end),
-                    min_value=min_date,
-                    max_value=max_date,
-                    help="分析終了日を選択してください"
-                )
-                st.session_state.analysis_end_date = end_date
-            
-            # 期間妥当性チェック
-            if start_date <= end_date:
-                period_days = (end_date - start_date).days + 1
-                st.info(f"選択期間: {period_days}日間")
-                
-                # 期間別推奨表示
-                if period_days <= 7:
-                    st.info("💡 短期間分析: 日別詳細分析に適しています")
-                elif period_days <= 30:
-                    st.info("💡 月次分析: 週別・日別分析に適しています")
-                elif period_days <= 90:
-                    st.info("💡 四半期分析: 月別・週別分析に適しています")
-                else:
-                    st.info("💡 長期分析: 月別・四半期分析に適しています")
-            else:
-                st.error("開始日は終了日より前の日付を選択してください。")
-                
-        else:
-            st.info("データを読み込み後に期間設定が利用できます。")
-
+    
     # 基本設定セクション
     with st.sidebar.expander("🏥 基本設定", expanded=True):
         # 設定値の自動読み込み
@@ -740,7 +690,6 @@ def create_sidebar():
 
     return (total_beds > 0 and bed_occupancy_rate > 0 and 
             avg_length_of_stay > 0 and avg_admission_fee > 0)
-
 def create_management_dashboard_tab():
     """経営ダッシュボードタブ（期間設定統合版）"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
