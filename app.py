@@ -330,12 +330,13 @@ def create_sidebar():
             "目標病床稼働率 (%)", 
             min_value=int(HOSPITAL_SETTINGS['min_occupancy_rate'] * 100), 
             max_value=int(HOSPITAL_SETTINGS['max_occupancy_rate'] * 100), 
-            value=int(get_safe_value('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE * 100)),
+            value=st.session_state.get('bed_occupancy_rate_percent', int(DEFAULT_OCCUPANCY_RATE * 100)),
             step=1,
             help="目標とする病床稼働率を設定してください"
         ) / 100
         st.session_state.bed_occupancy_rate = bed_occupancy_rate
-        
+        st.session_state.bed_occupancy_rate_percent = int(bed_occupancy_rate * 100)
+       
         avg_length_of_stay = st.number_input(
             "平均在院日数", 
             min_value=HOSPITAL_SETTINGS['min_avg_stay'], 

@@ -161,34 +161,3 @@ def display_department_tables_tab(department_type: str):
                 st.warning(f"{header_title_suffix}別テーブルデータの生成に失敗しました。")
     else:
         st.error("テーブル生成関数 (generate_department_table) が利用できません。")
-
-# このファイルが直接実行された場合のテスト用コード (通常は app.py から呼び出す)
-# if __name__ == '__main__':
-#     # Streamlitのセッションステートを模倣するためのダミー設定
-#     st.session_state.data_processed = True
-#     # ダミーのDataFrameを作成
-#     sample_dates = pd.to_datetime(['2023-01-01', '2023-01-01', '2023-01-02', '2023-01-02'])
-#     st.session_state.df = pd.DataFrame({
-#         '日付': sample_dates,
-#         '病棟コード': ['A1', 'A1', 'A1', 'A2'],
-#         '診療科名': ['内科', '外科', '内科', '外科'],
-#         '入院患者数（在院）': [10, 5, 12, 6],
-#         '総入院患者数': [2, 1, 3, 1],
-#         '総退院患者数': [1, 0, 2, 1],
-#         '病床数': [20, 20, 20, 15] # ダミーの病床数
-#     })
-#     st.session_state.target_data = pd.DataFrame({ # ダミーの目標値データ
-#         '部門コード': ['A1', '内科', '外科', 'A2'],
-#         '部門名': ['A1病棟', '内科', '外科', 'A2病棟'],
-#         '目標ALOS': [10.0, 12.0, 15.0, 9.0],
-#         '目標病床利用率': [85.0, 80.0, 75.0, 90.0],
-#         '病床数': [20, 50, 40, 15] # 部門レベルの病床数
-#     })
-#     st.session_state.latest_data_date_str = '2023年01月02日'
-#     st.session_state.sidebar_start_date = pd.to_datetime('2023-01-01').date()
-#     st.session_state.sidebar_end_date = pd.to_datetime('2023-01-02').date()
-#     st.session_state.show_all_depts = True # 診療科表示設定のダミー
-
-#     st.title("部門別テーブルテスト")
-#     display_department_tables_tab(department_type='ward')
-#     display_department_tables_tab(department_type='clinical')
