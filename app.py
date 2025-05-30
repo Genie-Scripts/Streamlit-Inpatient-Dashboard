@@ -53,6 +53,149 @@ except ImportError as e:
     FORECAST_AVAILABLE = False
     st.stop()
 
+from data_persistence import (
+    auto_load_data, save_data_to_file, load_data_from_file, 
+    get_data_info, delete_saved_data, get_file_sizes,
+    save_settings_to_file, load_settings_from_file,
+    get_backup_info, restore_from_backup
+
+def create_sidebar_period_settings():
+    """サイドバーの期間設定（改修版）"""
+    with st.sidebar.expander("📅 分析期間設定", expanded=True):
+        if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
+            df = st.session_state.df
+            min_date = df['日付'].min().date()
+            max_date = df['日付'].max().date()
+            
+            # 期間設定モード選択
+            period_mode = st.radio(
+                "期間設定方法",
+                ["プリセット期間", "カスタム期間"],
+                key="period_mode",
+                help="プリセットまたはカスタム期間を選択"
+            )
+            
+            if period_mode == "プリセット期間":
+                preset_period = st.selectbox(
+                    "期間選択",
+                    PERIOD_OPTIONS,
+                    index=0,
+                    key="global_preset_period",
+                    help="事前定義された期間から選択"
+                )
+                st.session_state.analysis_period_type = "preset"
+                st.session_state.analysis_preset_period = preset_period
+                
+                # プリセット期間に基づく日付計算
+                start_date, end_date = calculate_preset_period_dates(df, preset_period)
+                st.session_state.analysis_start_date = start_date
+                st.session_state.analysis_end_date = end_date
+                
+                st.info(f"📊 期間: {start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')}")
+                
+            else:  # カスタム期間
+                col1, col2 = st.columns(2)
+                with col1:
+                    start_date = st.date_input(
+                        "開始日",
+                        value=st.session_state.get('analysis_start_date', max_date - pd.Timedelta(days=30)),
+                        min_value=min_date,
+                        max_value=max_date,
+                        key="custom_start_date",
+                        help="分析開始日を選択してください"
+                    )
+                    
+                with col2:
+                    end_date = st.date_input(
+                        "終了日",
+                        value=st.session_state.get('analysis_end_date', max_date),
+                        min_value=min_date,
+                        max_value=max_date,
+                        key="custom_end_date",
+                        help="分析終了日を選択してください"
+                    )
+                
+                st.session_state.analysis_period_type = "custom"
+                st.session_state.analysis_start_date = start_date
+                st.session_state.analysis_end_date = end_date
+                
+                if start_date <= end_date:
+                    period_days = (end_date - start_date).days + 1
+                    st.success(f"✅ 選択期間: {period_days}日間")
+                else:
+                    st.error("開始日は終了日より前に設定してください")
+            
+            # 全タブに適用ボタン
+            if st.button("🔄 全タブに期間を適用", key="apply_global_period", use_container_width=True):
+                st.session_state.period_applied = True
+                st.success("期間設定を全タブに適用しました")
+                st.experimental_rerun()
+                
+        else:
+            st.info("データを読み込み後に期間設定が利用できます。")
+
+def calculate_preset_period_dates(df, preset_period):
+    """プリセット期間から具体的な日付を計算"""
+    latest_date = df['日付'].max()
+    
+    if preset_period == "直近30日":
+        start_date = latest_date - pd.Timedelta(days=29)
+        end_date = latest_date
+    elif preset_period == "前月完了分":
+        prev_month_start = (latest_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
+        prev_month_end = latest_date.replace(day=1) - pd.Timedelta(days=1)
+        start_date = prev_month_start
+        end_date = prev_month_end
+    elif preset_period == "今年度":
+        current_year = latest_date.year
+        if latest_date.month >= 4:
+            fiscal_start = pd.Timestamp(current_year, 4, 1)
+        else:
+            fiscal_start = pd.Timestamp(current_year - 1, 4, 1)
+        start_date = fiscal_start
+        end_date = latest_date
+    else:
+        start_date = latest_date - pd.Timedelta(days=29)
+        end_date = latest_date
+    
+    return start_date.date(), end_date.date()
+
+def get_analysis_period():
+    """現在の分析期間を取得"""
+    if not st.session_state.get('data_processed', False):
+        return None, None, "データなし"
+    
+    start_date = st.session_state.get('analysis_start_date')
+    end_date = st.session_state.get('analysis_end_date')
+    period_type = st.session_state.get('analysis_period_type', 'preset')
+    
+    if start_date and end_date:
+        return pd.to_datetime(start_date), pd.to_datetime(end_date), period_type
+    
+    # デフォルト値
+    df = st.session_state.get('df')
+    if df is not None:
+        latest_date = df['日付'].max()
+        default_start = latest_date - pd.Timedelta(days=29)
+        return default_start, latest_date, "デフォルト"
+    
+    return None, None, "エラー"
+
+def filter_data_by_analysis_period(df):
+    """分析期間でデータをフィルタリング"""
+    start_date, end_date, period_type = get_analysis_period()
+    
+    if start_date is None or end_date is None:
+        return df
+    
+    # データをフィルタリング
+    filtered_df = df[
+        (df['日付'] >= start_date) & 
+        (df['日付'] <= end_date)
+    ].copy()
+    
+    return filtered_df
+    
 def check_forecast_dependencies():
     """予測機能に必要な依存関係をチェック"""
     missing_libs = []
@@ -420,16 +563,17 @@ def create_sidebar_data_settings():
                     st.error(f"読み込みエラー: {e}")
 
 def create_sidebar():
-    """サイドバーの設定UI（改修版）"""
     # データ設定セクション
     create_sidebar_data_settings()
     
     st.sidebar.markdown("---")
     st.sidebar.header("⚙️ 基本設定")
     
-    # 期間設定セクション
-    with st.sidebar.expander("📅 期間設定", expanded=True):
-        if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
+    # 期間設定セクション（統合版）
+    create_sidebar_period_settings()
+
+    # 基本設定セクション（従来と同じ）
+    with st.sidebar.expander("🏥 基本設定", expanded=True):        if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
             df = st.session_state.df
             min_date = df['日付'].min().date()
             max_date = df['日付'].max().date()
@@ -597,7 +741,7 @@ def create_sidebar():
             avg_length_of_stay > 0 and avg_admission_fee > 0)
 
 def create_management_dashboard_tab():
-    """経営ダッシュボードタブ"""
+    """経営ダッシュボードタブ（期間設定統合版）"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
         st.warning(MESSAGES['data_not_loaded'])
         return
@@ -605,79 +749,68 @@ def create_management_dashboard_tab():
     df = st.session_state['df']
     st.header("💰 経営ダッシュボード")
     
-    # 期間選択UI
-    st.markdown("### 📊 表示期間設定")
-    selected_period = st.radio(
-        "期間選択（平均値計算用）",
-        PERIOD_OPTIONS,
-        index=0,
-        horizontal=True,
-        key="dashboard_period_selector",
-        help="日平均在院患者数、平均在院日数、日平均新入院患者数の計算期間"
-    )
+    # サイドバーの期間設定を表示
+    start_date, end_date, period_type = get_analysis_period()
     
-    st.markdown("---")
-    
-    # メトリクス計算と表示
-    metrics = calculate_dashboard_metrics(df, selected_period)
-    if metrics:
-        display_unified_metrics_layout_colorized(metrics, selected_period)
-
+    if start_date and end_date:
+        period_days = (end_date - start_date).days + 1
+        st.info(f"📊 分析期間: {start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')} ({period_days}日間)")
+        st.caption("※期間設定はサイドバーで変更できます")
+        
+        # 期間でフィルタリングされたデータを使用
+        filtered_df = filter_data_by_analysis_period(df)
+        
+        if len(filtered_df) == 0:
+            st.warning("選択期間にデータがありません。サイドバーで期間を調整してください。")
+            return
+        
+        st.success(f"✅ 対象データ: {len(filtered_df):,}件")
+        
+        # 既存のメトリクス計算を使用（フィルタリングされたデータで）
+        metrics = calculate_dashboard_metrics(filtered_df, start_date, end_date)
+        if metrics:
+            display_unified_metrics_layout_colorized(metrics, f"{start_date.strftime('%m/%d')}-{end_date.strftime('%m/%d')}")
+    else:
+        st.error("期間設定に問題があります。サイドバーで期間を設定してください。")
+        
 def calculate_dashboard_metrics(df, selected_period):
-    """ダッシュボードメトリクスの計算"""
+    """フィルタリング済みデータでのダッシュボードメトリクス計算"""
     try:
-        latest_date = df['日付'].max()
-        
-        # 直近30日の計算
-        fixed_start_date = latest_date - pd.Timedelta(days=29)
-        fixed_end_date = latest_date
-        
         total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
-        fixed_kpis = calculate_kpis(df, fixed_start_date, fixed_end_date, total_beds=total_beds)
+        kpis = calculate_kpis(df, start_date, end_date, total_beds=total_beds)
         
-        if fixed_kpis and fixed_kpis.get("error"):
-            st.error(f"KPI計算エラー: {fixed_kpis['error']}")
-            return None
-        
-        # 平均値計算用期間
-        period_start_date, period_end_date = get_period_dates(df, selected_period)
-        period_kpis = calculate_kpis(df, period_start_date, period_end_date, total_beds=total_beds)
-        
-        if period_kpis and period_kpis.get("error"):
-            st.error(f"期間KPI計算エラー: {period_kpis['error']}")
+        if kpis and kpis.get("error"):
+            st.error(f"KPI計算エラー: {kpis['error']}")
             return None
         
         # 基本設定値
         avg_admission_fee = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
         monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS)
-        target_revenue = monthly_target_patient_days * avg_admission_fee
         
-        # 固定値（直近30日）
-        total_patient_days_30d = fixed_kpis.get('total_patient_days', 0)
-        avg_daily_census_30d = fixed_kpis.get('avg_daily_census', 0)
-        bed_occupancy_rate = fixed_kpis.get('bed_occupancy_rate', 0)
+        # 期間内の値（既存のロジックを再利用）
+        total_patient_days = kpis.get('total_patient_days', 0)
+        avg_daily_census = kpis.get('avg_daily_census', 0)
+        bed_occupancy_rate = kpis.get('bed_occupancy_rate', 0)
+        avg_los = kpis.get('alos', 0) 
+        avg_daily_admissions = kpis.get('avg_daily_admissions', 0)
+        period_days = kpis.get('days_count', 1)
         
-        # 直近30日の推計収益
-        estimated_revenue_30d = total_patient_days_30d * avg_admission_fee
+        # 推計収益
+        estimated_revenue = total_patient_days * avg_admission_fee
         
-        # 平均値（選択期間）
-        avg_daily_census = period_kpis.get('avg_daily_census', 0)
-        avg_los = period_kpis.get('alos', 0)
-        avg_daily_admissions = period_kpis.get('avg_daily_admissions', 0)
-        period_days = period_kpis.get('days_count', 1)
-        
+        # 既存のメトリクス形式に合わせて返す
         return {
-            'total_patient_days_30d': total_patient_days_30d,
+            'total_patient_days_30d': total_patient_days,  # 名前は既存に合わせる
             'bed_occupancy_rate': bed_occupancy_rate,
-            'estimated_revenue_30d': estimated_revenue_30d,
-            'avg_daily_census_30d': avg_daily_census_30d,
+            'estimated_revenue_30d': estimated_revenue,
+            'avg_daily_census_30d': avg_daily_census,
             'avg_daily_census': avg_daily_census,
             'avg_los': avg_los,
             'avg_daily_admissions': avg_daily_admissions,
             'period_days': period_days,
             'total_beds': total_beds,
-            'target_revenue': target_revenue,
-            'selected_period': selected_period
+            'target_revenue': monthly_target_patient_days * avg_admission_fee,
+            'selected_period': f"カスタム期間"
         }
         
     except Exception as e:
