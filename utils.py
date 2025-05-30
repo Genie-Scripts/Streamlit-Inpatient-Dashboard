@@ -1,6 +1,175 @@
 # utils.py - 共通ユーティリティ関数
 import streamlit as st
 import pandas as pd
+from datetime import datetime, timedelta
+
+def safe_date_input(
+    label, 
+    df, 
+    session_key, 
+    default_offset_days=30, 
+    is_end_date=False,
+    related_start_key=None
+):
+    """
+    安全な日付選択UI
+    
+    Parameters:
+    -----------
+    label : str
+        日付選択のラベル
+    df : pd.DataFrame
+        データフレーム（日付範囲の計算用）
+    session_key : str
+        セッション状態のキー
+    default_offset_days : int
+        デフォルト値の計算用オフセット日数
+    is_end_date : bool
+        終了日かどうか
+    related_start_key : str
+        関連する開始日のセッションキー（終了日の場合）
+    
+    Returns:
+    --------
+    datetime.date
+        選択された日付
+    """
+    
+    if df is None or df.empty or '日付' not in df.columns:
+        st.error("日付データが利用できません。")
+        return datetime.now().date()
+    
+    # データの日付範囲を取得
+    data_min_date = df['日付'].min().date()
+    data_max_date = df['日付'].max().date()
+    
+    # セッション状態から値を取得
+    session_value = st.session_state.get(session_key)
+    
+    # デフォルト値の計算
+    if is_end_date:
+        # 終了日の場合
+        if related_start_key and related_start_key in st.session_state:
+            related_start = st.session_state[related_start_key]
+            if isinstance(related_start, datetime.date):
+                # 開始日から適切な期間を設定
+                ideal_end = related_start + timedelta(days=default_offset_days)
+                default_value = min(ideal_end, data_max_date)
+            else:
+                default_value = data_max_date
+        else:
+            default_value = data_max_date
+    else:
+        # 開始日の場合
+        ideal_start = data_max_date - timedelta(days=default_offset_days)
+        default_value = max(ideal_start, data_min_date)
+    
+    # セッション値の安全性チェック
+    if session_value is not None:
+        if isinstance(session_value, str):
+            try:
+                session_value = datetime.strptime(session_value, '%Y-%m-%d').date()
+            except:
+                session_value = None
+        
+        if (session_value and 
+            isinstance(session_value, datetime.date) and 
+            data_min_date <= session_value <= data_max_date):
+            default_value = session_value
+        else:
+            # 範囲外の場合は警告表示
+            if session_value:
+                st.warning(f"{label}: 前回の設定({session_value})が範囲外のため、デフォルト値を調整しました。")
+    
+    # 日付入力
+    selected_date = st.date_input(
+        label,
+        value=default_value,
+        min_value=data_min_date,
+        max_value=data_max_date,
+        key=f"{session_key}_widget"
+    )
+    
+    # セッション状態に保存
+    st.session_state[session_key] = selected_date
+    
+    return selected_date
+
+def clear_date_session_states():
+    """日付関連のセッション状態をクリア"""
+    
+    date_session_keys = [
+        'dow_comparison_start_date', 'dow_comparison_end_date',
+        'alos_start_date', 'alos_end_date',
+        'analysis_start_date', 'analysis_end_date',
+        'dow_analysis_start_date', 'dow_analysis_end_date',
+        'custom_start_date', 'custom_end_date'
+    ]
+    
+    cleared_count = 0
+    for key in date_session_keys:
+        if key in st.session_state:
+            del st.session_state[key]
+            cleared_count += 1
+    
+    return cleared_count
+
+def validate_date_range(start_date, end_date, max_days=365):
+    """日付範囲の妥当性をチェック"""
+    
+    if start_date > end_date:
+        return False, "開始日は終了日以前である必要があります。"
+    
+    period_days = (end_date - start_date).days + 1
+    
+    if period_days > max_days:
+        return False, f"期間が長すぎます（最大{max_days}日）。"
+    
+    if period_days < 1:
+        return False, "期間は最低1日必要です。"
+    
+    return True, f"選択期間: {period_days}日間"
+
+# dow_analysis_tab.py での使用例
+def create_safe_comparison_period_selector(df, start_date, end_date):
+    """安全な期間比較セレクター"""
+    
+    st.markdown("### 📅 比較期間選択")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        comp_start = safe_date_input(
+            "比較期間：開始日",
+            df=df,
+            session_key="dow_comparison_start_date",
+            default_offset_days=365,  # 1年前
+            is_end_date=False
+        )
+    
+    with col2:
+        # 現在期間と同じ長さにする
+        current_period_days = (end_date - start_date).days
+        
+        comp_end = safe_date_input(
+            "比較期間：終了日",
+            df=df,
+            session_key="dow_comparison_end_date", 
+            default_offset_days=current_period_days,
+            is_end_date=True,
+            related_start_key="dow_comparison_start_date"
+        )
+    
+    # 期間の妥当性チェック
+    is_valid, message = validate_date_range(comp_start, comp_end)
+    
+    if is_valid:
+        st.success(message)
+    else:
+        st.error(message)
+        return None, None
+    
+    return comp_start, comp_end
 
 def safe_date_filter(df, start_date=None, end_date=None):
     """安全な日付フィルタリング"""

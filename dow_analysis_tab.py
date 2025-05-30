@@ -427,30 +427,56 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
     if enable_comparison:
         # 比較用の期間選択UI
         col1_comp, col2_comp = st.columns(2)
+        
+        # データの日付範囲を取得
+        data_min_date = df['日付'].min().date()
+        data_max_date = df['日付'].max().date()
+        
         with col1_comp:
-            # 比較期間の開始日（デフォルトは現在の期間の1年前）
-            default_comp_start = (start_date - timedelta(days=365)) if isinstance(start_date, datetime.date) else start_date - pd.Timedelta(days=365)
+            # セッション状態から安全に値を取得
+            session_comp_start = st.session_state.get("dow_comparison_start_date")
+            
+            # デフォルト値を計算（1年前だが、データ範囲内に収める）
+            ideal_comp_start = (start_date - timedelta(days=365)) if isinstance(start_date, datetime.date) else start_date - pd.Timedelta(days=365)
+            
+            # 範囲チェックして安全なデフォルト値を設定
+            if session_comp_start and data_min_date <= session_comp_start <= data_max_date:
+                default_comp_start = session_comp_start
+            elif ideal_comp_start >= data_min_date:
+                default_comp_start = ideal_comp_start
+            else:
+                # 1年前がデータ範囲外の場合は、データ開始日から90日後を使用
+                default_comp_start = min(data_min_date + timedelta(days=90), data_max_date)
+            
             comp_start_date = st.date_input(
                 "比較期間：開始日", 
                 value=default_comp_start,
-                min_value=df['日付'].min().date(),
-                max_value=df['日付'].max().date(),
+                min_value=data_min_date,
+                max_value=data_max_date,
                 key="dow_comparison_start_date"
             )
         
         with col2_comp:
-            # 比較期間の終了日（期間の長さを同じにするデフォルト）
+            # セッション状態から安全に値を取得
+            session_comp_end = st.session_state.get("dow_comparison_end_date")
+            
+            # 期間の長さを計算
             period_length = (end_date - start_date).days if isinstance(start_date, datetime.date) else (end_date - start_date).days
-            default_comp_end = comp_start_date + timedelta(days=period_length)
-            # データの最大日付を超えないように調整
-            if default_comp_end > df['日付'].max().date():
-                default_comp_end = df['日付'].max().date()
-                
+            ideal_comp_end = comp_start_date + timedelta(days=period_length)
+            
+            # 範囲チェックして安全なデフォルト値を設定
+            if session_comp_end and data_min_date <= session_comp_end <= data_max_date:
+                default_comp_end = session_comp_end
+            elif ideal_comp_end <= data_max_date:
+                default_comp_end = ideal_comp_end
+            else:
+                default_comp_end = data_max_date
+            
             comp_end_date = st.date_input(
                 "比較期間：終了日", 
                 value=default_comp_end,
-                min_value=df['日付'].min().date(),
-                max_value=df['日付'].max().date(),
+                min_value=data_min_date,
+                max_value=data_max_date,
                 key="dow_comparison_end_date"
             )
         
