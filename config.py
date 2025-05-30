@@ -1,7 +1,7 @@
-# config.py - アプリケーション設定値の管理
+# config.py - アプリケーション設定値の管理（更新版）
 
 # ===== 基本設定 =====
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"  # バージョンアップ
 APP_TITLE = "入退院分析ダッシュボード"
 APP_ICON = "🏥"
 
@@ -43,15 +43,26 @@ NUMBER_FORMAT = {
 
 # ===== メッセージ設定 =====
 MESSAGES = {
-    'data_not_loaded': "⚠️ データが読み込まれていません。先にデータ処理タブでファイルをアップロードしてください。",
+    'data_not_loaded': "⚠️ データが読み込まれていません。サイドバーから保存データを読み込むか、データ処理タブでファイルをアップロードしてください。",
     'data_processing_complete': "✅ データ処理が完了しました。",
-    'insufficient_data': "📊 データを読み込み後に利用可能になります。",
-    'forecast_libs_missing': "📋 予測機能を使用するには必要なライブラリをインストールしてください。"
+    'insufficient_data': "📊 データを読み込み後に利用可能になります。サイドバーの「データ設定」をご確認ください。",
+    'forecast_libs_missing': "📋 予測機能を使用するには必要なライブラリをインストールしてください。",
+    'auto_load_success': "💾 保存されたデータを自動読み込みしました。",
+    'data_save_success': "✅ データが保存されました。次回起動時に自動読み込みされます。",
+    'data_save_error': "❌ データ保存に失敗しました。"
 }
 
 # ===== ファイル設定 =====
 SUPPORTED_FILE_TYPES = ['.xlsx', '.xls', '.csv']
 MAX_FILE_SIZE_MB = 100
+
+# ===== データ永続化設定 =====
+DATA_PERSISTENCE = {
+    'auto_load_enabled': True,  # 自動読み込み機能
+    'auto_save_on_process': True,  # 処理後自動保存
+    'max_saved_versions': 5,  # 最大保存バージョン数（将来の拡張用）
+    'compression_enabled': True,  # 圧縮保存（将来の拡張用）
+}
 
 # ===== 予測機能設定 =====
 FORECAST_SETTINGS = {
@@ -75,4 +86,18 @@ ANALYSIS_SETTINGS = {
     'trend_min_periods': 12,  # トレンド分析に必要な最小期間数
     'seasonal_min_periods': 24,  # 季節性分析に必要な最小期間数
     'statistical_significance': 0.05  # 統計的有意水準
+}
+
+# ===== セッション管理設定 =====
+SESSION_SETTINGS = {
+    'persistent_keys': [  # 永続化するセッション状態のキー
+        'total_beds',
+        'bed_occupancy_rate', 
+        'bed_occupancy_rate_percent',
+        'avg_length_of_stay',
+        'avg_admission_fee',
+        'monthly_target_patient_days',
+        'monthly_target_admissions'
+    ],
+    'auto_clear_on_new_data': False,  # 新データ時の自動クリア
 }
