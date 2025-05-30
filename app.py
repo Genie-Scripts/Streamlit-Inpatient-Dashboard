@@ -975,6 +975,18 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
 
 def main():
     """メイン関数（改修版）"""
+    # 緊急対処：アプリ起動時に古い日付をクリア
+    if 'app_initialized' not in st.session_state:
+        # 初回起動時に全ての日付関連セッション状態をクリア
+        keys_to_check = list(st.session_state.keys())
+        for key in keys_to_check:
+            if 'date' in key.lower() and key in st.session_state:
+                value = st.session_state[key]
+                if hasattr(value, 'year') and value.year < 2024:
+                    del st.session_state[key]
+        
+        st.session_state.app_initialized = True
+
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
         st.session_state['data_processed'] = False

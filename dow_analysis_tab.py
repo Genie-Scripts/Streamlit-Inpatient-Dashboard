@@ -422,6 +422,22 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
     # 期間比較の設定を追加
     st.markdown(f"<div class='chart-title' style='margin-top: 2rem;'>期間比較</div>", unsafe_allow_html=True)
     
+    # ★★★ ここに安全チェックを追加 ★★★
+    # データの日付範囲を取得
+    data_min_date = df['日付'].min().date()
+    data_max_date = df['日付'].max().date()
+    
+    # 問題のあるセッション状態をクリア
+    if 'dow_comparison_start_date' in st.session_state:
+        stored_start = st.session_state['dow_comparison_start_date']
+        if hasattr(stored_start, 'year') and (stored_start < data_min_date or stored_start > data_max_date):
+            del st.session_state['dow_comparison_start_date']
+    
+    if 'dow_comparison_end_date' in st.session_state:
+        stored_end = st.session_state['dow_comparison_end_date']
+        if hasattr(stored_end, 'year') and (stored_end < data_min_date or stored_end > data_max_date):
+            del st.session_state['dow_comparison_end_date']
+    
     enable_comparison = st.checkbox("別の期間と比較する", key="dow_enable_comparison")
     
     if enable_comparison:
