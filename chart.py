@@ -242,47 +242,76 @@ def create_interactive_dual_axis_chart(data, title="入院患者数と患者移�
         return None
 
 # @st.cache_data(ttl=1800) # この関数もMatplotlibを使っているので、同様にst.session_stateキャッシュを検討可能
+@st.cache_data(ttl=1800, show_spinner=False)
 def create_dual_axis_chart(data, title="入院患者数と患者移動の推移", filename=None, days=90, font_name_for_mpl=None):
     """
     入院患者数と患者移動の7日移動平均グラフを二軸で作成する（Matplotlib版、PDF用）
+    st.session_state を使ったキャッシュに対応
     """
+    start_time = time.time()
+
+    chart_cache_instance = get_chart_cache()
+
+    data_hash = get_data_hash(data)
+    cache_key = get_chart_cache_key(title, days, None, "dual_axis_mpl", data_hash)
+
+    cached_chart_bytes = chart_cache_instance.get(cache_key)
+    if cached_chart_bytes is not None:
+        print(f"キャッシュヒット(st.session_state): {title} ({days}日, 二軸)")
+        buf = BytesIO(cached_chart_bytes)
+        buf.seek(0)
+        return buf
+
     fig = None
     try:
         fig, ax1 = plt.subplots(figsize=(10, 5.5))
 
         if not isinstance(data, pd.DataFrame) or data.empty:
-            if fig: plt.close(fig)
+            # fig が初期化されていない可能性があるので、ここでは plt.close(fig) は呼び出さない
             return None
 
         required_columns = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "退院患者数"]
         if any(col not in data.columns for col in required_columns):
-            if fig: plt.close(fig)
+            # fig が初期化されていない可能性
             return None
-        
-        # '日付'列が datetime 型であることを確認
-        if not pd.api.types.is_datetime64_any_dtype(data['日付']):
-            data = data.copy()
-            data['日付'] = pd.to_datetime(data['日付'], errors='coerce')
-            data.dropna(subset=['日付'], inplace=True)
 
-        grouped = data.groupby("日付").agg({"入院患者数（在院）": "sum", "新入院患者数": "sum", "緊急入院患者数": "sum", "退院患者数": "sum"}).reset_index().sort_values("日付")
-        if len(grouped) > days: grouped = grouped.tail(days)
+        data_copy = data.copy() # 元のデータを変更しないようにコピー
+        if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
+            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
+            data_copy.dropna(subset=['日付'], inplace=True)
+
+        grouped = data_copy.groupby("日付").agg({
+            "入院患者数（在院）": "sum",
+            "新入院患者数": "sum",
+            "緊急入院患者数": "sum",
+            "退院患者数": "sum"
+        }).reset_index().sort_values("日付")
+
+        if len(grouped) > days:
+            grouped = grouped.tail(days)
         if grouped.empty:
-            if fig: plt.close(fig)
+            # fig が初期化されていない可能性
             return None
 
-        for col_name in required_columns[1:]: # Iterate through the original required names
-            if col_name in grouped.columns: # Check if the column exists after aggregation
-                 grouped[f'{col_name}_7日移動平均'] = grouped[col_name].rolling(window=7, min_periods=1).mean()
-            # else:
-                 # print(f"Warning: Column '{col_name}' not found in grouped data for moving average calculation.")
-
+        cols_for_ma = ["入院患者数（在院）", "新入院患者数", "緊急入院患者数", "退院患者数"]
+        for col in cols_for_ma:
+            if col in grouped.columns: # grouped に列が存在するか確認
+                grouped[f'{col}_7日移動平均'] = grouped[col].rolling(window=7, min_periods=1).mean()
+            else:
+                # 警告を出すか、デフォルト値（例: 0）で列を作成
+                print(f"Warning: Column '{col}' not found in grouped data for moving average calculation in '{title}'. Skipping MA for this column.")
+                grouped[f'{col}_7日移動平均'] = 0 # または pd.NA など
 
         font_kwargs = {}
         if font_name_for_mpl:
             font_kwargs['fontname'] = font_name_for_mpl
 
-        ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日移動平均"], color='#3498db', linewidth=2, label="入院患者数（在院）")
+        # '入院患者数（在院）_7日移動平均' が存在するか確認してからプロット
+        if "入院患者数（在院）_7日移動平均" in grouped.columns:
+            ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日移動平均"], color='#3498db', linewidth=2, label="入院患者数（在院）")
+        else:
+            print(f"Warning: '入院患者数（在院）_7日移動平均' not found for plotting in '{title}'.")
+
         ax1.set_xlabel('日付', fontsize=9, **font_kwargs)
         ax1.set_ylabel('入院患者数（在院）', fontsize=9, color='#3498db', **font_kwargs)
         ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=8)
@@ -301,7 +330,8 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         legend_prop = {'size': 9}
-        if font_name_for_mpl: legend_prop['family'] = font_name_for_mpl
+        if font_name_for_mpl:
+            legend_prop['family'] = font_name_for_mpl
         ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', prop=legend_prop)
 
         plt.title(title, fontsize=12, **font_kwargs)
@@ -312,17 +342,26 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
 
         buf = BytesIO()
         plt.savefig(buf, format='png', dpi=150)
-        # plt.close(fig) # fig オブジェクトはここで閉じる
+        # plt.close(fig) # finally ブロックで閉じる
+        buf.seek(0)
+
+        chart_cache_instance[cache_key] = buf.getvalue()
+        
+        end_time = time.time()
+        print(f"二軸グラフ生成完了 (st.session_stateキャッシュ): {title} ({days}日)、処理時間: {end_time - start_time:.2f}秒")
+
         buf.seek(0)
         return buf
 
     except Exception as e:
         print(f"Error in create_dual_axis_chart ('{title}'): {e}")
-        # if fig: plt.close(fig)
+        import traceback
+        print(traceback.format_exc())
         return None
     finally:
-        if fig: # tryブロック内でエラーが発生した場合でもfigがNoneでない可能性があるため
+        if fig: # figがNoneでない（plt.subplotsが成功した）場合のみ閉じる
             plt.close(fig)
+        gc.collect()
 
 @st.cache_data(ttl=1800)
 def create_forecast_comparison_chart(actual_series, forecast_results, title="年度患者数予測比較", display_days_past=365, display_days_future=365):
