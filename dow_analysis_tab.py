@@ -22,12 +22,13 @@ except ImportError:
     create_dow_heatmap = lambda *args, **kwargs: None
     DOW_LABELS = ['月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日', '日曜日']
 
-# utils.pyから病棟関連の関数をインポート
+# utils.pyから病棟関連の関数をインポート（修正：safe_date_filterを追加）
 from utils import (
     create_ward_name_mapping,
     get_ward_display_name,
     create_ward_display_options,
-    initialize_ward_mapping
+    initialize_ward_mapping,
+    safe_date_filter  # ← Timestamp比較エラー対応で追加
 )
 
 def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
@@ -419,23 +420,34 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
     else: # summary_df が空の場合
         st.info("分析インサイトを生成するためのサマリーデータがありません。")
 
-    # 期間比較の設定を追加
+    # ★★★ 期間比較の設定（修正版）★★★
     st.markdown(f"<div class='chart-title' style='margin-top: 2rem;'>期間比較</div>", unsafe_allow_html=True)
     
-    # ★★★ ここに安全チェックを追加 ★★★
-    # データの日付範囲を取得
-    data_min_date = df['日付'].min().date()
-    data_max_date = df['日付'].max().date()
+    # データの日付範囲を取得（Timestamp対応）
+    try:
+        data_min_date = df['日付'].min()
+        data_max_date = df['日付'].max()
+        
+        # date型に変換（UI用）
+        if hasattr(data_min_date, 'date'):
+            data_min_date_ui = data_min_date.date()
+            data_max_date_ui = data_max_date.date()
+        else:
+            data_min_date_ui = data_min_date
+            data_max_date_ui = data_max_date
+    except Exception as e:
+        st.error(f"日付範囲の取得でエラーが発生しました: {e}")
+        return
     
     # 問題のあるセッション状態をクリア
     if 'dow_comparison_start_date' in st.session_state:
         stored_start = st.session_state['dow_comparison_start_date']
-        if hasattr(stored_start, 'year') and (stored_start < data_min_date or stored_start > data_max_date):
+        if hasattr(stored_start, 'year') and (stored_start < data_min_date_ui or stored_start > data_max_date_ui):
             del st.session_state['dow_comparison_start_date']
     
     if 'dow_comparison_end_date' in st.session_state:
         stored_end = st.session_state['dow_comparison_end_date']
-        if hasattr(stored_end, 'year') and (stored_end < data_min_date or stored_end > data_max_date):
+        if hasattr(stored_end, 'year') and (stored_end < data_min_date_ui or stored_end > data_max_date_ui):
             del st.session_state['dow_comparison_end_date']
     
     enable_comparison = st.checkbox("別の期間と比較する", key="dow_enable_comparison")
@@ -443,10 +455,6 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
     if enable_comparison:
         # 比較用の期間選択UI
         col1_comp, col2_comp = st.columns(2)
-        
-        # データの日付範囲を取得
-        data_min_date = df['日付'].min().date()
-        data_max_date = df['日付'].max().date()
         
         with col1_comp:
             # セッション状態から安全に値を取得
@@ -456,19 +464,19 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
             ideal_comp_start = (start_date - timedelta(days=365)) if isinstance(start_date, datetime.date) else start_date - pd.Timedelta(days=365)
             
             # 範囲チェックして安全なデフォルト値を設定
-            if session_comp_start and data_min_date <= session_comp_start <= data_max_date:
+            if session_comp_start and data_min_date_ui <= session_comp_start <= data_max_date_ui:
                 default_comp_start = session_comp_start
-            elif ideal_comp_start >= data_min_date:
+            elif ideal_comp_start >= data_min_date_ui:
                 default_comp_start = ideal_comp_start
             else:
                 # 1年前がデータ範囲外の場合は、データ開始日から90日後を使用
-                default_comp_start = min(data_min_date + timedelta(days=90), data_max_date)
+                default_comp_start = min(data_min_date_ui + timedelta(days=90), data_max_date_ui)
             
             comp_start_date = st.date_input(
                 "比較期間：開始日", 
                 value=default_comp_start,
-                min_value=data_min_date,
-                max_value=data_max_date,
+                min_value=data_min_date_ui,
+                max_value=data_max_date_ui,
                 key="dow_comparison_start_date"
             )
         
@@ -481,18 +489,18 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
             ideal_comp_end = comp_start_date + timedelta(days=period_length)
             
             # 範囲チェックして安全なデフォルト値を設定
-            if session_comp_end and data_min_date <= session_comp_end <= data_max_date:
+            if session_comp_end and data_min_date_ui <= session_comp_end <= data_max_date_ui:
                 default_comp_end = session_comp_end
-            elif ideal_comp_end <= data_max_date:
+            elif ideal_comp_end <= data_max_date_ui:
                 default_comp_end = ideal_comp_end
             else:
-                default_comp_end = data_max_date
+                default_comp_end = data_max_date_ui
             
             comp_end_date = st.date_input(
                 "比較期間：終了日", 
                 value=default_comp_end,
-                min_value=data_min_date,
-                max_value=data_max_date,
+                min_value=data_min_date_ui,
+                max_value=data_max_date_ui,
                 key="dow_comparison_end_date"
             )
         
@@ -503,12 +511,12 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
             comp_end_date = comp_start_date + timedelta(days=period_length)
             
             # データの範囲内に収める
-            if comp_end_date > df['日付'].max().date():
-                comp_end_date = df['日付'].max().date()
+            if comp_end_date > data_max_date_ui:
+                comp_end_date = data_max_date_ui
                 comp_start_date = comp_end_date - timedelta(days=period_length)
                 # さらに開始日がデータ範囲外になった場合の調整
-                if comp_start_date < df['日付'].min().date():
-                    comp_start_date = df['日付'].min().date()
+                if comp_start_date < data_min_date_ui:
+                    comp_start_date = data_min_date_ui
             
             # セッション状態を更新
             st.session_state.dow_comparison_start_date = comp_start_date
@@ -519,7 +527,7 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
             st.error("比較期間の終了日は開始日以降に設定してください。")
             return
         
-        # 既存のグラフ生成時と同様にデータを取得するが、比較期間用
+        # ★★★ 修正：safe_date_filter を使用 ★★★
         if selected_chart_metrics:
             comp_dow_data = get_dow_data(
                 df=df,
@@ -843,11 +851,14 @@ def display_dow_analysis_tab(df, start_date, end_date, common_config=None):
                         st.markdown("<div class='info-card'>", unsafe_allow_html=True)
                         st.markdown("#### <span style='color: #191970;'>期間比較インサイト</span>", unsafe_allow_html=True)
                         
-                        # 比較期間データからサマリー計算
+                        # ★★★ 修正：safe_date_filter を使用してサマリー計算 ★★★
                         comp_summary_df = None
                         if calculate_dow_summary:
+                            # 比較期間のフィルタリング済みデータを取得
+                            comparison_filtered_df = safe_date_filter(df, comp_start_date, comp_end_date)
+                            
                             comp_summary_df = calculate_dow_summary(
-                                df=df,
+                                df=comparison_filtered_df,  # フィルタリング済みデータを使用
                                 start_date=comp_start_date,
                                 end_date=comp_end_date,
                                 group_by_column=group_by_col_name,
