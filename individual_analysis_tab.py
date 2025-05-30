@@ -34,7 +34,7 @@ def display_dataframe_with_title(title, df_data, key_suffix=""):
     """指定されたタイトルでデータフレームを表示するヘルパー関数"""
     if df_data is not None and not df_data.empty:
         st.markdown(f"##### {title}")
-        st.dataframe(df_data.fillna('-'), use_container_width=True, key=f"df_{key_suffix}")
+        st.dataframe(df_data.fillna('-'), use_container_width=True)
     else:
         st.markdown(f"##### {title}")
         st.warning(f"{title} データがありません。")
@@ -325,7 +325,7 @@ def display_individual_analysis_tab():
                     display_df_ind = display_df_ind.rename(columns={"年間平均人日（実績＋予測）": "年度予測"})
                 if "延べ予測人日" in display_df_ind.columns:
                     display_df_ind = display_df_ind.drop(columns=["延べ予測人日"])
-                st.dataframe(display_df_ind, use_container_width=True, key="forecast_df_ind_widget")
+                st.dataframe(display_df_ind, use_container_width=True)
             else:
                 st.warning("予測データを作成できませんでした。必要な平日または休日の平均値データが不足している可能性があります。")
         else:
