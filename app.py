@@ -690,6 +690,7 @@ def create_sidebar():
 
     return (total_beds > 0 and bed_occupancy_rate > 0 and 
             avg_length_of_stay > 0 and avg_admission_fee > 0)
+            
 def create_management_dashboard_tab():
     """経営ダッシュボードタブ（期間設定統合版）"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
@@ -716,12 +717,81 @@ def create_management_dashboard_tab():
         
         st.success(f"✅ 対象データ: {len(filtered_df):,}件")
         
-        # 既存のメトリクス計算を使用（フィルタリングされたデータで）
-        metrics = calculate_dashboard_metrics(filtered_df, start_date, end_date)
-        if metrics:
-            display_unified_metrics_layout_colorized(metrics, f"{start_date.strftime('%m/%d')}-{end_date.strftime('%m/%d')}")
+        # 直近30日の計算（既存のロジックを使用）
+        latest_date = filtered_df['日付'].max()
+        fixed_start_date = latest_date - pd.Timedelta(days=29)
+        fixed_end_date = latest_date
+        
+        total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
+        fixed_kpis = calculate_kpis(filtered_df, fixed_start_date, fixed_end_date, total_beds=total_beds)
+        
+        if fixed_kpis and fixed_kpis.get("error"):
+            st.error(f"KPI計算エラー: {fixed_kpis['error']}")
+            return
+        
+        # 選択期間の計算
+        period_kpis = calculate_kpis(filtered_df, start_date, end_date, total_beds=total_beds)
+        
+        if period_kpis and period_kpis.get("error"):
+            st.error(f"期間KPI計算エラー: {period_kpis['error']}")
+            return
+        
+        # 基本設定値
+        avg_admission_fee = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
+        monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS)
+        target_revenue = monthly_target_patient_days * avg_admission_fee
+        
+        # 固定値（直近30日）
+        total_patient_days_30d = fixed_kpis.get('total_patient_days', 0)
+        avg_daily_census_30d = fixed_kpis.get('avg_daily_census', 0)
+        bed_occupancy_rate = fixed_kpis.get('bed_occupancy_rate', 0)
+        
+        # 直近30日の推計収益
+        estimated_revenue_30d = total_patient_days_30d * avg_admission_fee
+        
+        # 平均値（選択期間）
+        avg_daily_census = period_kpis.get('avg_daily_census', 0)
+        avg_los = period_kpis.get('alos', 0)
+        avg_daily_admissions = period_kpis.get('avg_daily_admissions', 0)
+        period_days_count = period_kpis.get('days_count', 1)
+        
+        # メトリクス辞書を作成（既存のdisplay_unified_metrics_layout_colorized関数に合わせる）
+        metrics = {
+            'total_patient_days_30d': total_patient_days_30d,
+            'bed_occupancy_rate': bed_occupancy_rate,
+            'estimated_revenue_30d': estimated_revenue_30d,
+            'avg_daily_census_30d': avg_daily_census_30d,
+            'avg_daily_census': avg_daily_census,
+            'avg_los': avg_los,
+            'avg_daily_admissions': avg_daily_admissions,
+            'period_days': period_days_count,
+            'total_beds': total_beds,
+            'target_revenue': target_revenue,
+            'selected_period': f"カスタム期間({period_days}日間)"
+        }
+        
+        # 既存の表示関数を使用
+        display_unified_metrics_layout_colorized(metrics, f"カスタム期間({period_days}日間)")
+        
     else:
         st.error("期間設定に問題があります。サイドバーで期間を設定してください。")
+        
+        # フォールバック：従来の方法で表示
+        st.markdown("---")
+        st.markdown("### 📊 従来の期間選択")
+        selected_period = st.radio(
+            "期間選択（平均値計算用）",
+            PERIOD_OPTIONS,
+            index=0,
+            horizontal=True,
+            key="dashboard_period_selector_fallback",
+            help="日平均在院患者数、平均在院日数、日平均新入院患者数の計算期間"
+        )
+        
+        # 既存のロジックを使用
+        metrics = calculate_dashboard_metrics(df, selected_period)
+        if metrics:
+            display_unified_metrics_layout_colorized(metrics, selected_period)
         
 def calculate_dashboard_metrics(df, selected_period):
     """フィルタリング済みデータでのダッシュボードメトリクス計算"""
