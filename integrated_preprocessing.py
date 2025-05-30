@@ -19,80 +19,275 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def efficient_duplicate_check(df_raw):
+# --- ここから preprocess.py より移植する関数群 ---
+
+def add_patient_days_calculation(df):
     """
-    データフレームの重複を効率的にチェックして除去する関数
+    延べ在院日数（人日）を計算してデータフレームに追加する
     
-    Args:
-        df_raw (pd.DataFrame): 重複チェック対象のデータフレーム
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        病院データのデータフレーム
         
     Returns:
-        pd.DataFrame: 重複が除去されたデータフレーム
+    --------
+    pd.DataFrame
+        延べ在院日数（人日）列が追加されたデータフレーム
     """
-    start_time = time.time()
+    df_processed = df.copy()
     
-    # 空のデータフレームチェック
+    required_cols = ['入院患者数（在院）', '退院患者数']
+    available_cols = [col for col in required_cols if col in df_processed.columns]
+    
+    if '入院患者数（在院）' not in available_cols:
+        logger.warning("延べ在院日数の計算に必要な「入院患者数（在院）」列が見つかりません。")
+        df_processed['延べ在院日数（人日）'] = 0
+        return df_processed
+    
+    if '退院患者数' in available_cols:
+        df_processed['延べ在院日数（人日）'] = df_processed['入院患者数（在院）'] + df_processed['退院患者数']
+        logger.info("延べ在院日数（人日）を計算しました: 入院患者数（在院） + 退院患者数")
+    else:
+        logger.warning("延べ在院日数の計算に必要な「退院患者数」列が見つかりません。在院患者数のみで計算します。")
+        df_processed['延べ在院日数（人日）'] = df_processed['入院患者数（在院）']
+    
+    df_processed['延べ在院日数（人日）'] = df_processed['延べ在院日数（人日）'].clip(lower=0)
+    df_processed['延べ在院日数（人日）'] = df_processed['延べ在院日数（人日）'].astype(int)
+    
+    return df_processed
+
+def validate_patient_days_data(df):
+    """
+    延べ在院日数データの妥当性を検証する
+    """
+    validation_sub_results = {
+        "warnings": [],
+        "errors": [],
+        "summary": {}
+    }
+    
+    if '延べ在院日数（人日）' not in df.columns:
+        validation_sub_results["errors"].append("延べ在院日数（人日）列が存在しません。")
+        return validation_sub_results
+    
+    patient_days = df['延べ在院日数（人日）']
+    if patient_days.empty:
+        validation_sub_results["warnings"].append("延べ在院日数（人日）データが空です。")
+        return validation_sub_results
+
+    validation_sub_results["summary"] = {
+        "total_patient_days": patient_days.sum(),
+        "avg_daily_patient_days": patient_days.mean(),
+        "max_daily_patient_days": patient_days.max(),
+        "min_daily_patient_days": patient_days.min(),
+        "zero_days_count": (patient_days == 0).sum(),
+        "data_days": len(patient_days)
+    }
+    
+    if pd.notna(patient_days.max()) and patient_days.max() > 1000:
+        validation_sub_results["warnings"].append(
+            f"延べ在院日数（人日）に異常に大きな値が検出されました: 最大値 {patient_days.max()}"
+        )
+    
+    if pd.notna(patient_days.min()) and patient_days.min() < 0:
+        validation_sub_results["errors"].append("延べ在院日数（人日）に負の値が検出されました。")
+    
+    if len(patient_days) > 0:
+        zero_ratio = (patient_days == 0).sum() / len(patient_days)
+        if zero_ratio > 0.1:
+            validation_sub_results["warnings"].append(
+                f"延べ在院日数（人日）がゼロの日が多く検出されました: {zero_ratio:.1%}"
+            )
+    
+    if '入院患者数（在院）' in df.columns:
+        census_data = df['入院患者数（在院）']
+        if not census_data.empty and not patient_days.empty and (patient_days < census_data).any():
+            validation_sub_results["warnings"].append(
+                "延べ在院日数（人日）が入院患者数（在院）より少ない日があります。退院患者数が負になっているか、計算ロジックの確認が必要です。"
+            )
+    
+    return validation_sub_results
+
+def validate_general_data(df):
+    """
+    データの一般的な検証を行い、異常値や欠損値を確認する
+    """
+    validation_sub_results = {
+        "warnings": [],
+        "errors": []
+    }
+    
+    required_cols_for_validation = ["病棟コード", "診療科名", "日付", "入院患者数（在院）"]
+    missing_cols = [col for col in required_cols_for_validation if col not in df.columns]
+    
+    if missing_cols:
+        validation_sub_results["errors"].append(f"一般的なデータ検証に必要な列が不足しています: {', '.join(missing_cols)}")
+        return validation_sub_results
+        
+    if df.empty:
+        validation_sub_results["errors"].append("一般的なデータ検証の対象データが空です。")
+        return validation_sub_results
+        
+    if '日付' in df.columns and not df['日付'].empty:
+        min_date = df["日付"].min()
+        max_date = df["日付"].max()
+        if pd.notna(min_date) and pd.notna(max_date): # NaTでないことを確認
+            date_range_days = (max_date - min_date).days
+            if date_range_days < 30:
+                validation_sub_results["warnings"].append(f"データ期間が短いです ({date_range_days}日間)。最低30日以上のデータを推奨します。")
+        else:
+            validation_sub_results["warnings"].append("日付データの最小値または最大値が無効です。期間の検証をスキップします。")
+
+    cols_to_check_negative = ["入院患者数（在院）", "新入院患者数", "総退院患者数"]
+    for col in cols_to_check_negative:
+        if col in df.columns and not df[col].empty and pd.api.types.is_numeric_dtype(df[col]) and (df[col] < 0).any():
+            negative_count = (df[col] < 0).sum()
+            validation_sub_results["warnings"].append(f"列 '{col}' に負の値が {negative_count} 件あります。")
+    
+    cols_for_outlier_check = ["入院患者数（在院）", "新入院患者数", "総退院患者数"]
+    for col in cols_for_outlier_check:
+        if col in df.columns and not df[col].empty and pd.api.types.is_numeric_dtype(df[col]) and len(df[col].dropna()) > 1:
+            mean = df[col].mean()
+            std = df[col].std()
+            if pd.notna(std) and std > 0:
+                outliers = df[np.abs(df[col] - mean) > 3 * std]
+                if not outliers.empty:
+                    validation_sub_results["warnings"].append(f"列 '{col}' に外れ値の可能性があるデータが {len(outliers)} 件あります（3標準偏差外）。")
+    
+    return validation_sub_results
+
+def get_patient_days_summary_integrated(df, start_date=None, end_date=None):
+    """
+    延べ在院日数の集計サマリーを取得する (integrated_preprocessing.py バージョン)
+    """
+    if df is None or df.empty:
+        logger.warning("get_patient_days_summary_integrated: 入力データが空です。")
+        return {"error": "入力データが空です。"}
+    if '延べ在院日数（人日）' not in df.columns:
+        logger.error("get_patient_days_summary_integrated: 延べ在院日数（人日）列が存在しません。")
+        return {"error": "延べ在院日数（人日）列が存在しません。"}
+    if '日付' not in df.columns:
+        logger.error("get_patient_days_summary_integrated: 日付列が存在しません。")
+        return {"error": "日付列が存在しません。"}
+    
+    df_filtered = df.copy()
+    if start_date and end_date:
+        try:
+            start_date_ts = pd.to_datetime(start_date)
+            end_date_ts = pd.to_datetime(end_date)
+            # Ensure '日付' column is in datetime format for proper filtering
+            if not pd.api.types.is_datetime64_any_dtype(df_filtered['日付']):
+                df_filtered['日付'] = pd.to_datetime(df_filtered['日付'])
+            df_filtered = df_filtered[
+                (df_filtered['日付'] >= start_date_ts) & 
+                (df_filtered['日付'] <= end_date_ts)
+            ]
+        except Exception as e:
+            logger.error(f"get_patient_days_summary_integrated: 日付フィルタリングエラー: {e}")
+            return {"error": f"日付フィルタリングエラー: {e}"}
+    
+    if df_filtered.empty:
+        logger.info("get_patient_days_summary_integrated: 指定期間にデータがありません。")
+        return {"error": "指定期間にデータがありません。"}
+    
+    patient_days_series = df_filtered['延べ在院日数（人日）']
+    summary = {
+        "period": {
+            "start_date": df_filtered['日付'].min().strftime('%Y-%m-%d') if not df_filtered['日付'].empty and pd.notna(df_filtered['日付'].min()) else None,
+            "end_date": df_filtered['日付'].max().strftime('%Y-%m-%d') if not df_filtered['日付'].empty and pd.notna(df_filtered['日付'].max()) else None,
+            "days_count": df_filtered['日付'].nunique()
+        },
+        "total_patient_days": patient_days_series.sum(),
+        "avg_daily_patient_days": round(patient_days_series.mean(), 1) if not patient_days_series.empty else 0,
+        "max_daily_patient_days": patient_days_series.max() if not patient_days_series.empty else 0,
+        "min_daily_patient_days": patient_days_series.min() if not patient_days_series.empty else 0
+    }
+    
+    if '診療科名' in df_filtered.columns:
+        try:
+            dept_summary = df_filtered.groupby('診療科名')['延べ在院日数（人日）'].sum().to_dict()
+            summary["by_department"] = dept_summary
+        except Exception as e:
+            logger.warning(f"診療科別集計エラー: {e}")
+            summary["by_department"] = {}
+    
+    if '病棟コード' in df_filtered.columns:
+        try:
+            ward_summary = df_filtered.groupby('病棟コード')['延べ在院日数（人日）'].sum().to_dict()
+            summary["by_ward"] = ward_summary
+        except Exception as e:
+            logger.warning(f"病棟別集計エラー: {e}")
+            summary["by_ward"] = {}
+            
+    return summary
+
+# --- 既存の integrated_preprocessing.py の関数 ---
+def efficient_duplicate_check(df_raw): # 既存の関数
+    start_time = time.time()
     if df_raw is None or df_raw.empty:
         logger.info("重複チェック: 空のデータフレームが渡されました")
         return df_raw
-    
     initial_rows = len(df_raw)
-    
-    # メモリ使用量最適化のための型変換
-    # カーディナリティが低い文字列列をカテゴリ型に変換
-    # ここは変換先なので問題なし
     for col in df_raw.select_dtypes(include=['object']).columns:
         try:
-            # カーディナリティ（ユニーク値の比率）が低い列のみカテゴリ型に変換
             if df_raw[col].nunique() / len(df_raw) < 0.5:
                 df_raw[col] = df_raw[col].astype('category')
                 logger.debug(f"列 '{col}' をカテゴリ型に変換")
         except Exception as e:
             logger.warning(f"列 '{col}' の型変換エラー: {e}")
-    
     try:
-        # パフォーマンス計測開始
         mem_before = df_raw.memory_usage(deep=True).sum() / (1024 * 1024)
-        
-        # 重複除去実行（inplace=Falseでコピーを作成）
         df_processed = df_raw.drop_duplicates()
-        
-        # 重複除去後のメモリ使用量
         mem_after = df_processed.memory_usage(deep=True).sum() / (1024 * 1024)
-        
-        # 結果の集計
         rows_dropped = initial_rows - len(df_processed)
-        
-        # 元のデータフレームとその関連リソースを解放
         del df_raw
         gc.collect()
-        
-        # 終了時間とパフォーマンス情報
         end_time = time.time()
         processing_time = end_time - start_time
-        
-        # 結果をログに出力
         logger.info(f"重複チェック結果: 初期行数={initial_rows:,}, 削除行数={rows_dropped:,}, "
                    f"最終行数={len(df_processed):,}, 処理時間={processing_time:.2f}秒, "
                    f"メモリ削減={mem_before-mem_after:.2f}MB")
-        
-        # セッション状態にパフォーマンス情報を記録
-        if 'performance_metrics' not in st.session_state:
-            st.session_state.performance_metrics = {}
-        st.session_state.performance_metrics['duplicate_check_time'] = processing_time
-        st.session_state.performance_metrics['duplicate_rows_removed'] = rows_dropped
-        
+        if 'st' in globals() and hasattr(st, 'session_state'): # Streamlitコンテキストでのみ実行
+            if 'performance_metrics' not in st.session_state:
+                st.session_state.performance_metrics = {}
+            st.session_state.performance_metrics['duplicate_check_time'] = processing_time
+            st.session_state.performance_metrics['duplicate_rows_removed'] = rows_dropped
         return df_processed
-    
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
         logger.error(f"重複チェック処理エラー: {e}\n{error_detail}")
-        
-        # エラーが発生した場合は元のデータフレームを返す
-        return df_raw
+        return df_raw # Return original if error
 
-@st.cache_data(ttl=3600, show_spinner=False)
+def add_weekday_flag(df): # 既存の関数
+    """
+    平日/休日の判定フラグを追加する
+    """
+    def is_holiday(date):
+        return (
+            date.weekday() >= 5 or
+            jpholiday.is_holiday(date) or
+            (date.month == 12 and date.day >= 29) or
+            (date.month == 1 and date.day <= 3)
+        )
+    if '日付' not in df.columns:
+        logger.error("add_weekday_flag: '日付'列が見つかりません。")
+        return df # またはエラーを発生させる
+
+    df_copy = df.copy() # 元のDataFrameを変更しないようにコピー
+    # Ensure '日付' is datetime
+    if not pd.api.types.is_datetime64_any_dtype(df_copy['日付']):
+        df_copy['日付'] = pd.to_datetime(df_copy['日付'], errors='coerce')
+        # Drop rows where date conversion failed
+        df_copy.dropna(subset=['日付'], inplace=True)
+
+    df_copy["平日判定"] = df_copy["日付"].apply(lambda x: "休日" if is_holiday(x) else "平日")
+    return df_copy
+
+
+# --- integrated_preprocess_data 関数の修正箇所 ---
+# @st.cache_data(ttl=3600, show_spinner=False) # キャッシュデコレータは維持
 def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = None):
     start_time = time.time()
     validation_results = {
@@ -100,9 +295,8 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         "warnings": [],
         "errors": [],
         "info": [],
-        "summaries": {} # 検証サマリー格納用
+        "summaries": {}
     }
-    # ... (既存の major_departments_list 生成ロジックはそのまま) ...
     major_departments_list = []
     if target_data_df is not None and not target_data_df.empty and '部門コード' in target_data_df.columns:
         potential_major_depts = target_data_df['部門コード'].astype(str).unique()
@@ -110,8 +304,8 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             potential_major_depts_from_name = target_data_df['部門名'].astype(str).unique()
             potential_major_depts = np.union1d(potential_major_depts, potential_major_depts_from_name)
 
-        if '診療科名' in df.columns:
-            actual_depts_in_df = df['診療科名'].astype(str).unique()
+        if '診療科名' in df.columns: # df can be None or empty here
+            actual_depts_in_df = df['診療科名'].astype(str).unique() if df is not None and not df.empty else []
             major_departments_list = [dept for dept in actual_depts_in_df if dept in potential_major_depts]
         
         if not major_departments_list and len(potential_major_depts) > 0:
@@ -120,11 +314,10 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
                 "目標設定ファイルに記載の診療科が、実績データの診療科名と直接一致しませんでした。"
                 "目標設定ファイルの「部門コード」または「部門名」を主要診療科として扱います。"
             )
-        if not major_departments_list:
-            validation_results["warnings"].append("目標設定ファイルから主要診療科リストを特定できませんでした。")
+        if not major_departments_list: # After all attempts
+             validation_results["warnings"].append("目標設定ファイルから主要診療科リストを特定できませんでした。")
     else:
         validation_results["warnings"].append("目標設定ファイルが提供されなかったか、'部門コード'列がありません。全ての診療科を「その他」として扱います。")
-
 
     try:
         if df is None or df.empty:
@@ -132,15 +325,13 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             validation_results["errors"].append("入力データが空です。")
             return None, validation_results
 
-        # ... (既存の欠損値処理、日付処理、診療科名集約、重複除去はそのまま) ...
-        # 必要な列の確認
         expected_cols = ["病棟コード", "診療科名", "日付", "在院患者数",
                          "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"]
         available_cols = [col for col in df.columns if col in expected_cols]
         df_processed = df[available_cols].copy()
 
         initial_rows = len(df_processed)
-        df_processed.dropna(subset=['病棟コード'], inplace=True)
+        df_processed.dropna(subset=['病棟コード'], inplace=True) # Ensure '病棟コード' exists
         rows_dropped_due_to_ward_nan = initial_rows - len(df_processed)
         if rows_dropped_due_to_ward_nan > 0:
             validation_results["warnings"].append(
@@ -151,6 +342,8 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             validation_results["is_valid"] = False
             validation_results["errors"].append("必須列「日付」が存在しません。")
             return None, validation_results
+            
+        # Ensure '日付' column is datetime before operating on it
         df_processed['日付'] = pd.to_datetime(df_processed['日付'], errors='coerce')
         initial_rows = len(df_processed)
         df_processed.dropna(subset=['日付'], inplace=True)
@@ -183,7 +376,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             validation_results["warnings"].append("「診療科名」列が存在しないため、診療科集約をスキップしました。")
         
         initial_rows = len(df_processed)
-        df_processed = efficient_duplicate_check(df_processed) # efficient_duplicate_check は既存のものを想定
+        df_processed = efficient_duplicate_check(df_processed)
         rows_dropped_due_to_duplicates = initial_rows - len(df_processed)
         
         if rows_dropped_due_to_duplicates > 0:
@@ -191,7 +384,6 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
                 f"重複データ {rows_dropped_due_to_duplicates} 行を削除しました"
             )
 
-        # --- 数値列の処理 (既存のロジック) ---
         numeric_cols_to_process = [
             "在院患者数", "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
         ]
@@ -206,57 +398,46 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
                 df_processed[col] = 0
                 validation_results["warnings"].append(f"数値列'{col}'が存在しなかったため、0で補完された列を作成しました。")
 
-        # --- 列名の統一処理 (既存のロジック) ---
         if "在院患者数" in df_processed.columns:
-            df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy() # preprocess.py では rename だったが、ここではコピー＆新規作成
+            df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
             validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
-        elif "入院患者数（在院）" not in df_processed.columns: # どちらもない場合
-            df_processed["入院患者数（在院）"] = 0 # エラー回避のため0で作成
+        elif "入院患者数（在院）" not in df_processed.columns:
+            df_processed["入院患者数（在院）"] = 0
             validation_results["errors"].append("「在院患者数」または「入院患者数（在院）」列が存在しません。「入院患者数（在院）」を0で作成します。")
 
-
-        # --- 派生指標の計算 (既存のロジック) ---
-        # 総入院患者数
         if "入院患者数" in df_processed.columns and "緊急入院患者数" in df_processed.columns:
             df_processed["総入院患者数"] = df_processed["入院患者数"] + df_processed["緊急入院患者数"]
-        elif "入院患者数" in df_processed.columns: # 緊急入院がない場合
+        elif "入院患者数" in df_processed.columns:
              df_processed["総入院患者数"] = df_processed["入院患者数"]
              validation_results["info"].append("「緊急入院患者数」列がないため、「総入院患者数」は「入院患者数」と同じ値になります。")
         else:
             validation_results["warnings"].append("「入院患者数」列がないため、「総入院患者数」は計算できませんでした。0で作成します。")
             df_processed["総入院患者数"] = 0
 
-        # 総退院患者数
         if "退院患者数" in df_processed.columns and "死亡患者数" in df_processed.columns:
             df_processed["総退院患者数"] = df_processed["退院患者数"] + df_processed["死亡患者数"]
-        elif "退院患者数" in df_processed.columns: # 死亡患者数がない場合
+        elif "退院患者数" in df_processed.columns:
             df_processed["総退院患者数"] = df_processed["退院患者数"]
             validation_results["info"].append("「死亡患者数」列がないため、「総退院患者数」は「退院患者数」と同じ値になります。")
         else:
             validation_results["warnings"].append("「退院患者数」列がないため、「総退院患者数」は計算できませんでした。0で作成します。")
             df_processed["総退院患者数"] = 0
             
-        # 新入院患者数 (総入院患者数と同じと仮定する既存ロジックを踏襲)
         if "総入院患者数" in df_processed.columns:
             df_processed["新入院患者数"] = df_processed["総入院患者数"]
         else:
-            df_processed["新入院患者数"] = 0 # 総入院がなければ0
-
-        # --- 移植した関数の呼び出し ---
-        # 延べ在院日数の計算
+            df_processed["新入院患者数"] = 0
+        
+        # **移植した add_patient_days_calculation を呼び出す**
         df_processed = add_patient_days_calculation(df_processed) #
         validation_results["info"].append("延べ在院日数（人日）を計算しました。")
 
-        # 平日/休日フラグの追加 (integrated_preprocessing.py 内の既存関数を使用)
-        if '日付' in df_processed.columns:
+        if '日付' in df_processed.columns: # '日付'列の存在を再確認
             df_processed = add_weekday_flag(df_processed) #
             validation_results["info"].append("平日/休日フラグを追加しました。")
         else:
-            # このエラーは日付処理の段階で既に捕捉されているはずだが念のため
             validation_results["errors"].append("「日付」列がないため、平日/休日フラグを追加できません。")
 
-
-        # --- 移植した検証関数の呼び出しと結果のマージ ---
         general_validation_res = validate_general_data(df_processed) #
         validation_results["warnings"].extend(general_validation_res.get("warnings", []))
         validation_results["errors"].extend(general_validation_res.get("errors", []))
@@ -267,7 +448,6 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         if "summary" in patient_days_validation_res:
             validation_results["summaries"]["patient_days_summary"] = patient_days_validation_res["summary"]
 
-        # 最終的な is_valid の判定（エラーがあれば False）
         if validation_results["errors"]:
             validation_results["is_valid"] = False
             
@@ -276,11 +456,13 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         validation_results["info"].append(f"データ前処理全体時間: {end_time - start_time:.2f}秒")
         validation_results["info"].append(f"処理後のレコード数: {len(df_processed)}")
         if not df_processed.empty and '日付' in df_processed.columns:
-            min_date_str = df_processed['日付'].min().strftime('%Y/%m/%d') if pd.notna(df_processed['日付'].min()) else "不明"
-            max_date_str = df_processed['日付'].max().strftime('%Y/%m/%d') if pd.notna(df_processed['日付'].max()) else "不明"
+            min_date_obj = df_processed['日付'].min()
+            max_date_obj = df_processed['日付'].max()
+            min_date_str = min_date_obj.strftime('%Y/%m/%d') if pd.notna(min_date_obj) else "不明"
+            max_date_str = max_date_obj.strftime('%Y/%m/%d') if pd.notna(max_date_obj) else "不明"
             validation_results["info"].append(f"データ期間: {min_date_str} - {max_date_str}")
         
-        if df_processed.empty and validation_results["is_valid"]: # is_valid が True のまま空になった場合
+        if df_processed.empty and validation_results["is_valid"]:
             validation_results["is_valid"] = False
             validation_results["errors"].append("前処理の結果、有効なデータが残りませんでした。")
             logger.warning("Data became empty after processing but was initially considered valid.")
@@ -293,93 +475,8 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         error_detail = traceback.format_exc()
         validation_results["is_valid"] = False
         validation_results["errors"].append(f"データの前処理中に予期せぬエラーが発生しました: {str(e)}")
-        # validation_results["errors"].append(f"詳細: {error_detail}") # 詳細すぎる場合はログへ
         logger.error(f"前処理エラー: {error_detail}")
         return None, validation_results
-
-# --- preprocess.py の get_patient_days_summary はここに移植 ---
-# (ただし、これは前処理というよりは集計・分析に近い関数なので、
-# 将来的には utils.py や kpi_calculator.py など別の適切な場所に移動することを推奨します)
-@st.cache_data(ttl=3600, show_spinner=False) # 集計結果なのでキャッシュしても良い
-def get_patient_days_summary_integrated(df, start_date=None, end_date=None): # 関数名を変更して区別
-    """
-    延べ在院日数の集計サマリーを取得する (integrated_preprocessing.py バージョン)
-    
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        前処理済みのデータフレーム (既に'延べ在院日数（人日）'列と'日付'列を含む想定)
-    start_date : datetime, optional
-        集計開始日
-    end_date : datetime, optional
-        集計終了日
-        
-    Returns:
-    --------
-    dict
-        集計結果の辞書
-    """
-    # preprocess.py から移植した get_patient_days_summary とほぼ同じロジック
-    # logger を使用するように変更
-    if df is None or df.empty:
-        logger.warning("get_patient_days_summary_integrated: 入力データが空です。")
-        return {"error": "入力データが空です。"}
-    if '延べ在院日数（人日）' not in df.columns:
-        logger.error("get_patient_days_summary_integrated: 延べ在院日数（人日）列が存在しません。")
-        return {"error": "延べ在院日数（人日）列が存在しません。"}
-    if '日付' not in df.columns:
-        logger.error("get_patient_days_summary_integrated: 日付列が存在しません。")
-        return {"error": "日付列が存在しません。"}
-    
-    df_filtered = df.copy()
-    if start_date and end_date:
-        try:
-            start_date_ts = pd.to_datetime(start_date)
-            end_date_ts = pd.to_datetime(end_date)
-            df_filtered = df_filtered[
-                (df_filtered['日付'] >= start_date_ts) & 
-                (df_filtered['日付'] <= end_date_ts)
-            ]
-        except Exception as e:
-            logger.error(f"get_patient_days_summary_integrated: 日付フィルタリングエラー: {e}")
-            return {"error": f"日付フィルタリングエラー: {e}"}
-    
-    if df_filtered.empty:
-        logger.info("get_patient_days_summary_integrated: 指定期間にデータがありません。")
-        return {"error": "指定期間にデータがありません。"}
-    
-    patient_days_series = df_filtered['延べ在院日数（人日）']
-    summary = {
-        "period": {
-            "start_date": df_filtered['日付'].min().strftime('%Y-%m-%d') if not df_filtered['日付'].empty and pd.notna(df_filtered['日付'].min()) else None,
-            "end_date": df_filtered['日付'].max().strftime('%Y-%m-%d') if not df_filtered['日付'].empty and pd.notna(df_filtered['日付'].max()) else None,
-            "days_count": df_filtered['日付'].nunique()
-        },
-        "total_patient_days": patient_days_series.sum(),
-        "avg_daily_patient_days": round(patient_days_series.mean(), 1) if not patient_days_series.empty else 0,
-        "max_daily_patient_days": patient_days_series.max() if not patient_days_series.empty else 0,
-        "min_daily_patient_days": patient_days_series.min() if not patient_days_series.empty else 0
-    }
-    
-    # 診療科別集計
-    if '診療科名' in df_filtered.columns:
-        try:
-            dept_summary = df_filtered.groupby('診療科名')['延べ在院日数（人日）'].sum().to_dict()
-            summary["by_department"] = dept_summary
-        except Exception as e:
-            logger.warning(f"診療科別集計エラー: {e}")
-            summary["by_department"] = {}
-    
-    # 病棟別集計
-    if '病棟コード' in df_filtered.columns:
-        try:
-            ward_summary = df_filtered.groupby('病棟コード')['延べ在院日数（人日）'].sum().to_dict()
-            summary["by_ward"] = ward_summary
-        except Exception as e:
-            logger.warning(f"病棟別集計エラー: {e}")
-            summary["by_ward"] = {}
-            
-    return summary
 
 def add_weekday_flag(df):
     """
