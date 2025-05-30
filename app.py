@@ -58,6 +58,7 @@ from data_persistence import (
     get_data_info, delete_saved_data, get_file_sizes,
     save_settings_to_file, load_settings_from_file,
     get_backup_info, restore_from_backup
+)
 
 def create_sidebar_period_settings():
     """サイドバーの期間設定（改修版）"""
