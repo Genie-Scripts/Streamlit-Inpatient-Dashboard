@@ -10,6 +10,18 @@ from datetime import datetime, timedelta
 import time
 import hashlib
 import gc
+import logging
+
+# 統一フィルター関連のインポート
+from unified_filters import (
+    create_unified_filter_sidebar, 
+    apply_unified_filters, 
+    get_unified_filter_summary,
+    initialize_unified_filters,
+    validate_unified_filters
+)
+
+# ユーティリティ関数のインポート
 from utils import safe_date_filter
 
 # 既存モジュールからのインポート
@@ -63,11 +75,13 @@ except ImportError as e:
     analyze_kpi_insights = None
     get_display_name_for_dept = None
 
+logger = logging.getLogger(__name__)
+
 # ===============================================================================
-# メイン関数群
+# メイン関数群（統一フィルター対応版）
 # ===============================================================================
 def create_detailed_analysis_tab():
-    """詳細分析タブのメイン関数（期間選択分離対応版）"""
+    """詳細分析タブのメイン関数（統一フィルター対応版）"""
     st.header("📈 詳細分析")
     
     # データの確認
@@ -80,35 +94,36 @@ def create_detailed_analysis_tab():
         st.error("分析対象のデータがありません。")
         return
     
-    # グラフ表示用の期間設定を取得（新しい方式）
-    graph_period_type = st.session_state.get('graph_period_selector', '直近12ヶ月')
+    # 統一フィルターの初期化
+    initialize_unified_filters(df)
     
-    # グラフ用期間の計算
-    latest_date = df['日付'].max()
-    if graph_period_type == "直近12ヶ月":
-        graph_start_date = latest_date - pd.Timedelta(days=365)
-    elif graph_period_type == "直近6ヶ月":
-        graph_start_date = latest_date - pd.Timedelta(days=180)
-    else:  # 直近3ヶ月
-        graph_start_date = latest_date - pd.Timedelta(days=90)
-    
-    graph_end_date = latest_date
-    
-    # データ開始日より前にならないように調整
-    actual_graph_start_date = max(graph_start_date, df['日付'].min())
-    
-    # 期間でデータをフィルタリング
-    df_filtered = safe_date_filter(df, actual_graph_start_date, graph_end_date)
-    
-    if df_filtered.empty:
-        st.warning(f"選択された期間（{actual_graph_start_date.date()} ～ {graph_end_date.date()}）にデータがありません。")
+    # 統一フィルターサイドバーの作成
+    filter_config = create_unified_filter_sidebar(df)
+    if filter_config is None:
+        st.error("フィルター設定に問題があります。")
         return
     
-    common_config = st.session_state.get('common_config', {})
+    # フィルターの妥当性チェック
+    is_valid, validation_message = validate_unified_filters(df)
+    if not is_valid:
+        st.error(f"フィルター設定エラー: {validation_message}")
+        return
     
-    # 期間情報を明確に表示
-    period_days = (pd.to_datetime(graph_end_date) - pd.to_datetime(actual_graph_start_date)).days + 1
-    st.info(f"🔍 分析期間: {graph_period_type}（{actual_graph_start_date.date()} ～ {graph_end_date.date()}、{period_days}日間、{len(df_filtered):,}行のデータ）")
+    # 統一フィルター適用
+    df_filtered = apply_unified_filters(df)
+    
+    if df_filtered.empty:
+        st.warning("選択されたフィルター条件にマッチするデータがありません。")
+        return
+    
+    # フィルター情報の表示
+    filter_summary = get_unified_filter_summary()
+    data_count = len(df_filtered)
+    st.info(f"🔍 {filter_summary}")
+    st.success(f"📊 該当データ: {data_count:,}行")
+    
+    # 共通設定の取得
+    common_config = st.session_state.get('common_config', {})
     
     # サブタブの作成
     los_tab, weekday_tab, individual_tab = st.tabs([
@@ -117,19 +132,18 @@ def create_detailed_analysis_tab():
         "🔍 個別分析"
     ])
     
-    # フィルタリング済みデータと期間情報を各セクションに渡す
+    # フィルタリング済みデータと設定を各セクションに渡す
     with los_tab:
-        create_los_analysis_section(df_filtered, actual_graph_start_date, graph_end_date, common_config)
+        create_los_analysis_section(df_filtered, filter_config, common_config)
     
     with weekday_tab:
-        create_weekday_analysis_section(df_filtered, actual_graph_start_date, graph_end_date, common_config)
+        create_weekday_analysis_section(df_filtered, filter_config, common_config)
     
     with individual_tab:
-        # 個別分析は独自の期間選択を持つ場合があるため、全データを渡す
-        create_individual_analysis_section(df, actual_graph_start_date, graph_end_date)
+        create_individual_analysis_section(df_filtered, filter_config)
 
 def create_data_tables_tab():
-    """データテーブルタブのメイン関数（KPI期間対応版）"""
+    """データテーブルタブのメイン関数（統一フィルター対応版）"""
     st.header("📋 データテーブル")
     
     # データの確認
@@ -142,26 +156,14 @@ def create_data_tables_tab():
         st.error("分析対象のデータがありません。")
         return
     
-    # KPI期間設定を使用（データテーブルは短期間の詳細データを見ることが多いため）
-    kpi_period_type = st.session_state.get('kpi_period_selector', '直近30日')
+    # 統一フィルター適用
+    df_filtered = apply_unified_filters(df)
+    filter_summary = get_unified_filter_summary()
+    st.info(f"🔍 {filter_summary}")
     
-    # 期間の計算
-    latest_date = df['日付'].max()
-    if kpi_period_type == "直近30日":
-        start_date = latest_date - pd.Timedelta(days=29)
-        end_date = latest_date
-    elif kpi_period_type == "前月完了分":
-        start_date = (latest_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
-        end_date = latest_date.replace(day=1) - pd.Timedelta(days=1)
-    elif kpi_period_type == "当月実績（月途中）":
-        start_date = latest_date.replace(day=1)
-        end_date = latest_date
-    else:  # 当月予測
-        start_date = latest_date.replace(day=1)
-        end_date = latest_date
-    
-    df_filtered = safe_date_filter(df, start_date, end_date)
-    st.info(f"🔍 表示期間: {kpi_period_type}（{start_date.date()} ～ {end_date.date()}）")
+    if df_filtered.empty:
+        st.warning("選択されたフィルター条件にマッチするデータがありません。")
+        return
     
     # サブタブの作成
     ward_table_tab, dept_table_tab = st.tabs([
@@ -176,7 +178,7 @@ def create_data_tables_tab():
         create_department_table_section(df_filtered)
 
 def create_output_prediction_tab():
-    """出力・予測タブのメイン関数（期間選択対応版）"""
+    """出力・予測タブのメイン関数（統一フィルター対応版）"""
     st.header("📄 出力・予測")
     
     # データの確認
@@ -184,67 +186,19 @@ def create_output_prediction_tab():
         st.warning("まず「データ処理」タブでデータを読み込んでください。")
         return
     
-    # PDF出力用の期間選択UI
-    st.markdown("### PDF出力期間設定")
-    col1, col2 = st.columns(2)
+    df = st.session_state.get('df')
+    if df is None or df.empty:
+        st.error("分析対象のデータがありません。")
+        return
     
-    with col1:
-        pdf_period_options = [
-            "KPI期間と同じ",
-            "グラフ期間と同じ", 
-            "カスタム期間"
-        ]
-        pdf_period_type = st.radio(
-            "PDF出力期間",
-            pdf_period_options,
-            index=1,  # デフォルトはグラフ期間
-            key="pdf_period_selector"
-        )
+    # 統一フィルター適用
+    df_filtered = apply_unified_filters(df)
+    filter_summary = get_unified_filter_summary()
+    st.info(f"🔍 出力・予測期間: {filter_summary}")
     
-    with col2:
-        if pdf_period_type == "カスタム期間":
-            df_for_pdf_dates = st.session_state.get('df') # Ensure it's the original df for min/max
-            if df_for_pdf_dates is not None and not df_for_pdf_dates.empty and '日付' in df_for_pdf_dates.columns:
-                min_date_dt = df_for_pdf_dates['日付'].min().date()
-                max_date_dt = df_for_pdf_dates['日付'].max().date()
-
-                # st.date_input の value は datetime.date を期待
-                default_pdf_start_dt = (pd.Timestamp(max_date_dt) - pd.Timedelta(days=90)).date()
-                if default_pdf_start_dt < min_date_dt: default_pdf_start_dt = min_date_dt
-
-                pdf_start_date_input = st.date_input(
-                    "開始日",
-                    value=default_pdf_start_dt, # date型
-                    min_value=min_date_dt,
-                    max_value=max_date_dt,
-                    key="pdf_custom_start"
-                )
-                pdf_end_date_input = st.date_input(
-                    "終了日",
-                    value=max_date_dt, # date型
-                    min_value=pdf_start_date_input, # 選択された開始日以降
-                    max_value=max_date_dt,
-                    key="pdf_custom_end"
-                )
-                # 後続処理のためにTimestampに変換して保持するならここで
-                # st.session_state.pdf_actual_start_date = pd.to_datetime(pdf_start_date_input).normalize()
-                # st.session_state.pdf_actual_end_date = pd.to_datetime(pdf_end_date_input).normalize()
-                # これらを実際に safe_date_filter や PDF生成関数に渡す
-            else:
-                st.warning("データが読み込まれていません")
-                # pdf_start_date = None # 変数名が衝突しないように
-                # pdf_end_date = None
-        else:
-            # 選択された期間タイプに応じて期間を設定
-            if pdf_period_type == "KPI期間と同じ":
-                # KPI期間の設定を使用
-                kpi_period_type = st.session_state.get('kpi_period_selector', '直近30日')
-                st.info(f"KPI期間（{kpi_period_type}）を使用します")
-            else:  # グラフ期間と同じ
-                graph_period_type = st.session_state.get('graph_period_selector', '直近12ヶ月')
-                st.info(f"グラフ期間（{graph_period_type}）を使用します")
-    
-    st.markdown("---")
+    if df_filtered.empty:
+        st.warning("選択されたフィルター条件にマッチするデータがありません。")
+        return
     
     # サブタブの作成
     individual_pdf_tab, bulk_pdf_tab, prediction_tab = st.tabs([
@@ -254,58 +208,53 @@ def create_output_prediction_tab():
     ])
     
     with individual_pdf_tab:
-        create_individual_pdf_section()
+        create_individual_pdf_section(df_filtered)
     
     with bulk_pdf_tab:
-        create_bulk_pdf_section()
+        create_bulk_pdf_section(df_filtered)
     
     with prediction_tab:
-        create_prediction_analysis_section()
-
-# フォールバック関数の修正（期間情報を明示）
-def create_fallback_los_analysis(df, start_date, end_date):
-    """平均在院日数分析のフォールバック版（期間明示版）"""
-    # 期間情報を明確に表示
-    period_days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1
-    st.info(f"簡易版の平均在院日数分析を表示しています。（{period_days}日間のデータ）")
+        create_prediction_analysis_section(df_filtered)
 
 # ===============================================================================
-# 詳細分析セクション
+# 詳細分析セクション（統一フィルター対応版）
 # ===============================================================================
 
-def create_los_analysis_section(df_filtered, start_date, end_date, common_config):
-    """平均在院日数分析セクション（期間対応版）"""
+def create_los_analysis_section(df_filtered, filter_config, common_config):
+    """平均在院日数分析セクション（統一フィルター対応版）"""
     st.subheader("📊 平均在院日数分析")
     
     if display_alos_analysis_tab:
         try:
-            # フィルタリング済みデータと期間情報を渡す
-            display_alos_analysis_tab(df_filtered, start_date, end_date, common_config)
+            # 統一フィルター済みデータを渡す
+            display_alos_analysis_tab(df_filtered, filter_config, common_config)
             
         except Exception as e:
+            logger.error(f"平均在院日数分析でエラー: {e}")
             st.error(f"平均在院日数分析でエラーが発生しました: {e}")
             st.info("詳細なエラー情報はログを確認してください。")
     else:
         st.warning("平均在院日数分析機能が利用できません。alos_analysis_tab.pyを確認してください。")
-        create_fallback_los_analysis(df_filtered, start_date, end_date)
+        create_fallback_los_analysis(df_filtered, filter_config)
 
-def create_weekday_analysis_section(df_filtered, start_date, end_date, common_config):
-    """曜日別分析セクション（期間対応版）"""
+def create_weekday_analysis_section(df_filtered, filter_config, common_config):
+    """曜日別分析セクション（統一フィルター対応版）"""
     st.subheader("📅 曜日別入退院分析")
     
     if display_dow_analysis_tab:
         try:
-            # フィルタリング済みデータと期間情報を渡す
-            display_dow_analysis_tab(df_filtered, start_date, end_date, common_config)
+            # 統一フィルター済みデータを渡す
+            display_dow_analysis_tab(df_filtered, filter_config, common_config)
         except Exception as e:
+            logger.error(f"曜日別分析でエラー: {e}")
             st.error(f"曜日別分析でエラーが発生しました: {e}")
             st.info("詳細なエラー情報はログを確認してください。")
     else:
         st.warning("曜日別分析機能が利用できません。dow_analysis_tab.pyを確認してください。")
-        create_fallback_dow_analysis(df_filtered, start_date, end_date)
+        create_fallback_dow_analysis(df_filtered, filter_config)
 
-def create_individual_analysis_section(df_filtered, start_date, end_date):
-    """個別分析セクション（期間対応版）"""
+def create_individual_analysis_section(df_filtered, filter_config):
+    """個別分析セクション（統一フィルター対応版）"""
     st.subheader("🔍 個別分析")
     
     if display_individual_analysis_tab:
@@ -313,30 +262,35 @@ def create_individual_analysis_section(df_filtered, start_date, end_date):
             # 個別分析用にセッション状態を一時的に更新
             original_df = st.session_state.get('df')
             st.session_state['df'] = df_filtered  # フィルタリング済みデータを設定
+            st.session_state['unified_filter_applied'] = True  # フィルター適用フラグ
+            st.session_state['current_filter_config'] = filter_config  # フィルター設定を保存
             
             # 個別分析実行
             display_individual_analysis_tab()
             
             # 元のデータを復元
             st.session_state['df'] = original_df
+            st.session_state['unified_filter_applied'] = False
             
         except Exception as e:
+            logger.error(f"個別分析でエラー: {e}")
             st.error(f"個別分析でエラーが発生しました: {e}")
             st.info("詳細なエラー情報はログを確認してください。")
         finally:
             # 念のため元のデータを復元
             if 'original_df' in locals():
                 st.session_state['df'] = original_df
+                st.session_state['unified_filter_applied'] = False
     else:
         st.warning("個別分析機能が利用できません。individual_analysis_tab.pyを確認してください。")
-        create_fallback_individual_analysis()
+        create_fallback_individual_analysis(df_filtered, filter_config)
 
 # ===============================================================================
-# データテーブルセクション
+# データテーブルセクション（統一フィルター対応版）
 # ===============================================================================
 
 def create_ward_table_section(df_filtered):
-    """病棟別データテーブルセクション（病棟名表示対応）"""
+    """病棟別データテーブルセクション（統一フィルター対応版）"""
     st.subheader("🏥 病棟別データテーブル")
     
     try:
@@ -372,92 +326,8 @@ def create_ward_table_section(df_filtered):
                 cols.insert(code_idx + 1, cols.pop(cols.index('病棟名')))
                 ward_summary = ward_summary[cols]
             
-            # フィルタリングオプション（病棟名も含めて選択可能に）
-            col1, col2 = st.columns(2)
-            with col1:
-                # 選択肢を「コード（名前）」形式で表示
-                ward_display_options = []
-                for _, row in ward_summary.iterrows():
-                    code = row['病棟コード']
-                    name = row['病棟名']
-                    if name != str(code):
-                        display_option = f"{code}（{name}）"
-                    else:
-                        display_option = str(code)
-                    ward_display_options.append(display_option)
-                
-                selected_wards = st.multiselect(
-                    "表示する病棟を選択（空白の場合は全て表示）",
-                    options=ward_display_options,
-                    key="ward_table_filter"
-                )
-            
-            with col2:
-                sort_column = st.selectbox(
-                    "並び替え基準",
-                    options=['病棟コード', '平均在院患者数', '総入院患者数', '総退院患者数', '平均在院日数'],
-                    key="ward_table_sort"
-                )
-            
-            # データフィルタリングと並び替え
-            if selected_wards:
-                ward_summary = ward_summary[ward_summary['病棟コード'].isin(selected_wards)]
-            
-            if sort_column in ward_summary.columns:
-                ascending = st.checkbox("昇順で並び替え", key="ward_table_ascending")
-                ward_summary = ward_summary.sort_values(sort_column, ascending=ascending)
-            
-            # テーブル表示
-            # フォーマット辞書を詳細に定義
-            format_dict = {}
-            
-            # 各列のデータ型に応じてフォーマットを設定
-            for col in ward_summary.columns:
-                if col in ['病棟コード', '集計単位']:
-                    # 文字列列はそのまま
-                    continue
-                elif col in ['期間日数', '延べ在院患者数', '総入院患者数', '総退院患者数', 
-                           '緊急入院患者数', '死亡患者数']:
-                    # 整数値として表示（合計値・カウント数）
-                    format_dict[col] = "{:.0f}"
-                elif col in ['平均在院患者数']:
-                    # 小数点1桁で表示（平均値）
-                    format_dict[col] = "{:.1f}"
-                elif col in ['平均在院日数', '病床回転率']:
-                    # 小数点1桁で表示（比率・日数）
-                    format_dict[col] = "{:.1f}"
-                elif col in ['緊急入院率', '死亡率']:
-                    # パーセンテージは小数点1桁 + %
-                    format_dict[col] = "{:.1f}%"
-                else:
-                    # その他の数値列は小数点1桁
-                    if pd.api.types.is_numeric_dtype(ward_summary[col]):
-                        # 整数かどうかを判定
-                        if ward_summary[col].dtype in ['int64', 'int32', 'Int64', 'Int32']:
-                            format_dict[col] = "{:.0f}"
-                        else:
-                            # 平均値かどうかを名前から判定
-                            if '平均' in col or '率' in col or '日数' in col:
-                                format_dict[col] = "{:.1f}"
-                            else:
-                                format_dict[col] = "{:.0f}"
-            
-            # テーブル表示
-            st.dataframe(
-                ward_summary.style.format(format_dict),
-                use_container_width=True,
-                height=400
-            )
-            
-            # CSVダウンロード
-            csv_data = ward_summary.to_csv(index=False).encode('utf-8-sig')
-            period_str = f"{min_date}_{max_date}" if '日付' in df_filtered.columns else "全期間"
-            st.download_button(
-                label="病棟別データをCSVダウンロード",
-                data=csv_data,
-                file_name=f"病棟別データ_{period_str}.csv",
-                mime="text/csv"
-            )
+            # テーブル表示と処理
+            display_ward_table_with_filters(ward_summary, df_filtered)
             
             # 病棟別グラフ
             create_ward_comparison_charts(ward_summary)
@@ -465,30 +335,11 @@ def create_ward_table_section(df_filtered):
             st.warning("病棟別集計データを作成できませんでした。")
             
     except Exception as e:
+        logger.error(f"病棟別テーブル作成エラー: {e}")
         st.error(f"病棟別テーブル作成中にエラーが発生しました: {e}")
 
-# ===== 使用方法の説明 =====
-
-"""
-修正後の使用方法:
-
-1. utils.py に病棟関連の関数を追加
-2. alos_analysis_tab.py と dow_analysis_tab.py で utils.py をインポート
-3. 病棟選択UI で「02A（2階A病棟）」のような表示に変更
-4. 内部的には病棟コードを使用し、表示のみ病棟名を使用
-
-主な変更点:
-- 病棟コード → 病棟名の変換ロジック
-- 選択肢の表示形式の改善
-- セッションステートでのマッピング管理
-- エラーハンドリングの強化
-
-これにより、ユーザーは分かりやすい病棟名で選択でき、
-システム内部では既存の病棟コードベースの処理をそのまま使用できます。
-"""
-
 def create_department_table_section(df_filtered):
-    """診療科別データテーブルセクション（期間フィルタリング済み）"""
+    """診療科別データテーブルセクション（統一フィルター対応版）"""
     st.subheader("🩺 診療科別データテーブル")
     
     try:
@@ -506,34 +357,10 @@ def create_department_table_section(df_filtered):
         dept_summary = calculate_department_summary(df_filtered)
         
         if not dept_summary.empty:
-            # フィルタリングオプション
-            col1, col2 = st.columns(2)
-            with col1:
-                selected_depts = st.multiselect(
-                    "表示する診療科を選択（空白の場合は全て表示）",
-                    options=sorted(dept_summary['診療科名'].unique()),
-                    key="dept_table_filter"
-                )
-            
-            with col2:
-                sort_column = st.selectbox(
-                    "並び替え基準",
-                    options=['診療科名', '平均在院患者数', '総入院患者数', '総退院患者数', '平均在院日数'],
-                    key="dept_table_sort"
-                )
-            
-            # データフィルタリングと並び替え
-            if selected_depts:
-                dept_summary = dept_summary[dept_summary['診療科名'].isin(selected_depts)]
-            
-            if sort_column in dept_summary.columns:
-                ascending = st.checkbox("昇順で並び替え", key="dept_table_ascending")
-                dept_summary = dept_summary.sort_values(sort_column, ascending=ascending)
-            
-            # 診療科名の表示名変換 - dept_mapping パラメータを削除
+            # 診療科名の表示名変換
             if get_display_name_for_dept:
                 dept_summary['診療科表示名'] = dept_summary['診療科名'].apply(
-                    lambda x: get_display_name_for_dept(x, default_name=x)  # dept_mapping引数を削除
+                    lambda x: get_display_name_for_dept(x, default_name=x)
                 )
                 # 表示用に列の順序を調整
                 cols = dept_summary.columns.tolist()
@@ -541,57 +368,8 @@ def create_department_table_section(df_filtered):
                     cols.insert(1, cols.pop(cols.index('診療科表示名')))
                     dept_summary = dept_summary[cols]
             
-            # ===== 修正：数値フォーマットの改善 =====
-            # フォーマット辞書を詳細に定義
-            format_dict = {}
-            
-            # 各列のデータ型に応じてフォーマットを設定
-            for col in dept_summary.columns:
-                if col in ['診療科名', '診療科表示名', '集計単位']:
-                    # 文字列列はそのまま
-                    continue
-                elif col in ['期間日数', '延べ在院患者数', '総入院患者数', '総退院患者数', 
-                           '緊急入院患者数', '死亡患者数']:
-                    # 整数値として表示（合計値など）
-                    format_dict[col] = "{:.0f}"
-                elif col in ['平均在院患者数']:
-                    # 小数点1桁で表示（平均値）
-                    format_dict[col] = "{:.1f}"
-                elif col in ['平均在院日数', '病床回転率']:
-                    # 小数点1桁で表示（比率・日数）
-                    format_dict[col] = "{:.1f}"
-                elif col in ['緊急入院率', '死亡率']:
-                    # パーセンテージは小数点1桁 + %
-                    format_dict[col] = "{:.1f}%"
-                else:
-                    # その他の数値列は小数点1桁
-                    if pd.api.types.is_numeric_dtype(dept_summary[col]):
-                        # 整数かどうかを判定
-                        if dept_summary[col].dtype in ['int64', 'int32', 'Int64', 'Int32']:
-                            format_dict[col] = "{:.0f}"
-                        else:
-                            # 平均値かどうかを名前から判定
-                            if '平均' in col or '率' in col or '日数' in col:
-                                format_dict[col] = "{:.1f}"
-                            else:
-                                format_dict[col] = "{:.0f}"
-            
-            # テーブル表示
-            st.dataframe(
-                dept_summary.style.format(format_dict),
-                use_container_width=True,
-                height=400
-            )
-            
-            # CSVダウンロード
-            csv_data = dept_summary.to_csv(index=False).encode('utf-8-sig')
-            period_str = f"{min_date}_{max_date}" if '日付' in df_filtered.columns else "全期間"
-            st.download_button(
-                label="診療科別データをCSVダウンロード",
-                data=csv_data,
-                file_name=f"診療科別データ_{period_str}.csv",
-                mime="text/csv"
-            )
+            # テーブル表示と処理
+            display_department_table_with_filters(dept_summary, df_filtered)
             
             # 診療科別グラフ
             create_department_comparison_charts(dept_summary)
@@ -599,10 +377,166 @@ def create_department_table_section(df_filtered):
             st.warning("診療科別集計データを作成できませんでした。")
             
     except Exception as e:
+        logger.error(f"診療科別テーブル作成エラー: {e}")
         st.error(f"診療科別テーブル作成中にエラーが発生しました: {e}")
 
 # ===============================================================================
-# 集計処理関数
+# テーブル表示ヘルパー関数
+# ===============================================================================
+
+def display_ward_table_with_filters(ward_summary, df_filtered):
+    """病棟テーブルの表示とフィルタリング処理"""
+    # フィルタリングオプション
+    col1, col2 = st.columns(2)
+    with col1:
+        # 選択肢を「コード（名前）」形式で表示
+        ward_display_options = []
+        for _, row in ward_summary.iterrows():
+            code = row['病棟コード']
+            name = row['病棟名']
+            if name != str(code):
+                display_option = f"{code}（{name}）"
+            else:
+                display_option = str(code)
+            ward_display_options.append(display_option)
+        
+        selected_wards = st.multiselect(
+            "表示する病棟を選択（空白の場合は全て表示）",
+            options=ward_display_options,
+            key="ward_table_filter"
+        )
+    
+    with col2:
+        sort_column = st.selectbox(
+            "並び替え基準",
+            options=['病棟コード', '平均在院患者数', '総入院患者数', '総退院患者数', '平均在院日数'],
+            key="ward_table_sort"
+        )
+    
+    # データフィルタリングと並び替え
+    display_summary = ward_summary.copy()
+    if selected_wards:
+        # 選択された表示名から病棟コードを抽出
+        selected_codes = []
+        for display_ward in selected_wards:
+            # 「コード（名前）」形式から病棟コードを抽出
+            if '（' in display_ward:
+                code = display_ward.split('（')[0]
+            else:
+                code = display_ward
+            selected_codes.append(code)
+        display_summary = display_summary[display_summary['病棟コード'].isin(selected_codes)]
+    
+    if sort_column in display_summary.columns:
+        ascending = st.checkbox("昇順で並び替え", key="ward_table_ascending")
+        display_summary = display_summary.sort_values(sort_column, ascending=ascending)
+    
+    # フォーマット適用とテーブル表示
+    format_dict = create_table_format_dict(display_summary)
+    st.dataframe(
+        display_summary.style.format(format_dict),
+        use_container_width=True,
+        height=400
+    )
+    
+    # CSVダウンロード
+    create_csv_download_button(display_summary, df_filtered, "病棟別データ")
+
+def display_department_table_with_filters(dept_summary, df_filtered):
+    """診療科テーブルの表示とフィルタリング処理"""
+    # フィルタリングオプション
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_depts = st.multiselect(
+            "表示する診療科を選択（空白の場合は全て表示）",
+            options=sorted(dept_summary['診療科名'].unique()),
+            key="dept_table_filter"
+        )
+    
+    with col2:
+        sort_column = st.selectbox(
+            "並び替え基準",
+            options=['診療科名', '平均在院患者数', '総入院患者数', '総退院患者数', '平均在院日数'],
+            key="dept_table_sort"
+        )
+    
+    # データフィルタリングと並び替え
+    display_summary = dept_summary.copy()
+    if selected_depts:
+        display_summary = display_summary[display_summary['診療科名'].isin(selected_depts)]
+    
+    if sort_column in display_summary.columns:
+        ascending = st.checkbox("昇順で並び替え", key="dept_table_ascending")
+        display_summary = display_summary.sort_values(sort_column, ascending=ascending)
+    
+    # フォーマット適用とテーブル表示
+    format_dict = create_table_format_dict(display_summary)
+    st.dataframe(
+        display_summary.style.format(format_dict),
+        use_container_width=True,
+        height=400
+    )
+    
+    # CSVダウンロード
+    create_csv_download_button(display_summary, df_filtered, "診療科別データ")
+
+def create_table_format_dict(summary_df):
+    """テーブル表示用フォーマット辞書の作成"""
+    format_dict = {}
+    
+    for col in summary_df.columns:
+        if col in ['病棟コード', '診療科名', '診療科表示名', '病棟名', '集計単位']:
+            # 文字列列はそのまま
+            continue
+        elif col in ['期間日数', '延べ在院患者数', '総入院患者数', '総退院患者数', 
+                   '緊急入院患者数', '死亡患者数']:
+            # 整数値として表示（合計値・カウント数）
+            format_dict[col] = "{:.0f}"
+        elif col in ['平均在院患者数']:
+            # 小数点1桁で表示（平均値）
+            format_dict[col] = "{:.1f}"
+        elif col in ['平均在院日数', '病床回転率']:
+            # 小数点1桁で表示（比率・日数）
+            format_dict[col] = "{:.1f}"
+        elif col in ['緊急入院率', '死亡率']:
+            # パーセンテージは小数点1桁 + %
+            format_dict[col] = "{:.1f}%"
+        else:
+            # その他の数値列は小数点1桁
+            if pd.api.types.is_numeric_dtype(summary_df[col]):
+                # 整数かどうかを判定
+                if summary_df[col].dtype in ['int64', 'int32', 'Int64', 'Int32']:
+                    format_dict[col] = "{:.0f}"
+                else:
+                    # 平均値かどうかを名前から判定
+                    if '平均' in col or '率' in col or '日数' in col:
+                        format_dict[col] = "{:.1f}"
+                    else:
+                        format_dict[col] = "{:.0f}"
+    
+    return format_dict
+
+def create_csv_download_button(summary_df, df_filtered, data_type):
+    """CSVダウンロードボタンの作成"""
+    csv_data = summary_df.to_csv(index=False).encode('utf-8-sig')
+    
+    # 期間文字列の生成
+    if '日付' in df_filtered.columns:
+        min_date = df_filtered['日付'].min().date()
+        max_date = df_filtered['日付'].max().date()
+        period_str = f"{min_date}_{max_date}"
+    else:
+        period_str = "全期間"
+    
+    st.download_button(
+        label=f"{data_type}をCSVダウンロード",
+        data=csv_data,
+        file_name=f"{data_type}_{period_str}.csv",
+        mime="text/csv"
+    )
+
+# ===============================================================================
+# 集計処理関数（既存関数をそのまま使用）
 # ===============================================================================
 
 def calculate_ward_summary(df):
@@ -686,6 +620,7 @@ def calculate_ward_summary(df):
         return ward_summary
         
     except Exception as e:
+        logger.error(f"病棟別サマリー計算エラー: {e}")
         st.error(f"病棟別サマリー計算中にエラー: {e}")
         return pd.DataFrame()
 
@@ -765,11 +700,12 @@ def calculate_department_summary(df):
         return dept_summary
         
     except Exception as e:
+        logger.error(f"診療科別サマリー計算エラー: {e}")
         st.error(f"診療科別サマリー計算中にエラー: {e}")
         return pd.DataFrame()
 
 # ===============================================================================
-# グラフ作成関数
+# グラフ作成関数（既存関数をそのまま使用）
 # ===============================================================================
 
 def create_ward_comparison_charts(ward_summary):
@@ -820,6 +756,7 @@ def create_ward_comparison_charts(ward_summary):
         st.plotly_chart(fig_scatter, use_container_width=True)
         
     except Exception as e:
+        logger.error(f"病棟別グラフ作成エラー: {e}")
         st.error(f"病棟別グラフ作成中にエラー: {e}")
 
 def create_department_comparison_charts(dept_summary):
@@ -874,37 +811,18 @@ def create_department_comparison_charts(dept_summary):
         st.plotly_chart(fig_rates, use_container_width=True)
         
     except Exception as e:
+        logger.error(f"診療科別グラフ作成エラー: {e}")
         st.error(f"診療科別グラフ作成中にエラー: {e}")
 
 # ===============================================================================
-# 出力・予測セクション
+# 出力・予測セクション（統一フィルター対応版）
 # ===============================================================================
 
-def create_individual_pdf_section():
-    """個別PDF出力セクション"""
+def create_individual_pdf_section(df_filtered):
+    """個別PDF出力セクション（統一フィルター対応版）"""
     st.subheader("📄 個別PDF出力")
     
-    if not st.session_state.get('data_processed', False):
-        st.warning("まず「データ処理」タブでデータを読み込んでください。")
-        return
-    
-    df = st.session_state.get('df')
     target_data = st.session_state.get('target_data')
-    
-    if df is None or df.empty:
-        st.error("分析対象のデータがありません。")
-        return
-    
-    # 期間設定の適用
-    start_date = st.session_state.get('analysis_start_date')
-    end_date = st.session_state.get('analysis_end_date')
-    
-    if start_date and end_date:
-        df_for_pdf = safe_date_filter(df, start_date, end_date)
-        st.info(f"📄 PDF出力期間: {start_date} ～ {end_date}")
-    else:
-        df_for_pdf = df
-        st.info("📄 全期間のデータでPDF出力")
     
     try:
         # PDF出力設定
@@ -927,7 +845,7 @@ def create_individual_pdf_section():
         # 対象選択
         target_items = []
         if output_type == "診療科別":
-            available_depts = sorted(df_for_pdf['診療科名'].unique())
+            available_depts = sorted(df_filtered['診療科名'].unique())
             target_items = st.multiselect(
                 "出力対象診療科",
                 available_depts,
@@ -935,7 +853,7 @@ def create_individual_pdf_section():
                 key="pdf_target_depts"
             )
         elif output_type == "病棟別":
-            available_wards = sorted(df_for_pdf['病棟コード'].unique())
+            available_wards = sorted(df_filtered['病棟コード'].unique())
             target_items = st.multiselect(
                 "出力対象病棟",
                 available_wards,
@@ -959,54 +877,45 @@ def create_individual_pdf_section():
                 st.warning("出力対象を選択してください。")
             else:
                 generate_individual_pdfs(
-                    df_for_pdf, target_data, output_type, target_items, 
+                    df_filtered, target_data, output_type, target_items, 
                     pdf_orientation, graph_days
                 )
     
     except Exception as e:
+        logger.error(f"個別PDF出力設定エラー: {e}")
         st.error(f"個別PDF出力設定中にエラーが発生しました: {e}")
 
-def create_bulk_pdf_section():
-    """一括PDF出力セクション"""
+def create_bulk_pdf_section(df_filtered):
+    """一括PDF出力セクション（統一フィルター対応版）"""
     st.subheader("📚 一括PDF出力")
     
-    if not st.session_state.get('data_processed', False):
-        st.warning("まず「データ処理」タブでデータを読み込んでください。")
-        return
-    
-    df = st.session_state.get('df')
-    target_data = st.session_state.get('target_data')
-    
-    if df is None or df.empty:
-        st.error("分析対象のデータがありません。")
-        return
-    
-    # 期間設定の適用
-    start_date = st.session_state.get('analysis_start_date')
-    end_date = st.session_state.get('analysis_end_date')
-    
-    if start_date and end_date:
-        df_for_pdf = safe_date_filter(df, start_date, end_date)
-        st.info(f"📚 一括PDF期間: {start_date} ～ {end_date}")
-    else:
-        df_for_pdf = df
-        st.info("📚 全期間のデータで一括PDF出力")
-    
-    st.info("一括PDF出力機能により、全診療科または全病棟のPDFレポートを一度に生成できます。")
+    filter_summary = get_unified_filter_summary()
+    st.info(f"📚 一括PDF対象: {filter_summary}")
+    st.info("一括PDF出力機能により、フィルター条件に該当する全診療科または全病棟のPDFレポートを一度に生成できます。")
 
-def create_prediction_analysis_section():
-    """予測分析セクション"""
+def create_prediction_analysis_section(df_filtered):
+    """予測分析セクション（統一フィルター対応版）"""
     st.subheader("🔮 予測分析")
     
     if display_forecast_analysis_tab:
         try:
+            # フィルタリング済みデータで予測分析を実行
+            original_df = st.session_state.get('df')
+            st.session_state['df'] = df_filtered
+            
             display_forecast_analysis_tab()
+            
+            st.session_state['df'] = original_df
         except Exception as e:
+            logger.error(f"予測分析エラー: {e}")
             st.error(f"予測分析でエラーが発生しました: {e}")
             st.info("詳細なエラー情報はログを確認してください。")
+        finally:
+            if 'original_df' in locals():
+                st.session_state['df'] = original_df
     else:
         st.warning("予測分析機能が利用できません。forecast_analysis_tab.pyを確認してください。")
-        create_fallback_prediction_analysis()
+        create_fallback_prediction_analysis(df_filtered)
 
 # ===============================================================================
 # PDF生成関数（シンプル版）
@@ -1019,26 +928,33 @@ def generate_individual_pdfs(df, target_data, output_type, target_items, orienta
             st.error("PDF生成機能が利用できません。")
             return
         
+        filter_summary = get_unified_filter_summary()
+        st.info(f"PDF生成対象: {filter_summary}")
         st.info("PDF生成機能は実装中です。")
         
     except Exception as e:
+        logger.error(f"PDF生成エラー: {e}")
         st.error(f"PDF生成中にエラーが発生しました: {e}")
 
 # ===============================================================================
-# フォールバック関数群
+# フォールバック関数群（統一フィルター対応版）
 # ===============================================================================
 
-def create_fallback_los_analysis(df, start_date, end_date):
-    """平均在院日数分析のフォールバック版"""
+def create_fallback_los_analysis(df_filtered, filter_config):
+    """平均在院日数分析のフォールバック版（統一フィルター対応版）"""
     st.info("簡易版の平均在院日数分析を表示しています。")
     
     try:
-        if df.empty:
-            st.warning("指定された期間にデータがありません。")
+        if df_filtered.empty:
+            st.warning("フィルター条件にマッチするデータがありません。")
             return
         
+        # 基本統計の表示
+        filter_summary = get_unified_filter_summary()
+        st.info(f"分析対象: {filter_summary}")
+        
         # 利用可能な列名を確認
-        available_columns = df.columns.tolist()
+        available_columns = df_filtered.columns.tolist()
         
         # 列名のマッピング
         column_mapping = {
@@ -1064,16 +980,16 @@ def create_fallback_los_analysis(df, start_date, end_date):
             return
         
         # 基本的な平均在院日数計算
-        total_patient_days = df[actual_columns['在院患者数']].sum()
-        total_admissions = df[actual_columns['入院患者数']].sum()
-        total_discharges = df[actual_columns['退院患者数']].sum()
+        total_patient_days = df_filtered[actual_columns['在院患者数']].sum()
+        total_admissions = df_filtered[actual_columns['入院患者数']].sum()
+        total_discharges = df_filtered[actual_columns['退院患者数']].sum()
         
         if (total_admissions + total_discharges) > 0:
             alos = total_patient_days / ((total_admissions + total_discharges) / 2)
             st.metric("平均在院日数", f"{alos:.2f}日")
         
         # 日別トレンド
-        daily_alos = df.groupby('日付', observed=True).agg({
+        daily_alos = df_filtered.groupby('日付', observed=True).agg({
             actual_columns['在院患者数']: 'sum',
             actual_columns['入院患者数']: 'sum',
             actual_columns['退院患者数']: 'sum'
@@ -1096,24 +1012,29 @@ def create_fallback_los_analysis(df, start_date, end_date):
             daily_alos,
             x='日付',
             y='平均在院日数',
-            title=f'日別平均在院日数推移 ({start_date} ～ {end_date})'
+            title=f'日別平均在院日数推移（フィルター適用済み）'
         )
         st.plotly_chart(fig, use_container_width=True)
     
     except Exception as e:
+        logger.error(f"フォールバック版平均在院日数分析エラー: {e}")
         st.error(f"フォールバック版平均在院日数分析でエラー: {e}")
 
-def create_fallback_dow_analysis(df, start_date, end_date):
-    """曜日別分析のフォールバック版"""
+def create_fallback_dow_analysis(df_filtered, filter_config):
+    """曜日別分析のフォールバック版（統一フィルター対応版）"""
     st.info("簡易版の曜日別分析を表示しています。")
     
     try:
-        if df.empty:
-            st.warning("指定された期間にデータがありません。")
+        if df_filtered.empty:
+            st.warning("フィルター条件にマッチするデータがありません。")
             return
         
+        # 基本統計の表示
+        filter_summary = get_unified_filter_summary()
+        st.info(f"分析対象: {filter_summary}")
+        
         # 曜日の追加
-        df_copy = df.copy()
+        df_copy = df_filtered.copy()
         df_copy['曜日'] = df_copy['日付'].dt.day_name()
         df_copy['曜日番号'] = df_copy['日付'].dt.dayofweek
         
@@ -1135,7 +1056,7 @@ def create_fallback_dow_analysis(df, start_date, end_date):
             dow_summary,
             x='曜日',
             y=patient_columns[:3],  # 最大3つまで表示
-            title=f'曜日別平均患者数 ({start_date} ～ {end_date})',
+            title=f'曜日別平均患者数（フィルター適用済み）',
             barmode='group'
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -1144,14 +1065,19 @@ def create_fallback_dow_analysis(df, start_date, end_date):
         st.dataframe(dow_summary, use_container_width=True)
         
     except Exception as e:
+        logger.error(f"フォールバック版曜日別分析エラー: {e}")
         st.error(f"フォールバック版曜日別分析でエラー: {e}")
 
-def create_fallback_individual_analysis():
-    """個別分析のフォールバック版"""
+def create_fallback_individual_analysis(df_filtered, filter_config):
+    """個別分析のフォールバック版（統一フィルター対応版）"""
     st.info("個別分析機能が利用できません。")
+    filter_summary = get_unified_filter_summary()
+    st.info(f"分析対象: {filter_summary}")
     st.write("individual_analysis_tab.pyモジュールを確認してください。")
 
-def create_fallback_prediction_analysis():
-    """予測分析のフォールバック版"""
+def create_fallback_prediction_analysis(df_filtered):
+    """予測分析のフォールバック版（統一フィルター対応版）"""
     st.info("予測分析機能が利用できません。")
+    filter_summary = get_unified_filter_summary()
+    st.info(f"分析対象: {filter_summary}")
     st.write("forecast_analysis_tab.pyモジュールを確認してください。")
