@@ -14,11 +14,12 @@ import logging
 
 # 統一フィルター関連のインポート
 from unified_filters import (
-    create_unified_filter_sidebar, 
-    apply_unified_filters, 
+    create_unified_filter_sidebar,
+    apply_unified_filters,
     get_unified_filter_summary,
     initialize_unified_filters,
-    validate_unified_filters
+    validate_unified_filters,
+    get_unified_filter_config
 )
 
 # ユーティリティ関数のインポート
@@ -26,40 +27,21 @@ from utils import safe_date_filter
 
 # 既存モジュールからのインポート
 try:
-    # ALOS分析関連
     from alos_analysis_tab import display_alos_analysis_tab
-    
-    # 曜日別分析関連
     from dow_analysis_tab import display_dow_analysis_tab
-    
-    # 個別分析関連
     from individual_analysis_tab import display_individual_analysis_tab
-    
-    # 予測分析関連
     from forecast_analysis_tab import display_forecast_analysis_tab
-    
-    # チャート作成関連
     from chart import (
-        create_interactive_patient_chart, 
+        create_interactive_patient_chart,
         create_interactive_dual_axis_chart,
         create_forecast_comparison_chart
     )
-    
-    # PDF生成関連
     from pdf_generator import create_pdf, create_landscape_pdf
-    
-    # 予測・集計関連
     from forecast import generate_filtered_summaries, create_forecast_dataframe
-    
-    # KPI計算関連
     from kpi_calculator import calculate_kpis, analyze_kpi_insights
-    
-    # ユーティリティ関数
     from utils import get_display_name_for_dept
-    
 except ImportError as e:
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
-    # フォールバック用のダミー関数を定義
     display_alos_analysis_tab = None
     display_dow_analysis_tab = None
     display_individual_analysis_tab = None
@@ -74,6 +56,7 @@ except ImportError as e:
     calculate_kpis = None
     analyze_kpi_insights = None
     get_display_name_for_dept = None
+    get_unified_filter_config = None
 
 logger = logging.getLogger(__name__)
 
@@ -83,136 +66,148 @@ logger = logging.getLogger(__name__)
 def create_detailed_analysis_tab():
     """詳細分析タブのメイン関数（統一フィルター対応版）"""
     st.header("📈 詳細分析")
-    
-    # データの確認
+
     if not st.session_state.get('data_processed', False):
         st.warning("まず「データ処理」タブでデータを読み込んでください。")
         return
-    
+
     df = st.session_state.get('df')
     if df is None or df.empty:
         st.error("分析対象のデータがありません。")
         return
-    
-    # 統一フィルターの初期化
+
+    if get_unified_filter_config is None:
+        st.error("統一フィルター機能が利用できません。unified_filters.py を確認してください。")
+        return
+
     initialize_unified_filters(df)
-    
-    # 統一フィルターサイドバーの作成
     filter_config = create_unified_filter_sidebar(df)
     if filter_config is None:
-        st.error("フィルター設定に問題があります。")
         return
-    
-    # フィルターの妥当性チェック
+
     is_valid, validation_message = validate_unified_filters(df)
     if not is_valid:
         st.error(f"フィルター設定エラー: {validation_message}")
         return
-    
-    # 統一フィルター適用
+
     df_filtered = apply_unified_filters(df)
-    
+
     if df_filtered.empty:
+        filter_summary_on_empty = get_unified_filter_summary()
+        st.info(f"🔍 {filter_summary_on_empty}")
         st.warning("選択されたフィルター条件にマッチするデータがありません。")
         return
-    
-    # フィルター情報の表示
+
     filter_summary = get_unified_filter_summary()
     data_count = len(df_filtered)
     st.info(f"🔍 {filter_summary}")
     st.success(f"📊 該当データ: {data_count:,}行")
-    
-    # 共通設定の取得
+
     common_config = st.session_state.get('common_config', {})
-    
-    # サブタブの作成
+
     los_tab, weekday_tab, individual_tab = st.tabs([
-        "📊 平均在院日数分析", 
-        "📅 曜日別入退院分析", 
+        "📊 平均在院日数分析",
+        "📅 曜日別入退院分析",
         "🔍 個別分析"
     ])
-    
-    # フィルタリング済みデータと設定を各セクションに渡す
+
     with los_tab:
         create_los_analysis_section(df_filtered, filter_config, common_config)
-    
+
     with weekday_tab:
         create_weekday_analysis_section(df_filtered, filter_config, common_config)
-    
+
     with individual_tab:
         create_individual_analysis_section(df_filtered, filter_config)
 
 def create_data_tables_tab():
     """データテーブルタブのメイン関数（統一フィルター対応版）"""
     st.header("📋 データテーブル")
-    
-    # データの確認
+
     if not st.session_state.get('data_processed', False):
         st.warning("まず「データ処理」タブでデータを読み込んでください。")
         return
-    
-    df = st.session_state.get('df')
-    if df is None or df.empty:
+
+    df_original = st.session_state.get('df')
+    if df_original is None or df_original.empty:
         st.error("分析対象のデータがありません。")
         return
-    
-    # 統一フィルター適用
-    df_filtered = apply_unified_filters(df)
+
+    if get_unified_filter_config is None:
+        st.error("統一フィルター機能が利用できません。unified_filters.py を確認してください。")
+        return
+    initialize_unified_filters(df_original)
+
+    # 統一フィルターを適用するために filter_config を取得 (サイドバー表示はメインの create_detailed_analysis_tab で行われる想定)
+    # もしこのタブ単独でフィルターを操作させたい場合は create_unified_filter_sidebar を呼ぶ必要があるが、
+    # 通常はメインのフィルター設定が引き継がれるべき。
+    # get_unified_filter_config() で現在のフィルター設定を取得できる。
+    current_filter_config = get_unified_filter_config()
+    if current_filter_config is None:
+        # フィルターがまだ設定されていない場合（初回アクセスなど）、
+        # create_unified_filter_sidebar を呼んで初期化・設定を促すか、
+        # デフォルトフィルターを適用する。ここでは apply_unified_filters がよしなに扱うことを期待。
+        pass
+
+
+    df_filtered = apply_unified_filters(df_original)
     filter_summary = get_unified_filter_summary()
     st.info(f"🔍 {filter_summary}")
-    
+
     if df_filtered.empty:
         st.warning("選択されたフィルター条件にマッチするデータがありません。")
         return
-    
-    # サブタブの作成
+
     ward_table_tab, dept_table_tab = st.tabs([
-        "🏥 病棟別データテーブル", 
+        "🏥 病棟別データテーブル",
         "🩺 診療科別データテーブル"
     ])
-    
+
     with ward_table_tab:
         create_ward_table_section(df_filtered)
-    
+
     with dept_table_tab:
         create_department_table_section(df_filtered)
+
 
 def create_output_prediction_tab():
     """出力・予測タブのメイン関数（統一フィルター対応版）"""
     st.header("📄 出力・予測")
-    
-    # データの確認
+
     if not st.session_state.get('data_processed', False):
         st.warning("まず「データ処理」タブでデータを読み込んでください。")
         return
-    
-    df = st.session_state.get('df')
-    if df is None or df.empty:
+
+    df_original = st.session_state.get('df')
+    if df_original is None or df_original.empty:
         st.error("分析対象のデータがありません。")
         return
-    
-    # 統一フィルター適用
-    df_filtered = apply_unified_filters(df)
+
+    if get_unified_filter_config is None:
+        st.error("統一フィルター機能が利用できません。unified_filters.py を確認してください。")
+        return
+    initialize_unified_filters(df_original)
+
+    df_filtered = apply_unified_filters(df_original)
     filter_summary = get_unified_filter_summary()
     st.info(f"🔍 出力・予測期間: {filter_summary}")
-    
+
     if df_filtered.empty:
         st.warning("選択されたフィルター条件にマッチするデータがありません。")
         return
-    
-    # サブタブの作成
+
     individual_pdf_tab, bulk_pdf_tab, prediction_tab = st.tabs([
-        "📄 個別PDF出力", 
-        "📚 一括PDF出力", 
+        "📄 個別PDF出力",
+        "📚 一括PDF出力",
         "🔮 予測分析"
     ])
-    
+
     with individual_pdf_tab:
         create_individual_pdf_section(df_filtered)
-    
+
     with bulk_pdf_tab:
         create_bulk_pdf_section(df_filtered)
-    
+
     with prediction_tab:
         create_prediction_analysis_section(df_filtered)
 
@@ -223,14 +218,26 @@ def create_output_prediction_tab():
 def create_los_analysis_section(df_filtered, filter_config, common_config):
     """平均在院日数分析セクション（統一フィルター対応版）"""
     st.subheader("📊 平均在院日数分析")
-    
+
     if display_alos_analysis_tab:
         try:
-            # 統一フィルター済みデータを渡す
-            display_alos_analysis_tab(df_filtered, filter_config, common_config)
-            
+            start_date = filter_config.get('start_date')
+            end_date = filter_config.get('end_date')
+
+            if start_date is None or end_date is None:
+                st.error("期間設定がフィルター設定に含まれていません。")
+                logger.error("LOS分析: filter_configからstart_dateまたはend_dateが取得できませんでした。")
+                return
+
+            if not isinstance(start_date, pd.Timestamp):
+                start_date = pd.Timestamp(start_date)
+            if not isinstance(end_date, pd.Timestamp):
+                end_date = pd.Timestamp(end_date)
+
+            display_alos_analysis_tab(df_filtered, start_date, end_date, common_config)
+
         except Exception as e:
-            logger.error(f"平均在院日数分析でエラー: {e}")
+            logger.error(f"平均在院日数分析でエラー: {e}", exc_info=True)
             st.error(f"平均在院日数分析でエラーが発生しました: {e}")
             st.info("詳細なエラー情報はログを確認してください。")
     else:
@@ -240,50 +247,78 @@ def create_los_analysis_section(df_filtered, filter_config, common_config):
 def create_weekday_analysis_section(df_filtered, filter_config, common_config):
     """曜日別分析セクション（統一フィルター対応版）"""
     st.subheader("📅 曜日別入退院分析")
-    
+
     if display_dow_analysis_tab:
         try:
-            # 統一フィルター済みデータを渡す
-            display_dow_analysis_tab(df_filtered, filter_config, common_config)
+            start_date = filter_config.get('start_date')
+            end_date = filter_config.get('end_date')
+
+            if start_date is None or end_date is None:
+                st.error("期間設定がフィルター設定に含まれていません。")
+                logger.error("曜日別分析: filter_configからstart_dateまたはend_dateが取得できませんでした。")
+                return
+
+            if not isinstance(start_date, pd.Timestamp):
+                start_date = pd.Timestamp(start_date)
+            if not isinstance(end_date, pd.Timestamp):
+                end_date = pd.Timestamp(end_date)
+
+            display_dow_analysis_tab(df_filtered, start_date, end_date, common_config)
         except Exception as e:
-            logger.error(f"曜日別分析でエラー: {e}")
+            logger.error(f"曜日別分析でエラー: {e}", exc_info=True)
             st.error(f"曜日別分析でエラーが発生しました: {e}")
             st.info("詳細なエラー情報はログを確認してください。")
     else:
         st.warning("曜日別分析機能が利用できません。dow_analysis_tab.pyを確認してください。")
         create_fallback_dow_analysis(df_filtered, filter_config)
 
-def create_individual_analysis_section(df_filtered, filter_config):
+def create_individual_analysis_section(df_filtered, filter_config_from_caller):
     """個別分析セクション（統一フィルター対応版）"""
     st.subheader("🔍 個別分析")
-    
+
     if display_individual_analysis_tab:
+        original_df_in_session = st.session_state.get('df')
+        original_all_results = st.session_state.get('all_results') # 元のall_resultsを保持
+        original_latest_date_str = st.session_state.get('latest_data_date_str') # 元のlatest_data_date_strを保持
+
+
+        # フィルター済みデータに基づいて all_results を生成/設定
+        if generate_filtered_summaries and df_filtered is not None and not df_filtered.empty:
+            st.session_state.all_results = generate_filtered_summaries(df_filtered, None, None)
+        else:
+            st.session_state.all_results = None
+
+        # フィルター済みデータに基づいて latest_data_date_str を設定
+        if df_filtered is not None and not df_filtered.empty and '日付' in df_filtered.columns:
+            st.session_state.latest_data_date_str = df_filtered['日付'].max().strftime("%Y年%m月%d日")
+        elif original_latest_date_str: # フォールバックとして元の値
+             st.session_state.latest_data_date_str = original_latest_date_str
+        else: # それもなければ現在時刻
+            st.session_state.latest_data_date_str = pd.Timestamp.now().strftime("%Y年%m月%d日")
+
+
+        st.session_state['df'] = df_filtered
+        st.session_state['unified_filter_applied'] = True
+        # filter_config_from_caller は individual_analysis_tab.py が get_unified_filter_config() で取得するため、
+        # ここでセッションに 'current_filter_config' として保存する必要はない。
+        # get_unified_filter_config() が正しく filter_config_from_caller (または同等のもの) を返すように
+        # unified_filters.py が st.session_state[self.config_key] に保存していることが前提。
+
         try:
-            # 個別分析用にセッション状態を一時的に更新
-            original_df = st.session_state.get('df')
-            st.session_state['df'] = df_filtered  # フィルタリング済みデータを設定
-            st.session_state['unified_filter_applied'] = True  # フィルター適用フラグ
-            st.session_state['current_filter_config'] = filter_config  # フィルター設定を保存
-            
-            # 個別分析実行
             display_individual_analysis_tab()
-            
-            # 元のデータを復元
-            st.session_state['df'] = original_df
-            st.session_state['unified_filter_applied'] = False
-            
         except Exception as e:
-            logger.error(f"個別分析でエラー: {e}")
+            logger.error(f"個別分析でエラー: {e}", exc_info=True)
             st.error(f"個別分析でエラーが発生しました: {e}")
             st.info("詳細なエラー情報はログを確認してください。")
         finally:
-            # 念のため元のデータを復元
-            if 'original_df' in locals():
-                st.session_state['df'] = original_df
-                st.session_state['unified_filter_applied'] = False
+            st.session_state['df'] = original_df_in_session
+            st.session_state['unified_filter_applied'] = False
+            st.session_state['all_results'] = original_all_results # 元のall_resultsに戻す
+            st.session_state['latest_data_date_str'] = original_latest_date_str # 元の日付文字列に戻す
+
     else:
         st.warning("個別分析機能が利用できません。individual_analysis_tab.pyを確認してください。")
-        create_fallback_individual_analysis(df_filtered, filter_config)
+        create_fallback_individual_analysis(df_filtered, filter_config_from_caller)
 
 # ===============================================================================
 # データテーブルセクション（統一フィルター対応版）
@@ -542,10 +577,7 @@ def create_csv_download_button(summary_df, df_filtered, data_type):
 def calculate_ward_summary(df):
     """病棟別サマリーデータの計算"""
     try:
-        # 実際に存在する列名を確認
         available_columns = df.columns.tolist()
-        
-        # 列名のマッピング（柔軟な対応）
         column_mapping = {
             '在院患者数': ['入院患者数（在院）', '在院患者数', '現在患者数'],
             '入院患者数': ['総入院患者数', '入院患者数', '新規入院患者数'],
@@ -553,83 +585,86 @@ def calculate_ward_summary(df):
             '緊急入院患者数': ['緊急入院患者数', '救急入院患者数', '緊急入院'],
             '死亡患者数': ['死亡患者数', '死亡者数', '死亡']
         }
-        
-        # 実際に使用する列名を決定
         actual_columns = {}
         missing_columns = []
         
         for standard_name, possible_names in column_mapping.items():
-            found_column = None
-            for possible_name in possible_names:
-                if possible_name in available_columns:
-                    found_column = possible_name
-                    break
-            
+            found_column = next((pn for pn in possible_names if pn in available_columns), None)
             if found_column:
                 actual_columns[standard_name] = found_column
             else:
                 missing_columns.append(standard_name)
         
         if missing_columns:
-            st.error(f"病棟別集計に必要な列が見つかりません: {missing_columns}")
-            return pd.DataFrame()
+            # st.error は呼び出し元で行うか、エラー状態を返すようにする
+            logger.error(f"病棟別集計に必要な列が見つかりません: {missing_columns}")
+            return pd.DataFrame() # 空のDataFrameを返す
         
-        # 病棟別集計（実際の列名を使用）
         ward_groups = df.groupby('病棟コード', observed=True)
-        
-        ward_summary = pd.DataFrame({
+        ward_summary_data = {
             '病棟コード': ward_groups['病棟コード'].first(),
             '期間日数': ward_groups['日付'].nunique(),
-            '延べ在院患者数': ward_groups[actual_columns['在院患者数']].sum(),
-            '総入院患者数': ward_groups[actual_columns['入院患者数']].sum(),
-            '総退院患者数': ward_groups[actual_columns['退院患者数']].sum(),
-            '緊急入院患者数': ward_groups[actual_columns['緊急入院患者数']].sum(),
-            '死亡患者数': ward_groups[actual_columns['死亡患者数']].sum()
-        }).reset_index(drop=True)
-        
-        # 計算指標の追加
+        }
+        for standard_name, actual_col_name in actual_columns.items():
+            # Ensure the column exists before trying to sum it, even if mapped
+            if actual_col_name in df.columns:
+                 # Standardize the output column name using the sum of the actual column name
+                if standard_name == '在院患者数':
+                    ward_summary_data['延べ在院患者数'] = ward_groups[actual_col_name].sum()
+                elif standard_name == '入院患者数':
+                     ward_summary_data['総入院患者数'] = ward_groups[actual_col_name].sum()
+                elif standard_name == '退院患者数':
+                     ward_summary_data['総退院患者数'] = ward_groups[actual_col_name].sum()
+                elif standard_name == '緊急入院患者数':
+                     ward_summary_data['緊急入院患者数'] = ward_groups[actual_col_name].sum()
+                elif standard_name == '死亡患者数':
+                     ward_summary_data['死亡患者数'] = ward_groups[actual_col_name].sum()
+
+            else:
+                # This case should ideally not be reached if missing_columns check is robust
+                logger.warning(f"病棟別集計: 列 '{actual_col_name}' (対応する標準名: '{standard_name}') がデータに存在しません。集計から除外します。")
+
+
+        ward_summary = pd.DataFrame(ward_summary_data).reset_index(drop=True)
+
+        # Check if all necessary sum columns were created before proceeding
+        required_sum_cols = ['延べ在院患者数', '総入院患者数', '総退院患者数', '緊急入院患者数', '死亡患者数']
+        if not all(col in ward_summary.columns for col in required_sum_cols):
+            logger.error(f"病棟別サマリー計算に必要な集計列が不足しています。生成された列: {list(ward_summary.columns)}")
+            return pd.DataFrame()
+
         ward_summary['平均在院患者数'] = ward_summary['延べ在院患者数'] / ward_summary['期間日数']
-        
-        # 平均在院日数の計算
         ward_summary['平均在院日数'] = ward_summary.apply(
             lambda row: row['延べ在院患者数'] / ((row['総入院患者数'] + row['総退院患者数']) / 2)
             if (row['総入院患者数'] + row['総退院患者数']) > 0 else 0,
             axis=1
         )
-        
-        # 病床回転率の計算
         ward_summary['病床回転率'] = ward_summary.apply(
             lambda row: row['総退院患者数'] / row['平均在院患者数'] 
             if row['平均在院患者数'] > 0 else 0,
             axis=1
         )
-        
-        # 緊急入院率と死亡率
         ward_summary['緊急入院率'] = ward_summary.apply(
             lambda row: (row['緊急入院患者数'] / row['総入院患者数'] * 100)
             if row['総入院患者数'] > 0 else 0,
             axis=1
         )
-        
         ward_summary['死亡率'] = ward_summary.apply(
             lambda row: (row['死亡患者数'] / row['総退院患者数'] * 100)
             if row['総退院患者数'] > 0 else 0,
             axis=1
         )
-        
         return ward_summary
         
     except Exception as e:
-        logger.error(f"病棟別サマリー計算エラー: {e}")
-        st.error(f"病棟別サマリー計算中にエラー: {e}")
+        logger.error(f"病棟別サマリー計算エラー: {e}", exc_info=True)
+        # st.error(f"病棟別サマリー計算中にエラー: {e}") # UIエラーは呼び出し元で
         return pd.DataFrame()
 
 def calculate_department_summary(df):
     """診療科別サマリーデータの計算"""
     try:
-        # 病棟別集計と同じロジックを使用
         available_columns = df.columns.tolist()
-        
         column_mapping = {
             '在院患者数': ['入院患者数（在院）', '在院患者数', '現在患者数'],
             '入院患者数': ['総入院患者数', '入院患者数', '新規入院患者数'],
@@ -637,71 +672,75 @@ def calculate_department_summary(df):
             '緊急入院患者数': ['緊急入院患者数', '救急入院患者数', '緊急入院'],
             '死亡患者数': ['死亡患者数', '死亡者数', '死亡']
         }
-        
         actual_columns = {}
         missing_columns = []
-        
+
         for standard_name, possible_names in column_mapping.items():
-            found_column = None
-            for possible_name in possible_names:
-                if possible_name in available_columns:
-                    found_column = possible_name
-                    break
-            
+            found_column = next((pn for pn in possible_names if pn in available_columns), None)
             if found_column:
                 actual_columns[standard_name] = found_column
             else:
                 missing_columns.append(standard_name)
         
         if missing_columns:
-            st.error(f"診療科別集計に必要な列が見つかりません: {missing_columns}")
+            logger.error(f"診療科別集計に必要な列が見つかりません: {missing_columns}")
             return pd.DataFrame()
         
-        # 診療科別集計（実際の列名を使用）
         dept_groups = df.groupby('診療科名', observed=True)
-        
-        dept_summary = pd.DataFrame({
+        dept_summary_data = {
             '診療科名': dept_groups['診療科名'].first(),
             '期間日数': dept_groups['日付'].nunique(),
-            '延べ在院患者数': dept_groups[actual_columns['在院患者数']].sum(),
-            '総入院患者数': dept_groups[actual_columns['入院患者数']].sum(),
-            '総退院患者数': dept_groups[actual_columns['退院患者数']].sum(),
-            '緊急入院患者数': dept_groups[actual_columns['緊急入院患者数']].sum(),
-            '死亡患者数': dept_groups[actual_columns['死亡患者数']].sum()
-        }).reset_index(drop=True)
-        
-        # 計算指標の追加（ward_summaryと同じロジック）
+        }
+
+        for standard_name, actual_col_name in actual_columns.items():
+            if actual_col_name in df.columns:
+                if standard_name == '在院患者数':
+                    dept_summary_data['延べ在院患者数'] = dept_groups[actual_col_name].sum()
+                elif standard_name == '入院患者数':
+                    dept_summary_data['総入院患者数'] = dept_groups[actual_col_name].sum()
+                elif standard_name == '退院患者数':
+                    dept_summary_data['総退院患者数'] = dept_groups[actual_col_name].sum()
+                elif standard_name == '緊急入院患者数':
+                    dept_summary_data['緊急入院患者数'] = dept_groups[actual_col_name].sum()
+                elif standard_name == '死亡患者数':
+                    dept_summary_data['死亡患者数'] = dept_groups[actual_col_name].sum()
+            else:
+                logger.warning(f"診療科別集計: 列 '{actual_col_name}' (対応する標準名: '{standard_name}') がデータに存在しません。集計から除外します。")
+
+
+        dept_summary = pd.DataFrame(dept_summary_data).reset_index(drop=True)
+
+        required_sum_cols = ['延べ在院患者数', '総入院患者数', '総退院患者数', '緊急入院患者数', '死亡患者数']
+        if not all(col in dept_summary.columns for col in required_sum_cols):
+            logger.error(f"診療科別サマリー計算に必要な集計列が不足しています。生成された列: {list(dept_summary.columns)}")
+            return pd.DataFrame()
+
         dept_summary['平均在院患者数'] = dept_summary['延べ在院患者数'] / dept_summary['期間日数']
-        
         dept_summary['平均在院日数'] = dept_summary.apply(
             lambda row: row['延べ在院患者数'] / ((row['総入院患者数'] + row['総退院患者数']) / 2)
             if (row['総入院患者数'] + row['総退院患者数']) > 0 else 0,
             axis=1
         )
-        
         dept_summary['病床回転率'] = dept_summary.apply(
             lambda row: row['総退院患者数'] / row['平均在院患者数'] 
             if row['平均在院患者数'] > 0 else 0,
             axis=1
         )
-        
         dept_summary['緊急入院率'] = dept_summary.apply(
             lambda row: (row['緊急入院患者数'] / row['総入院患者数'] * 100)
             if row['総入院患者数'] > 0 else 0,
             axis=1
         )
-        
         dept_summary['死亡率'] = dept_summary.apply(
             lambda row: (row['死亡患者数'] / row['総退院患者数'] * 100)
             if row['総退院患者数'] > 0 else 0,
             axis=1
         )
-        
         return dept_summary
         
     except Exception as e:
-        logger.error(f"診療科別サマリー計算エラー: {e}")
-        st.error(f"診療科別サマリー計算中にエラー: {e}")
+        logger.error(f"診療科別サマリー計算エラー: {e}", exc_info=True)
+        # st.error(f"診療科別サマリー計算中にエラー: {e}") # UIエラーは呼び出し元で
         return pd.DataFrame()
 
 # ===============================================================================
@@ -942,83 +981,82 @@ def generate_individual_pdfs(df, target_data, output_type, target_items, orienta
 
 def create_fallback_los_analysis(df_filtered, filter_config):
     """平均在院日数分析のフォールバック版（統一フィルター対応版）"""
-    st.info("簡易版の平均在院日数分析を表示しています。")
+    st.info("🔧 平均在院日数分析の主要機能が利用できないため、簡易版を表示します。")
     
     try:
         if df_filtered.empty:
             st.warning("フィルター条件にマッチするデータがありません。")
             return
         
-        # 基本統計の表示
         filter_summary = get_unified_filter_summary()
         st.info(f"分析対象: {filter_summary}")
         
-        # 利用可能な列名を確認
         available_columns = df_filtered.columns.tolist()
-        
-        # 列名のマッピング
         column_mapping = {
             '在院患者数': ['入院患者数（在院）', '在院患者数', '現在患者数'],
             '入院患者数': ['総入院患者数', '入院患者数', '新規入院患者数'],
             '退院患者数': ['総退院患者数', '退院患者数', '退院者数']
         }
-        
-        # 実際に使用する列名を決定
         actual_columns = {}
+        missing_required = False
         for standard_name, possible_names in column_mapping.items():
-            for possible_name in possible_names:
-                if possible_name in available_columns:
-                    actual_columns[standard_name] = possible_name
-                    break
+            found_column = next((pn for pn in possible_names if pn in available_columns), None)
+            if found_column:
+                actual_columns[standard_name] = found_column
+            elif standard_name in ['在院患者数', '入院患者数', '退院患者数']: # これらは必須
+                missing_required = True
+                st.error(f"平均在院日数計算に必要な主要列 '{standard_name}' (またはそのエイリアス) がありません。")
+                logger.error(f"フォールバックLOS: 必須列 '{standard_name}' が欠落。")
         
-        # 必要な列が揃っているかチェック
-        required_columns = ['在院患者数', '入院患者数', '退院患者数']
-        missing_columns = [col for col in required_columns if col not in actual_columns]
-        
-        if missing_columns:
-            st.error(f"平均在院日数計算に必要な列がありません: {missing_columns}")
+        if missing_required:
             return
-        
-        # 基本的な平均在院日数計算
-        total_patient_days = df_filtered[actual_columns['在院患者数']].sum()
-        total_admissions = df_filtered[actual_columns['入院患者数']].sum()
-        total_discharges = df_filtered[actual_columns['退院患者数']].sum()
+
+        total_patient_days = df_filtered[actual_columns['在院患者数']].sum() if '在院患者数' in actual_columns else 0
+        total_admissions = df_filtered[actual_columns['入院患者数']].sum() if '入院患者数' in actual_columns else 0
+        total_discharges = df_filtered[actual_columns['退院患者数']].sum() if '退院患者数' in actual_columns else 0
         
         if (total_admissions + total_discharges) > 0:
             alos = total_patient_days / ((total_admissions + total_discharges) / 2)
-            st.metric("平均在院日数", f"{alos:.2f}日")
+            st.metric("期間全体の平均在院日数", f"{alos:.2f}日")
+        else:
+            st.metric("期間全体の平均在院日数", "計算不可 (入退院なし)")
         
-        # 日別トレンド
-        daily_alos = df_filtered.groupby('日付', observed=True).agg({
-            actual_columns['在院患者数']: 'sum',
-            actual_columns['入院患者数']: 'sum',
-            actual_columns['退院患者数']: 'sum'
-        }).reset_index()
-        
-        # 列名を標準化
-        daily_alos = daily_alos.rename(columns={
-            actual_columns['在院患者数']: '在院患者数',
-            actual_columns['入院患者数']: '入院患者数',
-            actual_columns['退院患者数']: '退院患者数'
-        })
-        
-        daily_alos['平均在院日数'] = daily_alos.apply(
-            lambda row: row['在院患者数'] / ((row['入院患者数'] + row['退院患者数']) / 2)
-            if (row['入院患者数'] + row['退院患者数']) > 0 else 0,
-            axis=1
-        )
-        
-        fig = px.line(
-            daily_alos,
-            x='日付',
-            y='平均在院日数',
-            title=f'日別平均在院日数推移（フィルター適用済み）'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
+        # 日別トレンド (より安全に)
+        if '日付' in df_filtered.columns and '在院患者数' in actual_columns:
+            daily_agg_dict = {actual_columns['在院患者数']: 'sum'}
+            if '入院患者数' in actual_columns:
+                daily_agg_dict[actual_columns['入院患者数']] = 'sum'
+            if '退院患者数' in actual_columns:
+                daily_agg_dict[actual_columns['退院患者数']] = 'sum'
+
+            daily_alos = df_filtered.groupby('日付', observed=True).agg(daily_agg_dict).reset_index()
+            
+            # Rename to standard names for calculation
+            rename_map = {v: k for k, v in actual_columns.items() if k in ['在院患者数', '入院患者数', '退院患者数']}
+            daily_alos = daily_alos.rename(columns=rename_map)
+
+            if '在院患者数' in daily_alos.columns and '入院患者数' in daily_alos.columns and '退院患者数' in daily_alos.columns:
+                daily_alos['日別平均在院日数'] = daily_alos.apply(
+                    lambda row: row['在院患者数'] / ((row['入院患者数'] + row['退院患者数']) / 2)
+                    if (row['入院患者数'] + row['退院患者数']) > 0 else np.nan, # np.nan for plotting
+                    axis=1
+                )
+                
+                fig = px.line(
+                    daily_alos.dropna(subset=['日別平均在院日数']), # Drop NaN for cleaner plot
+                    x='日付',
+                    y='日別平均在院日数',
+                    title=f'日別平均在院日数推移（フィルター適用済み）'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("日別平均在院日数の計算に必要なデータが不足しています。")
+        else:
+            st.warning("日別トレンド表示に必要な日付または在院患者数データがありません。")
+            
     except Exception as e:
-        logger.error(f"フォールバック版平均在院日数分析エラー: {e}")
-        st.error(f"フォールバック版平均在院日数分析でエラー: {e}")
+        logger.error(f"フォールバック版平均在院日数分析エラー: {e}", exc_info=True)
+        st.error(f"フォールバック版平均在院日数分析でエラーが発生しました。")
 
 def create_fallback_dow_analysis(df_filtered, filter_config):
     """曜日別分析のフォールバック版（統一フィルター対応版）"""
