@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
 import jpholiday
+from utils import safe_date_filter
 
 def ensure_datetime_compatibility(df, date_columns=None):
     """DataFrameの日付列をdatetime型に統一する"""
@@ -23,34 +24,6 @@ def ensure_datetime_compatibility(df, date_columns=None):
                 print(f"列 '{col}' の変換に失敗: {e}")
     
     return df_result
-
-def safe_date_filter(df, start_date=None, end_date=None):
-    """安全な日付フィルタリング"""
-    try:
-        if df is None or df.empty:
-            return df
-            
-        df_result = df.copy()
-        
-        if '日付' not in df_result.columns:
-            return df_result
-        
-        # 日付列をdatetime型に変換
-        df_result['日付'] = pd.to_datetime(df_result['日付'])
-        
-        if start_date is not None:
-            start_date_pd = pd.to_datetime(start_date)
-            df_result = df_result[df_result['日付'] >= start_date_pd]
-        
-        if end_date is not None:
-            end_date_pd = pd.to_datetime(end_date)
-            df_result = df_result[df_result['日付'] <= end_date_pd]
-        
-        return df_result
-        
-    except Exception as e:
-        print(f"日付フィルタリングエラー: {e}")
-        return df
 
 def create_revenue_dashboard_section(df, targets_df=None, period_info=None):
     """
