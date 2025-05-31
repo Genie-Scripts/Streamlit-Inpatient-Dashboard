@@ -1,4 +1,4 @@
-# unified_filters.py - 統一フィルター管理システム
+# unified_filters.py - 改良版統一フィルター管理システム
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -56,8 +56,96 @@ class UnifiedFilterManager:
         except Exception as e:
             logger.error(f"initialize_default_filters でエラー: {e}")
     
+    def create_filter_status_card(self, df):
+        """フィルター状態表示カードの作成（画面上部用）"""
+        config = st.session_state.get(self.config_key)
+        if not config:
+            st.warning("🔍 フィルター未設定 - サイドバーで設定してください")
+            return None, None
+        
+        try:
+            # フィルター情報の整理
+            start_date = config['start_date']
+            end_date = config['end_date']
+            period_days = (end_date - start_date).days + 1
+            
+            # データ件数計算
+            total_records = len(df) if df is not None and not df.empty else 0
+            filtered_df = self.apply_filters(df) if df is not None and not df.empty else pd.DataFrame()
+            filtered_records = len(filtered_df)
+            
+            # フィルター状態カードの表示
+            st.markdown("""
+            <div style="
+                background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 16px;
+                margin: 8px 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            ">
+            """, unsafe_allow_html=True)
+            
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            
+            with col1:
+                # 期間情報
+                if config.get('period_mode') == "プリセット期間" and config.get('preset'):
+                    period_text = f"📅 {config['preset']}"
+                else:
+                    period_text = f"📅 カスタム期間"
+                
+                st.markdown(f"**{period_text}**")
+                st.caption(f"{start_date.strftime('%Y/%m/%d')} ～ {end_date.strftime('%Y/%m/%d')} ({period_days}日間)")
+            
+            with col2:
+                # 診療科情報
+                if config['dept_filter_mode'] == "特定診療科":
+                    dept_count = len(config['selected_depts'])
+                    if dept_count > 0:
+                        dept_text = f"🏥 診療科: {dept_count}件選択"
+                    else:
+                        dept_text = "🏥 診療科: 選択なし ⚠️"
+                else:
+                    dept_text = "🏥 診療科: 全て"
+                st.markdown(f"**{dept_text}**")
+            
+            with col3:
+                # 病棟情報
+                if config['ward_filter_mode'] == "特定病棟":
+                    ward_count = len(config['selected_wards'])
+                    if ward_count > 0:
+                        ward_text = f"🏨 病棟: {ward_count}件選択"
+                    else:
+                        ward_text = "🏨 病棟: 選択なし ⚠️"
+                else:
+                    ward_text = "🏨 病棟: 全て"
+                st.markdown(f"**{ward_text}**")
+            
+            with col4:
+                # データ件数
+                filter_ratio = (filtered_records / total_records * 100) if total_records > 0 else 0
+                if filter_ratio > 75:
+                    color = "#28a745"  # 緑
+                elif filter_ratio > 25:
+                    color = "#ffc107"  # 黄
+                else:
+                    color = "#dc3545"  # 赤
+                
+                st.markdown(f"**📊 データ件数**")
+                st.markdown(f'<span style="color: {color}; font-weight: bold;">{filtered_records:,}件 ({filter_ratio:.1f}%)</span>', unsafe_allow_html=True)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            return filtered_df, config
+            
+        except Exception as e:
+            logger.error(f"create_filter_status_card でエラー: {e}")
+            st.error(f"フィルター状態の表示でエラーが発生しました: {e}")
+            return None, None
+    
     def create_unified_sidebar(self, df):
-        """統一フィルターサイドバーの作成"""
+        """統一フィルターサイドバーの作成（簡潔版）"""
         if df is None or df.empty:
             st.sidebar.error("📊 データが読み込まれていません")
             return None
@@ -387,6 +475,10 @@ filter_manager = UnifiedFilterManager()
 def create_unified_filter_sidebar(df):
     """統一フィルターサイドバーを作成（外部関数）"""
     return filter_manager.create_unified_sidebar(df)
+
+def create_unified_filter_status_card(df):
+    """統一フィルター状態カードを作成（新機能）"""
+    return filter_manager.create_filter_status_card(df)
 
 def apply_unified_filters(df):
     """統一フィルターを適用（外部関数）"""
