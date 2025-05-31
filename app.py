@@ -96,7 +96,9 @@ def create_main_filter_interface(df):
             st.write("• 診療科・病棟の選択を見直し")
         with col2:
             if st.button("🔄 フィルターをリセット", key="main_filter_reset"):
-                # フィルターリセット処理をここに実装
+                # フィルターリセット処理
+                from unified_filters import filter_manager
+                filter_manager._reset_filters()
                 st.rerun()
         
         return df, filter_config
@@ -690,7 +692,6 @@ def create_management_dashboard_tab():
         
     except Exception as e:
         st.error(f"ダッシュボード表示エラー: {e}")
-        logger.error(f"ダッシュボード表示エラー: {e}")
         
 def calculate_dashboard_metrics(df, selected_period):
     """フィルタリング済みデータでのダッシュボードメトリクス計算"""
