@@ -1007,9 +1007,11 @@ def main():
         for key in keys_to_check:
             if 'date' in key.lower() and key in st.session_state:
                 value = st.session_state[key]
-                if hasattr(value, 'year') and value.year < 2024:
+                # 適切なTimestamp型でない場合やおかしな値の場合にクリア
+                if not isinstance(value, pd.Timestamp) or pd.isna(value):
                     del st.session_state[key]
-        
+                elif hasattr(value, 'year') and (value.year < 2020 or value.year > 2030):
+                    del st.session_state[key]        
         st.session_state.app_initialized = True
 
     # セッション状態の初期化

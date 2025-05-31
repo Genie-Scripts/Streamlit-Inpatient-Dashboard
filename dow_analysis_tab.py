@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import timedelta, date  # date は st.date_input の型比較やデフォルト値設定で使用
+from datetime import timedelta, date
 
 # dow_charts.py から必要な関数をインポート
 try:
@@ -427,7 +427,7 @@ def display_dow_analysis_tab(
         st.info("分析インサイトを生成するためのサマリーデータがありません。")
 
     #
-    # ===== 5. 期間比較設定（修正版） =====
+    # ===== 5. 期間比較設定（完全版） =====
     #
     st.markdown(
         f"<div class='chart-title' style='margin-top:2rem;'>期間比較</div>",
@@ -466,13 +466,14 @@ def display_dow_analysis_tab(
             default_start = max(default_start, data_min_date)
             default_start = min(default_start, data_max_date)
 
-            comp_start_date = st.date_input(
+            comp_start_date_input = st.date_input(
                 "比較期間：開始日",
                 value=default_start,
                 min_value=data_min_date,
                 max_value=data_max_date,
                 key="dow_comparison_start_date"
             )
+            comp_start_date = pd.Timestamp(comp_start_date_input).normalize()
 
         with col2:
             sess_end = st.session_state.get("dow_comparison_end_date")
@@ -490,13 +491,14 @@ def display_dow_analysis_tab(
             default_end = min(default_end, data_max_date)
             default_end = max(default_end, data_min_date)
 
-            comp_end_date = st.date_input(
+            comp_end_date_input = st.date_input(
                 "比較期間：終了日",
                 value=default_end,
-                min_value=comp_start_date,
+                min_value=comp_start_date_input,  # date型のまま使用
                 max_value=data_max_date,
                 key="dow_comparison_end_date"
             )
+            comp_end_date = pd.Timestamp(comp_end_date_input).normalize()
 
         if st.button("現在期間と同じ長さに設定", key="set_same_length"):
             length_days = (end_date_ts.date() - start_date_ts.date()).days
@@ -572,7 +574,7 @@ def display_dow_analysis_tab(
                 else:
                     st.info("比較グラフを生成できませんでした。")
 
-            # 「1つのグラフで比較」の場合
+            # 「1つのグラフで比較」の場合（元ファイルから詳細版を復元）
             else:
                 combined = pd.DataFrame()
                 if not dow_data_for_chart.empty:
@@ -856,9 +858,6 @@ def display_dow_analysis_tab(
                                 )
                                 fig_all.update_layout(title_text=f"{sel_period} - 曜日別 患者数パターン")
 
-                            # ユニットごとに Y軸を合わせる必要があれば、以下を参照して対応
-                            # （ここでは省略）
-
                         # グラフの高さを決定
                         if num_units > 1 and selected_unit != '病院全体':
                             height = 400 * ((num_units + 2) // 3)
@@ -886,7 +885,7 @@ def display_dow_analysis_tab(
 
                     st.plotly_chart(fig_all, use_container_width=True)
 
-                    # ===== 期間比較インサイト =====
+                    # ===== 期間比較インサイト（元ファイルから復元） =====
                     st.markdown("<div class='info-card'>", unsafe_allow_html=True)
                     st.markdown("#### <span style='color: #191970;'>期間比較インサイト</span>", unsafe_allow_html=True)
 
@@ -1055,6 +1054,118 @@ def display_dow_analysis_tab(
                                 "期間間の曜日パターンを比較して、特に変化が大きい曜日や指標に注目することで、運用方法の改善点を見つけられます。",
                                 unsafe_allow_html=True
                             )
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                    # ===== 期間比較からの運用改善ヒント（元ファイルから復元） =====
+                    st.markdown("<div class='success-card' style='margin-top: 1em;'>", unsafe_allow_html=True)
+                    st.markdown("#### <span style='color: #006400;'>期間比較からの運用改善ヒント</span>", unsafe_allow_html=True)
+                    
+                    # 基本的な運用改善ヒント
+                    st.markdown(
+                        "<p style='margin-bottom: 0.5em;'>- 曜日パターンの変化から運用方法の改善効果を評価できます。例えば、週末の退院支援強化策を実施した場合、"
+                        "その前後の期間を比較することで効果測定が可能です。</p>", unsafe_allow_html=True
+                    )
+                    
+                    st.markdown(
+                        "<p style='margin-bottom: 0.5em;'>- 特定の曜日に患者数が増加している場合、その曜日のスタッフ配置や業務プロセスを見直すことで、より効率的な運用が可能になります。</p>", unsafe_allow_html=True
+                    )
+                    
+                    st.markdown(
+                        "<p style='margin-bottom: 0.5em;'>- 期間による変化が大きい場合は、季節性や特定のイベント（例：診療体制の変更、地域の人口動態変化など）の影響を考慮する必要があります。</p>", unsafe_allow_html=True
+                    )
+
+                    # メトリクス別の具体的な提案（元ファイルから復元）
+                    metric_specific_tips = []
+                    
+                    # 入院患者数のパターン変化に基づく提案
+                    if '入院患者数' in selected_metrics or '総入院患者数' in selected_metrics:
+                        target_metric = '入院患者数' if '入院患者数' in selected_metrics else '総入院患者数'
+                        
+                        if (dow_data_for_chart is not None and not dow_data_for_chart.empty and 
+                            comp_dow_data is not None and not comp_dow_data.empty and 
+                            '指標タイプ' in dow_data_for_chart.columns and '指標タイプ' in comp_dow_data.columns):
+
+                            current_data = dow_data_for_chart[dow_data_for_chart['指標タイプ'] == target_metric]
+                            comp_data = comp_dow_data[comp_dow_data['指標タイプ'] == target_metric]
+                            
+                            if not current_data.empty and not comp_data.empty:
+                                # 曜日ごとの比較
+                                for dow in DOW_LABELS:
+                                    current_dow = current_data[current_data['曜日'] == dow]['患者数'].mean()
+                                    comp_dow = comp_data[comp_data['曜日'] == dow]['患者数'].mean()
+                                    
+                                    if pd.notna(current_dow) and pd.notna(comp_dow) and comp_dow > 0:
+                                        change_pct = (current_dow - comp_dow) / comp_dow * 100
+                                        
+                                        if change_pct >= 20:
+                                            metric_specific_tips.append(
+                                                f"**{dow}の{target_metric}**が{change_pct:.1f}%増加しています。この曜日の入院受け入れ体制を強化し、"
+                                                f"病床管理や看護配置を最適化することで、質の高いケアを維持できる可能性があります。"
+                                            )
+                                        elif change_pct <= -20:
+                                            metric_specific_tips.append(
+                                                f"**{dow}の{target_metric}**が{abs(change_pct):.1f}%減少しています。この曜日の空床を有効活用するため、"
+                                                f"外来からの予定入院の調整や他の曜日からの入院シフトを検討できます。"
+                                            )
+                    
+                    # 退院患者数のパターン変化に基づく提案
+                    if '退院患者数' in selected_metrics or '総退院患者数' in selected_metrics:
+                        target_metric = '退院患者数' if '退院患者数' in selected_metrics else '総退院患者数'
+                        
+                        if (dow_data_for_chart is not None and not dow_data_for_chart.empty and 
+                            comp_dow_data is not None and not comp_dow_data.empty and 
+                            '指標タイプ' in dow_data_for_chart.columns and '指標タイプ' in comp_dow_data.columns):
+
+                            current_data = dow_data_for_chart[dow_data_for_chart['指標タイプ'] == target_metric]
+                            comp_data = comp_dow_data[comp_dow_data['指標タイプ'] == target_metric]
+                            
+                            if not current_data.empty and not comp_data.empty:
+                                # 週末（土日）の退院パターンの変化を分析
+                                current_weekend = current_data[current_data['曜日'].isin(['土曜日', '日曜日'])]['患者数'].mean()
+                                comp_weekend = comp_data[comp_data['曜日'].isin(['土曜日', '日曜日'])]['患者数'].mean()
+                                
+                                if pd.notna(current_weekend) and pd.notna(comp_weekend) and comp_weekend > 0:
+                                    weekend_change_pct = (current_weekend - comp_weekend) / comp_weekend * 100
+                                    
+                                    if weekend_change_pct >= 30:
+                                        metric_specific_tips.append(
+                                            f"**週末の{target_metric}**が{weekend_change_pct:.1f}%増加しています。週末の退院支援が強化されたようです。"
+                                            f"この良い変化を継続・発展させるため、週末の退院調整業務の成功要因を分析し、さらなる最適化を検討できます。"
+                                        )
+                                    elif weekend_change_pct <= -30:
+                                        metric_specific_tips.append(
+                                            f"**週末の{target_metric}**が{abs(weekend_change_pct):.1f}%減少しています。週末の退院支援体制に課題がある可能性があります。"
+                                            f"薬剤部や医事課など関連部門との連携強化や、退院前カンファレンスの週末実施などの対策が有効かもしれません。"
+                                        )
+                    
+                    # 緊急入院患者数のパターン変化に基づく提案
+                    if '緊急入院患者数' in selected_metrics:
+                        if (dow_data_for_chart is not None and not dow_data_for_chart.empty and 
+                            comp_dow_data is not None and not comp_dow_data.empty and 
+                            '指標タイプ' in dow_data_for_chart.columns and '指標タイプ' in comp_dow_data.columns):
+
+                            current_data = dow_data_for_chart[dow_data_for_chart['指標タイプ'] == '緊急入院患者数']
+                            comp_data = comp_dow_data[comp_dow_data['指標タイプ'] == '緊急入院患者数']
+
+                            if not current_data.empty and not comp_data.empty:
+                                current_avg = current_data['患者数'].mean()
+                                comp_avg = comp_data['患者数'].mean()
+                                
+                                if pd.notna(current_avg) and pd.notna(comp_avg) and comp_avg > 0:
+                                    change_pct = (current_avg - comp_avg) / comp_avg * 100
+                                    
+                                    if abs(change_pct) >= 20:
+                                        direction = "増加" if change_pct > 0 else "減少"
+                                        metric_specific_tips.append(
+                                            f"**緊急入院患者数**が全体的に{abs(change_pct):.1f}%{direction}しています。"
+                                            f"{'緊急対応体制の強化や救急部門との連携見直しが必要かもしれません。' if change_pct > 0 else '緊急入院の減少傾向を分析し、地域連携や診療体制に変化があったか確認するとよいでしょう。'}"
+                                        )
+                    
+                    # メトリクス別提案の表示
+                    if metric_specific_tips:
+                        for tip in metric_specific_tips:
+                            st.markdown(f"<p style='margin-bottom: 0.5em;'>- {tip}</p>", unsafe_allow_html=True)
 
                     st.markdown("</div>", unsafe_allow_html=True)
         else:
