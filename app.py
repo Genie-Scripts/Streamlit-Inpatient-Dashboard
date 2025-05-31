@@ -61,126 +61,151 @@ from data_persistence import (
 )
 
 def create_sidebar_period_settings():
-    """サイドバーの期間設定（改修版）"""
+    """サイドバーの期間設定（改修版 - Timestampで統一）"""
     with st.sidebar.expander("📅 分析期間設定", expanded=True):
         if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
             df = st.session_state.df
-            min_date = df['日付'].min().date()
-            max_date = df['日付'].max().date()
+            min_date_dt = df['日付'].min().date() # st.date_input の min_value/max_value は date 型
+            max_date_dt = df['日付'].max().date() # st.date_input の min_value/max_value は date 型
             
-            # 期間設定モード選択
             period_mode = st.radio(
                 "期間設定方法",
                 ["プリセット期間", "カスタム期間"],
-                key="period_mode",
+                key="period_mode", # このキー名は現状のままでも良いか、sidebar_period_mode のように変更するか検討
                 help="プリセットまたはカスタム期間を選択"
             )
             
+            final_start_date_ts = None
+            final_end_date_ts = None
+
             if period_mode == "プリセット期間":
                 preset_period = st.selectbox(
                     "期間選択",
-                    PERIOD_OPTIONS,
-                    index=0,
-                    key="global_preset_period",
+                    PERIOD_OPTIONS, # config.py からインポートされている想定
+                    index=0, # デフォルトは PERIOD_OPTIONS[0]
+                    key="global_preset_period", # このキー名も検討
                     help="事前定義された期間から選択"
                 )
-                st.session_state.analysis_period_type = "preset"
-                st.session_state.analysis_preset_period = preset_period
+                # calculate_preset_period_dates は Timestamp を返すように修正済み
+                start_ts, end_ts = calculate_preset_period_dates(df, preset_period)
+                final_start_date_ts = start_ts
+                final_end_date_ts = end_ts
                 
-                # プリセット期間に基づく日付計算
-                start_date, end_date = calculate_preset_period_dates(df, preset_period)
-                st.session_state.analysis_start_date = start_date
-                st.session_state.analysis_end_date = end_date
-                
-                st.info(f"📊 期間: {start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')}")
+                st.session_state.analysis_period_type = "preset" # これは文字列なので問題なし
+                st.session_state.analysis_preset_period = preset_period # これも文字列
                 
             else:  # カスタム期間
                 col1, col2 = st.columns(2)
                 with col1:
-                    start_date = st.date_input(
+                    # st.date_input の value は datetime.date 型を期待
+                    # セッションステートに保存されているTimestampをdate型に変換してデフォルト値とする
+                    default_start_val_dt = st.session_state.get('analysis_start_date', pd.Timestamp(max_date_dt) - pd.Timedelta(days=30)).date()
+                    start_date_input_dt = st.date_input(
                         "開始日",
-                        value=st.session_state.get('analysis_start_date', max_date - pd.Timedelta(days=30)),
-                        min_value=min_date,
-                        max_value=max_date,
-                        key="custom_start_date",
+                        value=default_start_val_dt,
+                        min_value=min_date_dt,
+                        max_value=max_date_dt,
+                        key="custom_start_date", # このキー名も検討
                         help="分析開始日を選択してください"
                     )
+                    final_start_date_ts = pd.to_datetime(start_date_input_dt).normalize() # Timestamp に変換
                     
                 with col2:
-                    end_date = st.date_input(
+                    default_end_val_dt = st.session_state.get('analysis_end_date', pd.Timestamp(max_date_dt)).date()
+                    # カスタム終了日の最小値は、選択されたカスタム開始日以降にする
+                    min_custom_end_dt = start_date_input_dt 
+                    # デフォルト値が最小値より前にならないように調整
+                    if default_end_val_dt < min_custom_end_dt:
+                        default_end_val_dt = min_custom_end_dt
+
+                    end_date_input_dt = st.date_input(
                         "終了日",
-                        value=st.session_state.get('analysis_end_date', max_date),
-                        min_value=min_date,
-                        max_value=max_date,
-                        key="custom_end_date",
+                        value=default_end_val_dt,
+                        min_value=min_custom_end_dt, # 動的に設定
+                        max_value=max_date_dt,
+                        key="custom_end_date", # このキー名も検討
                         help="分析終了日を選択してください"
                     )
+                    final_end_date_ts = pd.to_datetime(end_date_input_dt).normalize() # Timestamp に変換
                 
                 st.session_state.analysis_period_type = "custom"
-                st.session_state.analysis_start_date = start_date
-                st.session_state.analysis_end_date = end_date
-                
-                if start_date <= end_date:
-                    period_days = (end_date - start_date).days + 1
+
+            # セッションステートに Timestamp として保存
+            if final_start_date_ts and final_end_date_ts:
+                st.session_state.analysis_start_date = final_start_date_ts
+                st.session_state.analysis_end_date = final_end_date_ts
+
+                # 表示用 (strftime は Timestamp オブジェクトでも使用可能)
+                st.info(f"📊 期間: {final_start_date_ts.strftime('%Y/%m/%d')} - {final_end_date_ts.strftime('%Y/%m/%d')}")
+
+                if final_start_date_ts <= final_end_date_ts:
+                    period_days = (final_end_date_ts - final_start_date_ts).days + 1
                     st.success(f"✅ 選択期間: {period_days}日間")
                 else:
                     st.error("開始日は終了日より前に設定してください")
             
-            # 全タブに適用ボタン
-            if st.button("🔄 全タブに期間を適用", key="apply_global_period", use_container_width=True):
-                st.session_state.period_applied = True
+            if st.button("🔄 全タブに期間を適用", key="apply_global_period", use_container_width=True): # キー名検討
+                st.session_state.period_applied = True # このフラグの用途を確認
                 st.success("期間設定を全タブに適用しました")
-                st.experimental_rerun()
+                st.experimental_rerun() # 変更を即時反映
                 
         else:
             st.info("データを読み込み後に期間設定が利用できます。")
 
 def calculate_preset_period_dates(df, preset_period):
-    """プリセット期間から具体的な日付を計算"""
-    latest_date = df['日付'].max()
-    
+    """プリセット期間から具体的な日付を計算 (pd.Timestampを返すように変更)"""
+    latest_date = df['日付'].max()  # df['日付'] は既に Timestamp である想定
+
     if preset_period == "直近30日":
-        start_date = latest_date - pd.Timedelta(days=29)
-        end_date = latest_date
+        start_date_ts = latest_date - pd.Timedelta(days=29)
+        end_date_ts = latest_date
     elif preset_period == "前月完了分":
-        prev_month_start = (latest_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
+        # latest_date の前月の1日を取得
         prev_month_end = latest_date.replace(day=1) - pd.Timedelta(days=1)
-        start_date = prev_month_start
-        end_date = prev_month_end
+        prev_month_start = prev_month_end.replace(day=1)
+        start_date_ts = prev_month_start
+        end_date_ts = prev_month_end
     elif preset_period == "今年度":
         current_year = latest_date.year
+        # 日本の会計年度 (4月始まり)
         if latest_date.month >= 4:
-            fiscal_start = pd.Timestamp(current_year, 4, 1)
+            fiscal_start_year = current_year
         else:
-            fiscal_start = pd.Timestamp(current_year - 1, 4, 1)
-        start_date = fiscal_start
-        end_date = latest_date
-    else:
-        start_date = latest_date - pd.Timedelta(days=29)
-        end_date = latest_date
+            fiscal_start_year = current_year - 1
+        start_date_ts = pd.Timestamp(f"{fiscal_start_year}-04-01")
+        end_date_ts = latest_date # 年度末までではなく、最新データ日まで
+    else:  # デフォルト (直近30日など、必要に応じて適切なデフォルトを設定)
+        start_date_ts = latest_date - pd.Timedelta(days=29)
+        end_date_ts = latest_date
     
-    return start_date.date(), end_date.date()
+    # 時刻情報を正規化 (00:00:00 にする)
+    # これにより、日付のみの比較でも意図しない挙動を防ぐ
+    return start_date_ts.normalize(), end_date_ts.normalize()
 
 def get_analysis_period():
-    """現在の分析期間を取得"""
+    """現在の分析期間を取得 (Timestampで返す)"""
     if not st.session_state.get('data_processed', False):
         return None, None, "データなし"
-    
-    start_date = st.session_state.get('analysis_start_date')
-    end_date = st.session_state.get('analysis_end_date')
-    period_type = st.session_state.get('analysis_period_type', 'preset')
-    
-    if start_date and end_date:
-        return pd.to_datetime(start_date), pd.to_datetime(end_date), period_type
-    
-    # デフォルト値
+
+    start_date_ts = st.session_state.get('analysis_start_date') # Timestamp が入っているはず
+    end_date_ts = st.session_state.get('analysis_end_date')     # Timestamp が入っているはず
+    period_type = st.session_state.get('analysis_period_type', 'preset') # これは文字列
+
+    if start_date_ts and end_date_ts:
+        # 既にTimestampなのでそのまま返す
+        return start_date_ts, end_date_ts, period_type
+
+    # デフォルト値 (dfがロードされている場合)
     df = st.session_state.get('df')
-    if df is not None:
+    if df is not None and not df.empty and '日付' in df.columns:
         latest_date = df['日付'].max()
-        default_start = latest_date - pd.Timedelta(days=29)
-        return default_start, latest_date, "デフォルト"
-    
-    return None, None, "エラー"
+        default_start_ts = (latest_date - pd.Timedelta(days=29)).normalize()
+        # analysis_start_date/end_date をセッションに設定するならここで設定しても良い
+        st.session_state.analysis_start_date = default_start_ts
+        st.session_state.analysis_end_date = latest_date.normalize()
+        return default_start_ts, latest_date.normalize(), "デフォルト"
+
+    return None, None, "エラーまたはデータなし"
 
 def filter_data_by_analysis_period(df):
     """分析期間でデータをフィルタリング"""
