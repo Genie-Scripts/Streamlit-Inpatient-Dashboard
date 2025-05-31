@@ -19,7 +19,7 @@ from alos_charts import (
 # utils.pyから病棟・診療科関連の関数をインポート
 from utils import (
     # create_ward_name_mapping, # initialize_all_mappings で処理される想定
-    # get_ward_display_name, # 表示時に必要なら
+    get_ward_display_name, # <--- この行を追加またはコメント解除
     create_ward_display_options,
     # initialize_ward_mapping, # initialize_all_mappings で処理される想定
     safe_date_filter,
@@ -245,31 +245,28 @@ def display_alos_analysis_tab(df_filtered_by_period, start_date_ts, end_date_ts,
         if group_by_column_metrics == '病棟コード' and '集計単位' in display_metrics_df.columns:
             ward_map_metrics = st.session_state.get('ward_mapping', {})
             display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(
-                lambda x: get_ward_display_name(x, ward_map_metrics)
+                lambda x: get_ward_display_name(x, ward_map_metrics) # ward_mapping は引数として渡せる
             )
         elif group_by_column_metrics == '診療科名' and '集計単位' in display_metrics_df.columns:
-            dept_map_metrics = st.session_state.get('dept_mapping', {})
+            # dept_map_metrics = st.session_state.get('dept_mapping', {}) # この行は不要
             display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(
-                lambda x: get_display_name_for_dept(x, default_name=x, dept_mapping=dept_map_metrics)
+                lambda x: get_display_name_for_dept(x, default_name=x) # dept_mapping引数を削除
             )
             # フィルタリングも表示名ベースではなく、元のコード(target_items)で行う必要があるため、
             # metrics_df のフィルタリングは表示名変換前に行う。
             # ただし、ユーザーが選択するのは表示名なので、target_items がコードであることを確認。
 
-        if selected_unit != '病院全体' and target_items: #
-            # metrics_df のフィルタリングは元のコードで行う
-            metrics_df_filtered_for_display = metrics_df[metrics_df['集計単位'].astype(str).isin([str(item) for item in target_items])] #
-            # その後、表示用に変換
+        if selected_unit != '病院全体' and target_items:
+            metrics_df_filtered_for_display = metrics_df[metrics_df['集計単位'].astype(str).isin([str(item) for item in target_items])]
             display_metrics_df = metrics_df_filtered_for_display.copy()
             if group_by_column_metrics == '病棟コード' and '集計単位' in display_metrics_df.columns:
-                 ward_map_metrics = st.session_state.get('ward_mapping', {})
-                 display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(lambda x: get_ward_display_name(x, ward_map_metrics))
+                ward_map_metrics = st.session_state.get('ward_mapping', {})
+                display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(lambda x: get_ward_display_name(x, ward_map_metrics))
             elif group_by_column_metrics == '診療科名' and '集計単位' in display_metrics_df.columns:
-                 dept_map_metrics = st.session_state.get('dept_mapping', {})
-                 display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(lambda x: get_display_name_for_dept(x, default_name=x, dept_mapping=dept_map_metrics))
+                # dept_map_metrics = st.session_state.get('dept_mapping', {}) # この行は不要
+                display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(lambda x: get_display_name_for_dept(x, default_name=x)) # dept_mapping引数を削除
         else: # 病院全体の場合、またはフィルタリング不要の場合
             pass # display_metrics_df は既に変換済み（または全体なので変換不要）
-
 
         if not display_metrics_df.empty:
             format_dict_metrics = {'平均在院日数': "{:.2f}", '日平均在院患者数': "{:.1f}", '病床回転率': "{:.2f}", '延べ在院患者数': "{:.0f}", '総入院患者数': "{:.0f}", '総退院患者数': "{:.0f}", '緊急入院率': "{:.1f}%", '死亡率': "{:.1f}%"} #
