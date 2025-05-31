@@ -10,7 +10,6 @@ import gc
 import time
 import hashlib
 
-# global_chart_cache = {} # <--- この行を削除します
 
 def get_chart_cache():
     """セッション状態のチャートキャッシュを取得"""
@@ -55,30 +54,25 @@ def get_chart_cache_key(title, days, target_value=None, chart_type="default", da
     key_string = "_".join(components)
     return hashlib.md5(key_string.encode()).hexdigest()
 
-
 @st.cache_data(ttl=1800, show_spinner=False)
 def create_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, font_name_for_mpl=None):
     """データから患者数推移グラフを作成する（キャッシュ対応版）- Matplotlib PDF用"""
     start_time = time.time()
-    # セッションステートキャッシュ関連のロジックは削除
-    # data_hash = get_data_hash(data) # @st.cache_dataが引数ベースでキャッシュするので不要になることが多い
-    # cache_key = get_chart_cache_key(title, days, None, "patient_chart_mpl", data_hash)
-    # cached_chart_bytes = chart_cache_instance.get(cache_key)
-    # ...
+    # st.session_state を使ったキャッシュロジックは削除
 
     fig = None
     try:
         fig, ax = plt.subplots(figsize=(10, 5.5))
 
         if not isinstance(data, pd.DataFrame) or data.empty:
-            if fig: plt.close(fig) # エラーケースでもfigを閉じる
+            if fig: plt.close(fig)
             return None
 
         if "日付" not in data.columns or "入院患者数（在院）" not in data.columns:
             if fig: plt.close(fig)
             return None
 
-        data_copy = data.copy() # SettingWithCopyWarning を避ける
+        data_copy = data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
@@ -123,27 +117,23 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
         buf.seek(0)
 
         end_time = time.time()
-        # キャッシュキーのログは削除または変更
-        # print(f"グラフ生成完了 (st.cache_data): {title} ({days}日)、処理時間: {end_time - start_time:.2f}秒")
+        logger.info(f"グラフ '{title}' 生成完了 (@st.cache_data), 処理時間: {end_time - start_time:.2f}秒")
         return buf
     except Exception as e:
-        print(f"グラフ生成エラー '{title}': {e}")
+        logger.error(f"グラフ生成エラー '{title}': {e}", exc_info=True)
         return None
     finally:
-        if fig: plt.close(fig) # tryブロック内でエラーが発生した場合でもfigがNoneでない可能性があるため
+        if fig: plt.close(fig)
         gc.collect()
 
-
-@st.cache_data(ttl=1800, show_spinner=False) # Matplotlib版と同様に@st.cache_dataのみを使用
+@st.cache_data(ttl=1800, show_spinner=False)
 def create_dual_axis_chart(data, title="入院患者数と患者移動の推移", filename=None, days=90, font_name_for_mpl=None):
     """
     入院患者数と患者移動の7日移動平均グラフを二軸で作成する（Matplotlib版、PDF用）
+    @st.cache_data によるキャッシュ
     """
     start_time = time.time()
-    # セッションステートキャッシュ関連のロジックは削除
-    # data_hash = get_data_hash(data)
-    # cache_key = get_chart_cache_key(title, days, None, "dual_axis_mpl", data_hash)
-    # ...
+    # st.session_state を使ったキャッシュロジックは削除
 
     fig = None
     try:
@@ -178,7 +168,7 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
             if col in grouped.columns:
                 grouped[f'{col}_7日移動平均'] = grouped[col].rolling(window=7, min_periods=1).mean()
             else:
-                print(f"Warning: Column '{col}' not found for MA in '{title}'.")
+                logger.warning(f"Warning: Column '{col}' not found for MA in '{title}'.")
                 grouped[f'{col}_7日移動平均'] = 0
 
         font_kwargs = {}
@@ -187,7 +177,7 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
         if "入院患者数（在院）_7日移動平均" in grouped.columns:
              ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日移動平均"], color='#3498db', linewidth=2, label="入院患者数（在院）")
         else:
-            print(f"Warning: '入院患者数（在院）_7日移動平均' not found for plotting in '{title}'.")
+            logger.warning(f"Warning: '入院患者数（在院）_7日移動平均' not found for plotting in '{title}'.")
 
 
         ax1.set_xlabel('日付', fontsize=9, **font_kwargs)
@@ -221,12 +211,10 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
         buf.seek(0)
         
         end_time = time.time()
-        # print(f"二軸グラフ生成完了 (st.cache_data): {title} ({days}日)、処理時間: {end_time - start_time:.2f}秒")
+        logger.info(f"二軸グラフ '{title}' 生成完了 (@st.cache_data), 処理時間: {end_time - start_time:.2f}秒")
         return buf
     except Exception as e:
-        print(f"Error in create_dual_axis_chart ('{title}'): {e}")
-        import traceback
-        print(traceback.format_exc())
+        logger.error(f"Error in create_dual_axis_chart ('{title}'): {e}", exc_info=True)
         return None
     finally:
         if fig: plt.close(fig)
