@@ -81,7 +81,8 @@ def create_dept_display_options(dept_codes, dept_mapping=None):
 
     # 実績データの診療科コードをソートして処理
     for dept_code in sorted(list(set(str(c).strip() for c in dept_codes if pd.notna(c)))):
-        display_name = get_display_name_for_dept(dept_code, dept_mapping=dept_mapping) # マッピングを渡す
+        # 修正: dept_mapping 引数を削除
+        display_name = get_display_name_for_dept(dept_code, default_name=dept_code)
         if display_name != dept_code:
             display_option = f"{dept_code}（{display_name}）"
         else:
