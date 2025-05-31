@@ -226,11 +226,10 @@ def display_dow_analysis_tab(
                         lambda x: get_ward_display_name(x, ward_map_summary)
                     )
                 elif selected_unit == '診療科別':
-                    dept_map_summary = st.session_state.get('dept_mapping', {})
+                    # dept_map_summary = st.session_state.get('dept_mapping', {}) # この行は不要
                     display_summary_df['集計単位'] = display_summary_df['集計単位'].apply(
-                        lambda x: get_display_name_for_dept(x, default_name=x, dept_mapping=dept_map_summary)
+                        lambda x: get_display_name_for_dept(x, default_name=x) # dept_mapping引数を削除
                     )
-
             cols_to_show = ['集計単位', '曜日名', '集計日数'] #
             fmt = {'集計日数': "{:.0f}"} #
 
@@ -560,31 +559,33 @@ def display_dow_analysis_tab(
                         lambda x: get_ward_display_name(x, ward_map_chart)
                     )
                 elif selected_unit == '診療科別':
-                    dept_map_chart = st.session_state.get('dept_mapping', {})
-                    display_dow_data_for_chart_comp['集計単位名'] = display_dow_data_for_chart_comp['集計単位名'].apply(
-                        lambda x: get_display_name_for_dept(x, default_name=x, dept_mapping=dept_map_chart)
+                    # dept_map_chart = st.session_state.get('dept_mapping', {}) # この行は不要
+                    display_dow_data_for_chart['集計単位名'] = display_dow_data_for_chart['集計単位名'].apply(
+                        lambda x: get_display_name_for_dept(x, default_name=x) # dept_mapping引数を削除
                     )
-
 
             if comp_mode == "縦に並べて表示": #
                 fig_cur = None
                 if not display_dow_data_for_chart_comp.empty:
-                     fig_cur = create_dow_chart(
-                        dow_data_melted=display_dow_data_for_chart_comp, # 表示名変換済みデータ
+                    fig_cur = create_dow_chart(
+                        dow_data_melted=display_dow_data_for_chart_comp,
                         unit_type=selected_unit,
-                        target_items=[get_display_name_for_dept(ti, ti) if selected_unit == '診療科別' else get_ward_display_name(ti, st.session_state.get('ward_mapping', {})) for ti in target_items] if target_items else ["病院全体"],
+                        # target_items の表示名変換で dept_mapping を渡さない
+                        target_items=[get_display_name_for_dept(ti, default_name=ti) if selected_unit == '診療科別' else get_ward_display_name(ti, st.session_state.get('ward_mapping', {})) for ti in target_items] if target_items else ["病院全体"],
                         metric_type=metric_type,
                         patient_cols_to_analyze=selected_metrics,
                         title_prefix="現在期間"
-                    ) #
+                    )
                 fig_comp = create_dow_chart(
-                    dow_data_melted=display_comp_dow_data, # 表示名変換済みデータ
+                    dow_data_melted=display_comp_dow_data,
                     unit_type=selected_unit,
-                    target_items=[get_display_name_for_dept(ti, ti) if selected_unit == '診療科別' else get_ward_display_name(ti, st.session_state.get('ward_mapping', {})) for ti in target_items] if target_items else ["病院全体"],
+                    # target_items の表示名変換で dept_mapping を渡さない
+                    target_items=[get_display_name_for_dept(ti, default_name=ti) if selected_unit == '診療科別' else get_ward_display_name(ti, st.session_state.get('ward_mapping', {})) for ti in target_items] if target_items else ["病院全体"],
                     metric_type=metric_type,
                     patient_cols_to_analyze=selected_metrics,
                     title_prefix="比較期間"
-                ) #
+                )
+                
                 if fig_cur and fig_comp: #
                     st.plotly_chart(fig_cur, use_container_width=True) #
                     st.markdown("<div style='text-align:center; margin-bottom:1rem;'>↓ 比較 ↓</div>", unsafe_allow_html=True) #
@@ -817,7 +818,7 @@ def display_dow_analysis_tab(
                         unique_units_insight = summary_df_from_calc['集計単位'].unique() # これはコードのまま
                         for unit_code_insight in unique_units_insight:
                             # 表示用に変換
-                            unit_display_name_insight = get_display_name_for_dept(unit_code_insight, unit_code_insight) if selected_unit == '診療科別' else get_ward_display_name(unit_code_insight, st.session_state.get('ward_mapping', {}))
+                            unit_display_name_insight = get_display_name_for_dept(unit_code_insight, default_name=unit_code_insight) if selected_unit == '診療科別' else get_ward_display_name(unit_code_insight, st.session_state.get('ward_mapping', {}))
                             cur_unit_df_insight = summary_df_from_calc[summary_df_from_calc['集計単位'] == unit_code_insight]
                             comp_unit_df_insight = comp_summary_for_insight[comp_summary_for_insight['集計単位'] == unit_code_insight]
                             if cur_unit_df_insight.empty or comp_unit_df_insight.empty: continue
