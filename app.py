@@ -65,7 +65,7 @@ except ImportError as e:
     st.stop()
 
 def create_main_filter_interface(df):
-    """メイン画面上部のフィルターインターフェース"""
+    """メイン画面上部のフィルターインターフェース（キー重複修正版）"""
     if df is None or df.empty:
         st.warning("📊 データが読み込まれていません - データ処理タブでデータをアップロードしてください")
         return None, None
@@ -485,20 +485,21 @@ def create_sidebar_data_settings():
                     st.write(f"  • {name}: {size}")
 
 def create_sidebar():
-    """サイドバーの設定UI（統一フィルター対応版）"""
+    """サイドバーの設定UI（統一フィルター対応版・重複修正）"""
     # データ設定セクション
     create_sidebar_data_settings()
     
     st.sidebar.markdown("---")
     
     # 統一フィルター設定（データが読み込まれている場合）
+    # ★ 重要：ここで一度だけ統一フィルターを作成
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         df = st.session_state.get('df')
         
         # 統一フィルターの初期化
         initialize_unified_filters(df)
         
-        # 統一フィルターサイドバーの作成
+        # 統一フィルターサイドバーの作成（一度だけ）
         filter_config = create_unified_filter_sidebar(df)
         
         if filter_config is None:
@@ -627,7 +628,7 @@ def create_sidebar():
             avg_length_of_stay > 0 and avg_admission_fee > 0)
 
 def create_management_dashboard_tab():
-    """経営ダッシュボードタブ（統一フィルター対応版）"""
+    """経営ダッシュボードタブ（統一フィルター対応版・重複修正）"""
     st.header("💰 経営ダッシュボード")
     
     if 'df' not in st.session_state or st.session_state['df'] is None:
@@ -850,7 +851,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
 
 def main():
-    """メイン関数（統一フィルター対応版）"""
+    """メイン関数（統一フィルター対応版・キー重複修正）"""
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
         st.session_state['data_processed'] = False
@@ -872,7 +873,7 @@ def main():
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
     
-    # サイドバー設定
+    # ★ 重要：サイドバー設定（ここで一度だけ統一フィルターを作成）
     settings_valid = create_sidebar()
     if not settings_valid:
         st.stop()
@@ -928,7 +929,7 @@ def main():
                 except Exception as e:
                     st.error(f"予測分析でエラーが発生しました: {str(e)}")
             
-            # 詳細分析タブ
+            # 詳細分析タブ（★ 重要：ここでは統一フィルターを再作成しない）
             with tabs[2]:
                 try:
                     create_detailed_analysis_tab()

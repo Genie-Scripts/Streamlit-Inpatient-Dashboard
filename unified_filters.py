@@ -1,4 +1,4 @@
-# unified_filters.py - 改良版統一フィルター管理システム
+# unified_filters.py - キー重複問題修正版
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -16,11 +16,12 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 class UnifiedFilterManager:
-    """統一フィルター管理クラス"""
+    """統一フィルター管理クラス（キー重複問題修正版）"""
     
     def __init__(self):
         self.session_prefix = "unified_filter_"
         self.config_key = f"{self.session_prefix}config"
+        self.sidebar_created_key = f"{self.session_prefix}sidebar_created"
     
     def initialize_default_filters(self, df):
         """デフォルトフィルター値の初期化"""
@@ -145,7 +146,12 @@ class UnifiedFilterManager:
             return None, None
     
     def create_unified_sidebar(self, df):
-        """統一フィルターサイドバーの作成（簡潔版）"""
+        """統一フィルターサイドバーの作成（重複防止版）"""
+        # 既にサイドバーが作成されている場合はスキップ
+        if st.session_state.get(self.sidebar_created_key, False):
+            logger.info("統一フィルターサイドバーは既に作成済みです")
+            return st.session_state.get(self.config_key)
+        
         if df is None or df.empty:
             st.sidebar.error("📊 データが読み込まれていません")
             return None
@@ -160,12 +166,16 @@ class UnifiedFilterManager:
         st.sidebar.markdown("---")
         st.sidebar.markdown("## 🔍 分析フィルター")
         
+        # ユニークキーの生成
+        current_time = datetime.now().strftime("%H%M%S")
+        key_suffix = f"_{current_time}"
+        
         # 期間設定セクション
         with st.sidebar.expander("📅 分析期間", expanded=True):
             period_mode = st.radio(
                 "期間選択方法",
                 ["プリセット期間", "カスタム期間"],
-                key=f"{self.session_prefix}period_mode",
+                key=f"{self.session_prefix}period_mode{key_suffix}",
                 help="プリセット期間で簡単選択、またはカスタム期間で詳細指定"
             )
             
@@ -174,7 +184,7 @@ class UnifiedFilterManager:
                     "期間プリセット",
                     ["直近1ヶ月", "直近3ヶ月", "直近6ヶ月", "直近12ヶ月", "全期間"],
                     index=1,  # デフォルト：直近3ヶ月
-                    key=f"{self.session_prefix}preset",
+                    key=f"{self.session_prefix}preset{key_suffix}",
                     help="よく使われる期間から選択"
                 )
                 start_date, end_date = self._get_preset_dates(df, preset)
@@ -204,7 +214,7 @@ class UnifiedFilterManager:
                         value=max(default_start, data_min),
                         min_value=data_min,
                         max_value=data_max,
-                        key=f"{self.session_prefix}custom_start"
+                        key=f"{self.session_prefix}custom_start{key_suffix}"
                     )
                 with col2:
                     end_date_input = st.date_input(
@@ -212,7 +222,7 @@ class UnifiedFilterManager:
                         value=min(default_end, data_max),
                         min_value=start_date_input,
                         max_value=data_max,
-                        key=f"{self.session_prefix}custom_end"
+                        key=f"{self.session_prefix}custom_end{key_suffix}"
                     )
                 
                 start_date = pd.Timestamp(start_date_input)
@@ -228,7 +238,7 @@ class UnifiedFilterManager:
             dept_filter_mode = st.radio(
                 "診療科選択",
                 ["全診療科", "特定診療科"],
-                key=f"{self.session_prefix}dept_mode",
+                key=f"{self.session_prefix}dept_mode{key_suffix}",
                 help="全診療科を対象にするか、特定の診療科のみを選択"
             )
             
@@ -244,7 +254,7 @@ class UnifiedFilterManager:
                         selected_dept_displays = st.multiselect(
                             "対象診療科",
                             dept_options,
-                            key=f"{self.session_prefix}selected_depts",
+                            key=f"{self.session_prefix}selected_depts{key_suffix}",
                             help="分析対象とする診療科を選択（複数選択可）"
                         )
                         selected_depts = [dept_map[d] for d in selected_dept_displays if d in dept_map]
@@ -265,7 +275,7 @@ class UnifiedFilterManager:
             ward_filter_mode = st.radio(
                 "病棟選択",
                 ["全病棟", "特定病棟"],
-                key=f"{self.session_prefix}ward_mode",
+                key=f"{self.session_prefix}ward_mode{key_suffix}",
                 help="全病棟を対象にするか、特定の病棟のみを選択"
             )
             
@@ -281,7 +291,7 @@ class UnifiedFilterManager:
                         selected_ward_displays = st.multiselect(
                             "対象病棟",
                             ward_options,
-                            key=f"{self.session_prefix}selected_wards",
+                            key=f"{self.session_prefix}selected_wards{key_suffix}",
                             help="分析対象とする病棟を選択（複数選択可）"
                         )
                         selected_wards = [ward_map[w] for w in selected_ward_displays if w in ward_map]
@@ -311,16 +321,17 @@ class UnifiedFilterManager:
         
         # セッションに保存
         st.session_state[self.config_key] = filter_config
+        st.session_state[self.sidebar_created_key] = True  # 作成済みフラグ
         
         # フィルター操作ボタン
         st.sidebar.markdown("---")
         col1, col2 = st.sidebar.columns(2)
         with col1:
-            if st.button("🔄 適用", key=f"{self.session_prefix}apply", help="フィルター設定を適用して再分析"):
+            if st.button("🔄 適用", key=f"{self.session_prefix}apply{key_suffix}", help="フィルター設定を適用して再分析"):
                 logger.info("統一フィルターが適用されました")
                 st.rerun()
         with col2:
-            if st.button("🗑️ リセット", key=f"{self.session_prefix}reset", help="全てのフィルター設定をリセット"):
+            if st.button("🗑️ リセット", key=f"{self.session_prefix}reset{key_suffix}", help="全てのフィルター設定をリセット"):
                 self._reset_filters()
                 logger.info("統一フィルターがリセットされました")
                 st.rerun()
