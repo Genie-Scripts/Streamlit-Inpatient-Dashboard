@@ -29,7 +29,7 @@ except ImportError as e:
     get_unified_filter_summary = None
     get_unified_filter_config = None
 
-def display_dataframe_with_title(title, df_data, key_suffix=""): # key_suffixは現状未使用
+def display_dataframe_with_title(title, df_data, key_suffix=""):
     """指定されたタイトルでデータフレームを表示するヘルパー関数"""
     if df_data is not None and not df_data.empty:
         st.markdown(f"##### {title}")
@@ -49,12 +49,10 @@ def display_individual_analysis_tab():
         st.warning("まず「データ処理」タブでデータを読み込んでください。")
         return
 
-    df = st.session_state.get('df') # これは analysis_tabs.py から渡されるフィルター済みデータ
+    df = st.session_state.get('df')
     target_data = st.session_state.get('target_data')
-    all_results = st.session_state.get('all_results') # analysis_tabs.pyでフィルター済みdfに基づいて設定される想定
-    # latest_data_date_str も analysis_tabs.py でフィルター済みdfに基づいて設定される想定
+    all_results = st.session_state.get('all_results')
     latest_data_date_str_from_session = st.session_state.get('latest_data_date_str', pd.Timestamp.now().strftime("%Y年%m月%d日"))
-
 
     unified_filter_applied = st.session_state.get('unified_filter_applied', False)
 
@@ -67,13 +65,16 @@ def display_individual_analysis_tab():
         st.info(f"🔍 適用中のフィルター: {filter_summary}")
         st.success(f"📊 フィルター適用後データ: {len(df):,}行")
     else:
-        st.info("📊 全データでの個別分析") # unified_filter_applied が False のケースは通常ここには来ないはず
+        # このタブが呼び出される際、analysis_tabs.pyで unified_filter_applied=True が設定されるため、
+        # このelseブロックは通常実行されない想定。
+        st.info("📊 全データでの個別分析（注意：統一フィルターは未適用または不明）")
+
 
     if all_results is None:
         if generate_filtered_summaries:
             logger.warning("個別分析: all_resultsが未設定のため、フィルター済みdfから再生成します。")
             all_results = generate_filtered_summaries(df, None, None)
-            st.session_state.all_results = all_results # セッションにも保存しておく
+            st.session_state.all_results = all_results
             if not all_results:
                 st.error("「全体（フィルター適用後）」の集計データが生成できませんでした。")
                 return
@@ -82,23 +83,21 @@ def display_individual_analysis_tab():
             return
 
     try:
-        # フィルター適用後のデータフレーム df の最大日付を最新データ日付とする
         if not df.empty and '日付' in df.columns:
             latest_data_date_from_df = df['日付'].max()
-            # pd.Timestampに変換し、時刻部分を正規化
             latest_data_date = pd.Timestamp(latest_data_date_from_df).normalize()
             latest_data_date_str_for_display = latest_data_date.strftime("%Y年%m月%d日")
-            logger.info(f"個別分析: フィルター済みデータ内の最新日 ({latest_data_date_str_for_display}) を使用します。")
-        else: # dfが空、または日付列がないという通常ありえないケースのフォールバック
-            logger.warning(f"個別分析: フィルター済みdfから日付を取得できないため、セッションのlatest_data_date_str ({latest_data_date_str_from_session}) を使用します。")
+            logger.info(f"個別分析: フィルター済みデータ内の最新日 ({latest_data_date_str_for_display}) を予測基準日として使用します。")
+        else:
+            logger.warning(f"個別分析: フィルター済みdfから最新日を取得できないため、セッションのlatest_data_date_str ({latest_data_date_str_from_session}) を使用します。")
             latest_data_date = pd.to_datetime(latest_data_date_str_from_session, format="%Y年%m月%d日").normalize()
     except ValueError as ve:
         logger.error(f"最新データ日付の形式が無効です: {ve}", exc_info=True)
-        st.error(f"最新データ日付の形式が無効です。デフォルトの日付を使用します。")
-        latest_data_date = pd.Timestamp.now().normalize() # フォールバック
+        st.error(f"最新データ日付の形式が無効です。予測基準日としてデフォルトの日付を使用します。")
+        latest_data_date = pd.Timestamp.now().normalize()
     except Exception as e:
         logger.error(f"最新データ日付の処理中に予期せぬエラー: {e}", exc_info=True)
-        st.error(f"最新データ日付の処理中にエラーが発生しました。デフォルトの日付を使用します。")
+        st.error(f"最新データ日付の処理中にエラーが発生しました。予測基準日としてデフォルトの日付を使用します。")
         latest_data_date = pd.Timestamp.now().normalize()
 
 
@@ -106,12 +105,13 @@ def display_individual_analysis_tab():
     if unified_filter_applied:
         st.markdown("#### 🔍 詳細フィルター（統一フィルター結果内での細分化）")
     else:
+        # この分岐は通常通らない想定
         st.markdown("#### 🔍 分析対象選択")
 
     unique_depts = sorted(df["診療科名"].astype(str).unique()) if "診療科名" in df.columns and not df['診療科名'].empty else []
     unique_wards = sorted(df["病棟コード"].astype(str).unique()) if "病棟コード" in df.columns and not df['病棟コード'].empty else []
 
-    col1_filter, col2_filter = st.columns([1, 2]) # 3列目は不要なので削除
+    col1_filter, col2_filter = st.columns([1, 2])
 
     with col1_filter:
         filter_type_options = ["全体"]
@@ -128,7 +128,7 @@ def display_individual_analysis_tab():
             "分析単位",
             filter_type_options,
             index=current_filter_type_index,
-            key="ind_filter_type_radio" # キーを修正 (衝突回避)
+            key="ind_filter_type_radio_v2" # キーをよりユニークに
         )
         st.session_state.ind_filter_type = filter_type
 
@@ -141,7 +141,7 @@ def display_individual_analysis_tab():
             if get_display_name_for_dept:
                 for dept_code in unique_depts:
                     display_name = get_display_name_for_dept(dept_code, dept_code)
-                    dept_display_options_map[display_name] = dept_code # 表示名がキー、コードが値
+                    dept_display_options_map[display_name] = dept_code
             else:
                 for dept_code in unique_depts: dept_display_options_map[dept_code] = dept_code
             
@@ -159,17 +159,17 @@ def display_individual_analysis_tab():
                 "診療科を選択",
                 sorted_dept_display_names,
                 index=current_dept_idx,
-                key="ind_dept_select_sb" # キーを修正
+                key="ind_dept_select_sb_v2"
             )
             st.session_state.ind_dept_select_display = filter_value_display
             filter_value_actual = dept_display_options_map.get(filter_value_display, "全体")
 
         elif filter_type == "病棟別":
-            from utils import get_ward_display_name # 明示的にインポート
+            from utils import get_ward_display_name
             ward_display_options_map = {"全体": "全体"}
             if get_ward_display_name:
                  for ward_code in unique_wards:
-                    display_name = get_ward_display_name(ward_code) # utils内でマッピング解決
+                    display_name = get_ward_display_name(ward_code)
                     ward_display_options_map[display_name] = ward_code
             else:
                 for ward_code in unique_wards: ward_display_options_map[ward_code] = ward_code
@@ -188,7 +188,7 @@ def display_individual_analysis_tab():
                 "病棟を選択",
                 sorted_ward_display_names,
                 index=current_ward_idx,
-                key="ind_ward_select_sb" # キーを修正
+                key="ind_ward_select_sb_v2"
             )
             st.session_state.ind_ward_select_display = filter_value_display
             filter_value_actual = ward_display_options_map.get(filter_value_display, "全体")
@@ -199,7 +199,7 @@ def display_individual_analysis_tab():
     current_filter_title_display = "全体"
     current_results_data = all_results
     chart_data_for_graphs = df.copy()
-    filter_code_for_target = "全体"
+    filter_code_for_target = "全体" # 目標値取得用
 
     if filter_type == "全体" or filter_value_actual == "全体":
         current_filter_title_display = "全体（統一フィルター適用済み）" if unified_filter_applied else "全体"
@@ -208,60 +208,44 @@ def display_individual_analysis_tab():
         if unified_filter_applied: current_filter_title_display += "（統一フィルター範囲内）"
         filter_code_for_target = filter_value_actual
         current_results_data = generate_filtered_summaries(df, "診療科名", filter_value_actual) if generate_filtered_summaries else None
-        chart_data_for_graphs = df[df["診療科名"] == filter_value_actual] if "診療科名" in df.columns else pd.DataFrame()
+        chart_data_for_graphs = df[df["診療科名"] == filter_value_actual] if "診療科名" in df.columns and not df.empty else pd.DataFrame()
     elif filter_type == "病棟別":
         current_filter_title_display = f"病棟: {filter_value_display}"
         if unified_filter_applied: current_filter_title_display += "（統一フィルター範囲内）"
         filter_code_for_target = filter_value_actual
         current_results_data = generate_filtered_summaries(df, "病棟コード", filter_value_actual) if generate_filtered_summaries else None
-        chart_data_for_graphs = df[df["病棟コード"] == filter_value_actual] if "病棟コード" in df.columns else pd.DataFrame()
+        chart_data_for_graphs = df[df["病棟コード"] == filter_value_actual] if "病棟コード" in df.columns and not df.empty else pd.DataFrame()
 
     if not current_results_data or not isinstance(current_results_data, dict) or current_results_data.get("summary") is None:
         st.warning(f"「{current_filter_title_display}」には表示できる集計データがありません。")
     else:
         st.markdown(f"#### 分析結果: {current_filter_title_display}")
 
+        selected_days_for_graph = 90 # デフォルト (グラフデータがない場合のフォールバック)
+        pdf_graph_days_to_use = selected_days_for_graph # PDF用も初期化
+
         if chart_data_for_graphs is not None and not chart_data_for_graphs.empty:
             data_period_info = ""
+            min_date_chart_obj = None
+            max_date_chart_obj = None
             if '日付' in chart_data_for_graphs.columns and not chart_data_for_graphs['日付'].empty:
-                min_date_chart = chart_data_for_graphs['日付'].min().date()
-                max_date_chart = chart_data_for_graphs['日付'].max().date()
-                data_period_info = f"期間: {min_date_chart} ～ {max_date_chart}"
+                min_date_chart_obj = chart_data_for_graphs['日付'].min()
+                max_date_chart_obj = chart_data_for_graphs['日付'].max()
+                data_period_info = f"期間: {min_date_chart_obj.date()} ～ {max_date_chart_obj.date()}"
             st.info(f"📊 対象データ: {len(chart_data_for_graphs):,}行　{data_period_info}")
 
-            selected_days_for_graph = 90 # デフォルト
-            if not chart_data_for_graphs.empty and '日付' in chart_data_for_graphs.columns:
-                min_graph_date = chart_data_for_graphs['日付'].min()
-                max_graph_date = chart_data_for_graphs['日付'].max()
-                calculated_days = (max_graph_date - min_graph_date).days + 1
-                if calculated_days > 0 : # 期間が1日以上ある場合
+            if min_date_chart_obj and max_date_chart_obj :
+                calculated_days = (max_date_chart_obj - min_date_chart_obj).days + 1
+                if calculated_days > 0 :
                     selected_days_for_graph = calculated_days
             
-            # 統一フィルター適用時、または個別フィルターで「全体」以外が選択されている場合は、
-            # 絞り込まれたデータの全期間をグラフ表示のデフォルトとする。
-            # 統一フィルター非適用時のみ、ラジオボタンを表示して期間選択を可能にする。
-            if not unified_filter_applied and filter_type == "全体":
-                 display_period_options = ["直近90日間", "直近180日間", f"全期間 ({selected_days_for_graph}日間)"]
-                 default_period_option = f"全期間 ({selected_days_for_graph}日間)"
-                 if selected_days_for_graph > 180: default_period_option = "直近180日間"
-                 elif selected_days_for_graph > 90: default_period_option = "直近90日間"
-
-
-                 selected_period_label = st.radio(
-                    "グラフ表示期間",
-                    display_period_options,
-                    index=display_period_options.index(default_period_option), # デフォルトを設定
-                    horizontal=True,
-                    key="ind_graph_display_period_radio_local"
-                 )
-                 if selected_period_label == "直近90日間":
-                     selected_days_for_graph = 90
-                 elif selected_period_label == "直近180日間":
-                     selected_days_for_graph = 180
-                 # 「全期間」の場合は selected_days_for_graph は既に計算済み
+            # ラジオボタンは表示せず、フィルター適用期間全体をグラフ表示期間とする
+            if min_date_chart_obj and max_date_chart_obj:
+                 st.markdown(f"##### グラフ表示期間: フィルター適用期間全体 ({min_date_chart_obj.strftime('%Y/%m/%d')} - {max_date_chart_obj.strftime('%Y/%m/%d')}, {selected_days_for_graph}日間)")
             else:
-                 st.markdown(f"##### グラフ表示期間: フィルター適用期間全体 ({selected_days_for_graph}日間)")
-
+                st.markdown(f"##### グラフ表示期間: フィルター適用期間全体 ({selected_days_for_graph}日間)")
+            
+            pdf_graph_days_to_use = selected_days_for_graph
 
             target_val_all, target_val_weekday, target_val_holiday = None, None, None
             if target_data is not None and not target_data.empty and \
@@ -284,7 +268,7 @@ def display_individual_analysis_tab():
                         fig_all_ind = create_interactive_patient_chart(
                             chart_data_for_graphs,
                             title=f"{current_filter_title_display} 全日 入院患者数推移",
-                            days=selected_days_for_graph,
+                            days=selected_days_for_graph, # フィルター適用後の全期間の日数
                             target_value=target_val_all,
                             chart_type="全日"
                         )
@@ -303,7 +287,7 @@ def display_individual_analysis_tab():
                             fig_weekday_ind = create_interactive_patient_chart(
                                 weekday_data_ind,
                                 title=f"{current_filter_title_display} 平日 入院患者数推移",
-                                days=selected_days_for_graph, # 平日データに対しても同じ期間を適用
+                                days=selected_days_for_graph, # 平日データも全期間で表示
                                 show_moving_average=False,
                                 target_value=target_val_weekday,
                                 chart_type="平日"
@@ -319,7 +303,7 @@ def display_individual_analysis_tab():
                             fig_holiday_ind = create_interactive_patient_chart(
                                 holiday_data_ind,
                                 title=f"{current_filter_title_display} 休日 入院患者数推移",
-                                days=selected_days_for_graph, # 休日データに対しても同じ期間を適用
+                                days=selected_days_for_graph, # 休日データも全期間で表示
                                 show_moving_average=False,
                                 target_value=target_val_holiday,
                                 chart_type="休日"
@@ -339,7 +323,7 @@ def display_individual_analysis_tab():
                         fig_dual_ind = create_interactive_dual_axis_chart(
                             chart_data_for_graphs,
                             title=f"{current_filter_title_display} 入院患者数と患者移動の推移",
-                            days=selected_days_for_graph
+                            days=selected_days_for_graph # 全期間で表示
                         )
                         if fig_dual_ind: st.plotly_chart(fig_dual_ind, use_container_width=True)
                         else: st.warning("複合グラフの生成に失敗しました。")
@@ -348,8 +332,9 @@ def display_individual_analysis_tab():
                         st.error(f"複合グラフの作成中にエラーが発生しました: {e}")
                 else:
                     st.warning("グラフ生成関数 (create_interactive_dual_axis_chart) が利用できません。")
-        else:
+        else: # chart_data_for_graphs が空の場合
             st.warning("グラフを表示するためのデータがありません。")
+
 
         st.markdown("##### 在院患者数予測")
         if create_forecast_dataframe and \
@@ -362,7 +347,7 @@ def display_individual_analysis_tab():
                     current_results_data.get("summary"),
                     current_results_data.get("weekday"),
                     current_results_data.get("holiday"),
-                    latest_data_date
+                    latest_data_date # フィルター適用後のデータの最新日
                 )
                 if forecast_df_ind is not None and not forecast_df_ind.empty:
                     display_df_ind = forecast_df_ind.copy()
@@ -407,11 +392,14 @@ def display_individual_analysis_tab():
                 logger.error(f"PDF用予測データ作成エラー: {e}", exc_info=True)
                 pdf_forecast_df_data = pd.DataFrame()
 
-        pdf_graph_days_to_use = selected_days_for_graph if 'selected_days_for_graph' in locals() and chart_data_for_graphs is not None and not chart_data_for_graphs.empty else 90
-
-
         with pdf_col1:
-            if create_pdf and st.button("📄 縦向きPDF出力", key="ind_pdf_portrait_btn", use_container_width=True): # キー修正
+            # ボタンのキーを一意にする（フィルタータイプと実際の値で構成）
+            # filter_value_actual が "/" を含む可能性があるので置換
+            safe_filter_value = str(filter_value_actual).replace('/', '_') if filter_value_actual else "all"
+            portrait_button_key = f"ind_pdf_portrait_btn_{filter_type}_{safe_filter_value}"
+            portrait_dl_button_key = f"dl_ind_portrait_pdf_{filter_type}_{safe_filter_value}"
+
+            if create_pdf and st.button("📄 縦向きPDF出力", key=portrait_button_key, use_container_width=True):
                 if chart_data_for_graphs is None or chart_data_for_graphs.empty:
                     st.warning("PDF生成に必要なグラフデータがありません。")
                 else:
@@ -438,7 +426,7 @@ def display_individual_analysis_tab():
                                     data=pdf_data_portrait,
                                     file_name=filename_pdf,
                                     mime="application/pdf",
-                                    key=f"dl_ind_portrait_pdf_{filter_type}_{filter_value_actual.replace('/', '_')}" # よりユニークなキー
+                                    key=portrait_dl_button_key
                                 )
                             else: st.error("縦向きPDFの生成に失敗しました。")
                         except Exception as e:
@@ -446,7 +434,10 @@ def display_individual_analysis_tab():
                             st.error(f"縦向きPDFの生成中にエラーが発生しました: {e}")
 
         with pdf_col2:
-            if create_landscape_pdf and st.button("📄 横向きPDF出力", key="ind_pdf_landscape_btn", use_container_width=True): # キー修正
+            landscape_button_key = f"ind_pdf_landscape_btn_{filter_type}_{safe_filter_value}"
+            landscape_dl_button_key = f"dl_ind_landscape_pdf_{filter_type}_{safe_filter_value}"
+
+            if create_landscape_pdf and st.button("📄 横向きPDF出力", key=landscape_button_key, use_container_width=True):
                 if chart_data_for_graphs is None or chart_data_for_graphs.empty:
                     st.warning("PDF生成に必要なグラフデータがありません。")
                 else:
@@ -473,7 +464,7 @@ def display_individual_analysis_tab():
                                     data=pdf_data_landscape,
                                     file_name=filename_pdf_land,
                                     mime="application/pdf",
-                                    key=f"dl_ind_landscape_pdf_{filter_type}_{filter_value_actual.replace('/', '_')}" # よりユニークなキー
+                                    key=landscape_dl_button_key
                                 )
                             else: st.error("横向きPDFの生成に失敗しました。")
                         except Exception as e:
