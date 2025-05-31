@@ -21,191 +21,139 @@ from utils import (
     safe_date_filter
 )
 
-def display_alos_analysis_tab(df, start_date, end_date, common_config=None):
-    """平均在院日数分析タブの表示"""
+def display_alos_analysis_tab(df_filtered_by_period, start_date_ts, end_date_ts, common_config=None):
+    """
+    平均在院日数分析タブの表示
+    Args:
+        df_filtered_by_period (pd.DataFrame): 呼び出し元で既に期間フィルタリングされたDataFrame
+        start_date_ts (pd.Timestamp): 分析期間の開始日 (Timestamp型)
+        end_date_ts (pd.Timestamp): 分析期間の終了日 (Timestamp型)
+        common_config (dict, optional): 共通設定
+    """
     
-    # 病棟マッピングの初期化
-    initialize_ward_mapping(df)
-    
-    # ⭐ 期間情報の取得と表示
-    if start_date and end_date:
-        # 既にフィルタリング済みのデータを受け取っている場合
-        df_analysis = df.copy()
-        period_text = f"{start_date} ～ {end_date}"
+    # (1) 病棟マッピングの初期化: 渡されたフィルタ済みデータに対して行う
+    #     df_filtered_by_period が空でないことを確認してから初期化するとより安全
+    if df_filtered_by_period is not None and not df_filtered_by_period.empty:
+        initialize_ward_mapping(df_filtered_by_period)
     else:
-        # セッションステートから期間情報を取得
-        session_start = st.session_state.get('alos_start_date')
-        session_end = st.session_state.get('alos_end_date')
+        st.warning("分析対象のデータが空です。")
+        return
+
+    # (2) 期間情報の取得と表示: 引数で渡された Timestamp を使用
+    #     このセクションの else ブロック (セッションステートからの読み込みや全期間の計算) は不要になる
+    if start_date_ts and end_date_ts:
+        # (3) df_analysis の作成: 引数でフィルタ済みなのでそのまま使用
+        df_analysis = df_filtered_by_period.copy() # 変更を加える可能性があるのでコピー
         
-        if session_start and session_end:
-            df_analysis = safe_date_filter(df, session_start, session_end)
-            period_text = f"{session_start} ～ {session_end}"
-        else:
-            df_analysis = df.copy()
-            if not df_analysis.empty and '日付' in df_analysis.columns:
-                min_date = df_analysis['日付'].min().strftime('%Y年%m月%d日')
-                max_date = df_analysis['日付'].max().strftime('%Y年%m月%d日')
-                period_text = f"{min_date} ～ {max_date}"
-            else:
-                period_text = "期間不明"
+        # (4) period_text の作成: Timestamp をフォーマット
+        period_text = f"{start_date_ts.strftime('%Y年%m月%d日')} ～ {end_date_ts.strftime('%Y年%m月%d日')}"
+    else:
+        # 引数が正しく渡されなかった場合のフォールバック (通常は発生しないはず)
+        st.error("期間情報が正しく渡されませんでした。")
+        df_analysis = pd.DataFrame() # 空のDF
+        period_text = "期間不明"
+        
+    # (7) total_days の計算
+    total_days = len(df_analysis['日付'].unique()) if not df_analysis.empty and '日付' in df_analysis.columns else 0
+    # (8) st.info の表示
+    st.info(f"📅 分析期間: {period_text} （{total_days}日間）")
     
-    # ⭐ 期間情報の表示
-    total_days = len(df_analysis['日付'].unique()) if not df_analysis.empty else 0
-    st.info(f"📅 選択期間: {period_text} （{total_days}日間）")
-    
-    if df_analysis.empty:
+    if df_analysis.empty: # (3) の結果 df_analysis が空ならここでリターン
         st.warning("選択された期間にデータがありません。")
         return
     
-    # 列名確認
+    # (9) 列名確認 (これは df_analysis に対して行う)
     required_columns = [
         '日付', '病棟コード', '診療科名', 
         '入院患者数（在院）', '入院患者数', '緊急入院患者数', 
         '退院患者数', '死亡患者数', '総入院患者数', '総退院患者数'
     ]
     
-    missing_columns = [col for col in required_columns if col not in df.columns]
+    missing_columns = [col for col in required_columns if col not in df_analysis.columns]
     if missing_columns:
-        # もし入院患者数（在院）がない場合は、在院患者数を代用
-        if '入院患者数（在院）' in missing_columns and '在院患者数' in df.columns:
-            df['入院患者数（在院）'] = df['在院患者数']
+        # ... (既存の列補完ロジック - df_analysis を変更) ...
+        if '入院患者数（在院）' in missing_columns and '在院患者数' in df_analysis.columns:
+            df_analysis['入院患者数（在院）'] = df_analysis['在院患者数']
             missing_columns.remove('入院患者数（在院）')
         
-        # 総入院患者数と総退院患者数の計算
-        if '総入院患者数' in missing_columns and '入院患者数' in df.columns and '緊急入院患者数' in df.columns:
-            df['総入院患者数'] = df['入院患者数'] + df['緊急入院患者数']
+        if '総入院患者数' in missing_columns and '入院患者数' in df_analysis.columns and '緊急入院患者数' in df_analysis.columns:
+            df_analysis['総入院患者数'] = df_analysis['入院患者数'] + df_analysis['緊急入院患者数']
             missing_columns.remove('総入院患者数')
         
-        if '総退院患者数' in missing_columns and '退院患者数' in df.columns and '死亡患者数' in df.columns:
-            df['総退院患者数'] = df['退院患者数'] + df['死亡患者数']
+        if '総退院患者数' in missing_columns and '退院患者数' in df_analysis.columns and '死亡患者数' in df_analysis.columns:
+            df_analysis['総退院患者数'] = df_analysis['退院患者数'] + df_analysis['死亡患者数']
             missing_columns.remove('総退院患者数')
-    
-    if missing_columns:
+
+    if missing_columns: # 再度チェック
         st.error(f"必要な列が見つかりません: {', '.join(missing_columns)}")
         return
     
-    # 日付範囲の確認
-    min_date = pd.to_datetime(start_date)
-    max_date = pd.to_datetime(end_date)
-    date_range = (max_date - min_date).days + 1
+    # (10) min_date, (11) max_date の再定義: 引数で渡された Timestamp をそのまま使用
+    #     pd.to_datetime() による変換は不要
+    #     変数名を start_date_ts, end_date_ts に合わせるか、このまま min_date, max_date としても良い
+    min_date_for_chart = start_date_ts
+    max_date_for_chart = end_date_ts
     
-    if date_range <= 0:
+    # (12) date_range の計算
+    date_range_days = (max_date_for_chart - min_date_for_chart).days + 1 # 変数名修正
+    
+    # (13) date_range_days のチェック
+    if date_range_days <= 0:
         st.error("分析終了日は分析開始日より後である必要があります。")
         return
     
-    # サイドバー設定
+    # (14) サイドバー設定 (変更なし)
     st.sidebar.markdown("<div class='sidebar-section'>", unsafe_allow_html=True)
     st.sidebar.markdown("<div class='sidebar-title' style='font-size:1.1rem; margin-bottom:0.5rem;'>平均在院日数分析 設定</div>", unsafe_allow_html=True)
-    
-    # 集計粒度（日単位(直近30日)に固定）
-    selected_granularity = '日単位(直近30日)'
+    selected_granularity = '日単位(直近30日)' # 固定
     st.session_state.alos_granularity = selected_granularity
-    
-    # 集計単位選択
-    selected_unit = st.sidebar.selectbox(
-        "集計単位:", 
-        ['病院全体', '病棟別', '診療科別'], 
-        index=0, 
-        key="alos_unit"
-    )
-    
-    # 対象項目選択（病棟または診療科）
+    selected_unit = st.sidebar.selectbox("集計単位:", ['病院全体', '病棟別', '診療科別'], index=0, key="alos_unit")
     target_items = []
     if selected_unit == '病棟別':
-        available_wards = sorted(df['病棟コード'].astype(str).unique())
-        
-        # 病棟名マッピングを取得
+        # initialize_ward_mapping は df_analysis (フィルタ済み) で実行済みなので、
+        # df_analysis から unique な病棟コードを取得する方が適切かもしれない。
+        # ただし、選択肢としては全病棟を提示したい場合もあるので、元の df (st.session_state.df) から取るのが良い場合も。
+        # ここでは、UIの選択肢は全病棟からとし、実際の分析は df_analysis で行う。
+        # 元の df を参照する場合は、この関数の引数として渡すか、st.session_state.df を直接参照する。
+        # ここでは、簡単のため df_analysis から取得する。
+        available_wards = sorted(df_analysis['病棟コード'].astype(str).unique()) if '病棟コード' in df_analysis.columns else []
         ward_mapping = st.session_state.get('ward_mapping', {})
-        
-        # 表示オプションを作成
         ward_options, option_to_code = create_ward_display_options(available_wards, ward_mapping)
-        
-        selected_ward_options = st.sidebar.multiselect(
-            "対象病棟:", 
-            ward_options, 
-            default=[ward_options[0]] if ward_options else [], 
-            key="alos_target_wards",
-            help="分析対象の病棟を選択してください"
-        )
-        
-        # 選択された表示名から病棟コードを取得
+        selected_ward_options = st.sidebar.multiselect("対象病棟:", ward_options, default=[ward_options[0]] if ward_options else [], key="alos_target_wards", help="分析対象の病棟を選択してください")
         target_items = [option_to_code[option] for option in selected_ward_options]
-        
     elif selected_unit == '診療科別':
-        available_depts = sorted(df['診療科名'].astype(str).unique())
-        target_items = st.sidebar.multiselect(
-            "対象診療科:", 
-            available_depts, 
-            default=available_depts[0] if available_depts else None, 
-            key="alos_target_depts"
-        )
-
-    
-    # 移動平均ウィンドウサイズの設定
-    # 元のコード（削除）
-    # if selected_granularity == '月単位':
-    #     moving_avg_window = st.sidebar.slider(
-    #         "移動平均期間 (ヶ月)", 
-    #         1, 12, 3, 
-    #         key="alos_ma_months"
-    #     )
-    # else:  # 週単位
-    #     moving_avg_window = st.sidebar.slider(
-    #         "移動平均期間 (週)", 
-    #         1, 26, 4, 
-    #         key="alos_ma_weeks"
-    #     )
-    
-    # 新しいコード（直近30日用）
-    moving_avg_window = st.sidebar.slider(
-        "集計期間 (日)", 
-        7, 90, 30, 
-        key="alos_ma_rolling_days"
-    )
-    
-    # ベンチマーク値設定
-    benchmark_alos = None
-    if common_config and 'benchmark_alos' in common_config:
-        benchmark_alos = common_config['benchmark_alos']
-    else:
-        benchmark_alos = st.sidebar.number_input(
-            "平均在院日数目標値 (日):", 
-            min_value=0.0, 
-            value=12.0, 
-            step=0.5, 
-            key="alos_benchmark",
-            help="平均在院日数の目標値（ベンチマーク値）を設定します。"
-        )
-    
+        available_depts = sorted(df_analysis['診療科名'].astype(str).unique()) if '診療科名' in df_analysis.columns else []
+        target_items = st.sidebar.multiselect("対象診療科:", available_depts, default=available_depts[0] if available_depts else None, key="alos_target_depts")
+    moving_avg_window = st.sidebar.slider("集計期間 (日)", 7, 90, 30, key="alos_ma_rolling_days")
+    benchmark_alos = st.sidebar.number_input("平均在院日数目標値 (日):", min_value=0.0, value=common_config.get('benchmark_alos', 12.0) if common_config else 12.0, step=0.5, key="alos_benchmark", help="平均在院日数の目標値（ベンチマーク値）を設定します。")
     st.sidebar.markdown("</div>", unsafe_allow_html=True)
     
-    # メインコンテンツ
+    # (15) メインコンテンツ (変更なし)
     st.markdown("<div class='page-title'>平均在院日数分析</div>", unsafe_allow_html=True)
-    
-    # データフィルタリングとチェック
     if selected_unit in ['病棟別', '診療科別'] and not target_items:
         st.warning(f"分析対象の{selected_unit.replace('別','')}をサイドバーで選択してください。")
         return
-    
-    # 主要チャート：平均在院日数と平均在院患者数の推移
     st.markdown("<div class='section-title'>平均在院日数と平均在院患者数の推移（デフォルト30日）</div>", unsafe_allow_html=True)
     st.markdown(f"""
         <div style='font-size: 18px; color: #666; margin-bottom:1rem;'>
-            選択期間: {min_date.strftime('%Y年%m月%d日')} ～ {max_date.strftime('%Y年%m月%d日')}
-            （{date_range}日間）
+            選択期間: {min_date_for_chart.strftime('%Y年%m月%d日')} ～ {max_date_for_chart.strftime('%Y年%m月%d日')}
+            （{date_range_days}日間）
         </div>
     """, unsafe_allow_html=True)
     
-    # グラフと集計データの取得
+    # (16) グラフと集計データの取得
+    # (17) create_alos_volume_chart に渡す df は、フィルタ済みの df_analysis を使用
+    # (18) start_date, (19) end_date も Timestamp 型の min_date_for_chart, max_date_for_chart を使用
     alos_chart, alos_data = create_alos_volume_chart(
-        df, 
+        df_analysis, # フィルタリング済みのデータ
         selected_granularity, 
         selected_unit, 
         target_items, 
-        min_date, 
-        max_date, 
+        min_date_for_chart, # Timestamp
+        max_date_for_chart, # Timestamp
         moving_avg_window
     )
+
     
     if alos_chart and alos_data is not None:
         # グラフの表示
@@ -260,14 +208,14 @@ def display_alos_analysis_tab(df, start_date, end_date, common_config=None):
         
         # ベンチマークチャートの作成
         benchmark_chart = create_alos_benchmark_chart(
-            df, 
+            df_analysis, # df から df_analysis に変更
             selected_unit, 
             target_items if selected_unit != '病院全体' else None, 
-            min_date, 
-            max_date,
+            min_date_for_chart, # Timestamp
+            max_date_for_chart, # Timestamp
             benchmark_alos
-        )
-        
+        )        
+
         if benchmark_chart:
             st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
             st.plotly_chart(benchmark_chart, use_container_width=True)
@@ -277,16 +225,16 @@ def display_alos_analysis_tab(df, start_date, end_date, common_config=None):
     
     # 詳細メトリクス表示
     st.markdown("<div class='section-title'>詳細メトリクス</div>", unsafe_allow_html=True)
+    group_by_column_metrics = None
+    if selected_unit == '病棟別': group_by_column_metrics = '病棟コード'
+    elif selected_unit == '診療科別': group_by_column_metrics = '診療科名'
     
-    # グループ化列の指定
-    group_by_column = None
-    if selected_unit == '病棟別':
-        group_by_column = '病棟コード'
-    elif selected_unit == '診療科別':
-        group_by_column = '診療科名'
-    
-    # メトリクスの計算
-    metrics_df = calculate_alos_metrics(df, min_date, max_date, group_by_column)
+    metrics_df = calculate_alos_metrics(
+        df_analysis, # フィルタ済みデータを使用
+        min_date_for_chart, # Timestamp
+        max_date_for_chart, # Timestamp
+        group_by_column_metrics
+    )
     
     if not metrics_df.empty:
         # 選択された項目のみをフィルタリング

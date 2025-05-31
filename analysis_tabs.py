@@ -203,29 +203,37 @@ def create_output_prediction_tab():
     
     with col2:
         if pdf_period_type == "カスタム期間":
-            df = st.session_state.get('df')
-            if df is not None and not df.empty:
-                min_date = df['日付'].min().date()
-                max_date = df['日付'].max().date()
-                
-                pdf_start_date = st.date_input(
+            df_for_pdf_dates = st.session_state.get('df') # Ensure it's the original df for min/max
+            if df_for_pdf_dates is not None and not df_for_pdf_dates.empty and '日付' in df_for_pdf_dates.columns:
+                min_date_dt = df_for_pdf_dates['日付'].min().date()
+                max_date_dt = df_for_pdf_dates['日付'].max().date()
+
+                # st.date_input の value は datetime.date を期待
+                default_pdf_start_dt = (pd.Timestamp(max_date_dt) - pd.Timedelta(days=90)).date()
+                if default_pdf_start_dt < min_date_dt: default_pdf_start_dt = min_date_dt
+
+                pdf_start_date_input = st.date_input(
                     "開始日",
-                    value=max(min_date, max_date - pd.Timedelta(days=90)),
-                    min_value=min_date,
-                    max_value=max_date,
+                    value=default_pdf_start_dt, # date型
+                    min_value=min_date_dt,
+                    max_value=max_date_dt,
                     key="pdf_custom_start"
                 )
-                pdf_end_date = st.date_input(
+                pdf_end_date_input = st.date_input(
                     "終了日",
-                    value=max_date,
-                    min_value=min_date,
-                    max_value=max_date,
+                    value=max_date_dt, # date型
+                    min_value=pdf_start_date_input, # 選択された開始日以降
+                    max_value=max_date_dt,
                     key="pdf_custom_end"
                 )
+                # 後続処理のためにTimestampに変換して保持するならここで
+                # st.session_state.pdf_actual_start_date = pd.to_datetime(pdf_start_date_input).normalize()
+                # st.session_state.pdf_actual_end_date = pd.to_datetime(pdf_end_date_input).normalize()
+                # これらを実際に safe_date_filter や PDF生成関数に渡す
             else:
                 st.warning("データが読み込まれていません")
-                pdf_start_date = None
-                pdf_end_date = None
+                # pdf_start_date = None # 変数名が衝突しないように
+                # pdf_end_date = None
         else:
             # 選択された期間タイプに応じて期間を設定
             if pdf_period_type == "KPI期間と同じ":
