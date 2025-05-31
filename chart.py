@@ -1,3 +1,4 @@
+# chart.py (修正版)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,57 +10,20 @@ import matplotlib.font_manager
 import gc
 import time
 import hashlib
+import logging # ロギングを追加
 
+logger = logging.getLogger(__name__) # ロガーを取得
 
-def get_chart_cache():
-    """セッション状態のチャートキャッシュを取得"""
-    if 'chart_cache' not in st.session_state:
-        st.session_state.chart_cache = {}
-    return st.session_state.chart_cache
-
-def get_data_hash(data):
-    """データフレームのハッシュを計算"""
-    if data is None or data.empty:
-        return "empty"
-    try:
-        if '日付' in data.columns and '入院患者数（在院）' in data.columns:
-            sample = data.head(10)
-            # データの内容が少しでも変わればハッシュが変わるように、より多くの情報を含めるか、
-            # pandasの to_msgpack や to_pickle のバイト列表現のハッシュを取る方が堅牢
-            hash_str = pd.util.hash_pandas_object(sample, index=True).to_string()
-            return hashlib.md5(hash_str.encode()).hexdigest()[:16] # ハッシュ長を少し長く
-        else:
-            # 列名や形状だけでもハッシュに含める
-            hash_str = str(data.shape) + str(list(data.columns))
-            return hashlib.md5(hash_str.encode()).hexdigest()[:16]
-    except Exception as e:
-        print(f"Data hashing error: {e}")
-        return "error_hash_" + str(time.time()) # エラー時はユニークな値を返す
-
-def get_chart_cache_key(title, days, target_value=None, chart_type="default", data_hash=None): # 既存の関数
-    """キャッシュキーを生成する"""
-    components = [str(title), str(days)]
-    if target_value is not None:
-        try:
-            # 浮動小数点数の比較問題を避けるため、一定の精度で丸める
-            components.append(f"{float(target_value):.2f}")
-        except (ValueError, TypeError):
-            components.append(str(target_value))
-    else:
-        components.append("None")
-    components.append(str(chart_type))
-    if data_hash:
-        components.append(data_hash)
-    # キーが長くなりすぎないように、全体のハッシュを取ることも検討
-    key_string = "_".join(components)
-    return hashlib.md5(key_string.encode()).hexdigest()
+# get_chart_cache, get_data_hash, get_chart_cache_key は、
+# @st.cache_data を全面的に使用する場合、必須ではなくなります。
+# BytesIOオブジェクト自体を@st.cache_dataでキャッシュできるためです。
+# ただし、Plotlyのグラフオブジェクトなど、キャッシュできないものを扱う場合は
+# 別の戦略が必要になることがあります。ここではMatplotlib生成のBytesIOをキャッシュします。
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def create_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, font_name_for_mpl=None):
     """データから患者数推移グラフを作成する（キャッシュ対応版）- Matplotlib PDF用"""
     start_time = time.time()
-    # st.session_state を使ったキャッシュロジックは削除
-
     fig = None
     try:
         fig, ax = plt.subplots(figsize=(10, 5.5))
@@ -126,6 +90,129 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
         if fig: plt.close(fig)
         gc.collect()
 
+
+def create_interactive_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, target_value=None, chart_type="全日"):
+    """
+    インタラクティブな患者数推移グラフを作成する (Plotly)
+    """
+    try:
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            logger.warning(f"create_interactive_patient_chart: '{title}' のデータが空です。")
+            return None
+        if "日付" not in data.columns or "入院患者数（在院）" not in data.columns:
+            logger.warning(f"create_interactive_patient_chart: '{title}' のデータに必要な列（日付, 入院患者数（在院））がありません。")
+            return None
+
+        data_copy = data.copy() # SettingWithCopyWarning回避のためコピー
+        if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
+            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
+            data_copy.dropna(subset=['日付'], inplace=True)
+
+        grouped = data_copy.groupby("日付")["入院患者数（在院）"].sum().reset_index().sort_values("日付")
+        
+        # 日数制限を適用する前に、データが存在するか確認
+        if grouped.empty:
+            logger.warning(f"create_interactive_patient_chart: '{title}' のグループ化後データが空です。")
+            return None
+            
+        if len(grouped) > days: # days が0以下の場合も考慮（通常は正の整数）
+             if days > 0:
+                grouped = grouped.tail(days)
+             # days が0以下の場合は全期間表示とするか、エラーとするか。ここでは全期間とする。
+             # ただし、呼び出し元で適切なdaysが渡される想定。
+
+        if grouped.empty:
+            logger.warning(f"create_interactive_patient_chart: '{title}' の期間絞り込み後データが空です（days: {days}）。")
+            return None
+
+
+        avg = grouped["入院患者数（在院）"].mean()
+        if len(grouped) >= 7: grouped['7日移動平均'] = grouped["入院患者数（在院）"].rolling(window=7, min_periods=1).mean()
+
+        fig = make_subplots()
+        fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）"], mode='lines+markers', name='入院患者数', line=dict(color='#3498db', width=2), marker=dict(size=6)))
+        if show_moving_average and '7日移動平均' in grouped.columns:
+            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped['7日移動平均'], mode='lines', name='7日移動平均', line=dict(color='#2ecc71', width=2)))
+        
+        # groupedが空でないことを確認してからmin/maxを取得
+        if not grouped.empty:
+            fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[avg, avg], mode='lines', name=f'平均: {avg:.1f}', line=dict(color='#e74c3c', width=2, dash='dash')))
+
+            if target_value is not None and pd.notna(target_value):
+                fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[target_value, target_value], mode='lines', name=f'目標値: {target_value:.1f}', line=dict(color='#9b59b6', width=2, dash='dot')))
+                caution_threshold = target_value * 0.97
+                fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], y=[caution_threshold, caution_threshold, target_value, target_value], fill='toself', fillcolor='rgba(255, 165, 0, 0.2)', line=dict(color='rgba(255,165,0,0)', width=0), name='注意ゾーン', hoverinfo='none'))
+        else: # groupedが空の場合のフォールバック
+            logger.warning(f"create_interactive_patient_chart: '{title}' の最終データが空のため、平均線や目標線は描画されません。")
+
+
+        fig.update_layout(title=title, xaxis_title='日付', yaxis_title='患者数', legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), hovermode='x unified', height=500, margin=dict(l=10, r=10, t=50, b=10))
+        fig.update_xaxes(tickformat="%Y-%m-%d", tickangle=-45, tickmode='auto', nticks=10)
+        return fig
+    except Exception as e:
+        logger.error(f"インタラクティブグラフ '{title}' 作成中にエラー: {e}", exc_info=True)
+        return None
+
+def create_interactive_dual_axis_chart(data, title="入院患者数と患者移動の推移", days=90):
+    """
+    インタラクティブな入院患者数と患者移動の7日移動平均グラフを二軸で作成する (Plotly)
+    """
+    try:
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            logger.warning(f"create_interactive_dual_axis_chart: '{title}' のデータが空です。")
+            return None
+        required_columns = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "退院患者数"]
+        if any(col not in data.columns for col in required_columns):
+            missing_cols_str = ", ".join([col for col in required_columns if col not in data.columns])
+            logger.warning(f"create_interactive_dual_axis_chart: '{title}' のデータに必要な列がありません。不足列: {missing_cols_str}")
+            return None
+        
+        data_copy = data.copy()
+        if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
+            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
+            data_copy.dropna(subset=['日付'], inplace=True)
+
+        grouped = data_copy.groupby("日付").agg({"入院患者数（在院）": "sum", "新入院患者数": "sum", "緊急入院患者数": "sum", "退院患者数": "sum"}).reset_index().sort_values("日付")
+        
+        if grouped.empty:
+            logger.warning(f"create_interactive_dual_axis_chart: '{title}' のグループ化後データが空です。")
+            return None
+
+        if len(grouped) > days:
+            if days > 0:
+                grouped = grouped.tail(days)
+        
+        if grouped.empty:
+            logger.warning(f"create_interactive_dual_axis_chart: '{title}' の期間絞り込み後データが空です（days: {days}）。")
+            return None
+
+        for col in required_columns[1:]: # "日付"以外
+             if col in grouped.columns: # groupedに列が存在するか確認
+                grouped[f'{col}_7日移動平均'] = grouped[col].rolling(window=7, min_periods=1).mean()
+             else: # 実際にはaggで列が作られるはずだが念のため
+                grouped[f'{col}_7日移動平均'] = 0
+
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        if "入院患者数（在院）_7日移動平均" in grouped.columns:
+            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）_7日移動平均"], name="入院患者数（在院）", line=dict(color="#3498db", width=3), mode="lines"), secondary_y=False)
+
+        colors_map = {"新入院患者数": "#2ecc71", "緊急入院患者数": "#e74c3c", "退院患者数": "#f39c12"}
+        for col, color_val in colors_map.items():
+            ma_col_name = f"{col}_7日移動平均"
+            if ma_col_name in grouped.columns:
+                fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped[ma_col_name], name=col, line=dict(color=color_val, width=2), mode="lines"), secondary_y=True)
+
+        fig.update_layout(title=title, xaxis_title="日付", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5), hovermode="x unified", font=dict(family="Arial, 'Noto Sans JP', sans-serif", size=12), height=500)
+        fig.update_yaxes(title_text="入院患者数（在院）", secondary_y=False)
+        fig.update_yaxes(title_text="患者移動数", secondary_y=True)
+        fig.update_xaxes(tickformat="%Y-%m-%d", tickangle=-45, tickmode='auto', nticks=10)
+        return fig
+    except Exception as e:
+        logger.error(f"インタラクティブ2軸グラフ '{title}' 作成中にエラー: {e}", exc_info=True)
+        return None
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def create_dual_axis_chart(data, title="入院患者数と患者移動の推移", filename=None, days=90, font_name_for_mpl=None):
     """
@@ -133,8 +220,6 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
     @st.cache_data によるキャッシュ
     """
     start_time = time.time()
-    # st.session_state を使ったキャッシュロジックは削除
-
     fig = None
     try:
         fig, ax1 = plt.subplots(figsize=(10, 5.5))
@@ -224,36 +309,22 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
 def create_forecast_comparison_chart(actual_series, forecast_results, title="年度患者数予測比較", display_days_past=365, display_days_future=365):
     """
     実績データと複数の予測モデルの結果を比較するインタラクティブグラフを作成する (Plotly)
-
-    Parameters:
-    -----------
-    actual_series : pd.Series
-        実績の日次患者数 (インデックスは日付)
-    forecast_results : dict
-        キーがモデル名、バリューが予測結果のpd.Seriesである辞書
-    title : str
-        グラフタイトル
-    display_days_past : int
-        表示する過去の日数
-    display_days_future : int
-        表示する未来の日数
-
-    Returns:
-    --------
-    plotly.graph_objects.Figure or None
     """
     try:
         if actual_series.empty:
-            # st.warning("実績データが空のため、予測比較グラフを作成できません。") # UI要素なので呼び出し元で制御
-            print("実績データが空のため、予測比較グラフを作成できません。")
+            logger.warning(f"create_forecast_comparison_chart: '{title}' の実績データが空です。")
             return None
 
         fig = go.Figure()
 
         if not actual_series.index.is_monotonic_increasing:
              actual_series = actual_series.sort_index()
-        actual_display_start_date = actual_series.index.max() - pd.Timedelta(days=display_days_past -1)
-        actual_display_data = actual_series[actual_series.index >= actual_display_start_date]
+        
+        actual_display_data = actual_series # デフォルトでは全期間
+        if display_days_past > 0 and len(actual_series) > display_days_past:
+            actual_display_start_date = actual_series.index.max() - pd.Timedelta(days=display_days_past -1)
+            actual_display_data = actual_series[actual_series.index >= actual_display_start_date]
+
 
         fig.add_trace(go.Scatter(
             x=actual_display_data.index,
@@ -269,19 +340,23 @@ def create_forecast_comparison_chart(actual_series, forecast_results, title="年
             if forecast_series is None or forecast_series.empty:
                 continue
 
-            if not actual_series.empty:
-                 forecast_display_start_date = actual_series.index.max() + pd.Timedelta(days=1)
-            else:
-                 forecast_display_start_date = forecast_series.index.min()
+            # 予測開始日と終了日を設定
+            forecast_display_data = forecast_series
+            if display_days_future > 0 :
+                # 予測開始日を実績の最終日の翌日にするか、予測の最初の日付にするか
+                pred_start_date = forecast_series.index.min()
+                if not actual_series.empty:
+                    pred_start_date = max(pred_start_date, actual_series.index.max() + pd.Timedelta(days=1))
 
-            forecast_display_end_date = forecast_display_start_date + pd.Timedelta(days=display_days_future -1)
-            display_forecast = forecast_series[(forecast_series.index >= forecast_display_start_date) &
-                                               (forecast_series.index <= forecast_display_end_date)]
+                pred_end_date = pred_start_date + pd.Timedelta(days=display_days_future -1)
+                forecast_display_data = forecast_series[(forecast_series.index >= pred_start_date) &
+                                                        (forecast_series.index <= pred_end_date)]
 
-            if not display_forecast.empty:
+
+            if not forecast_display_data.empty:
                 fig.add_trace(go.Scatter(
-                    x=display_forecast.index,
-                    y=display_forecast,
+                    x=forecast_display_data.index,
+                    y=forecast_display_data,
                     mode='lines',
                     name=f'{model_name} (予測)',
                     line=dict(color=colors[i % len(colors)], width=2, dash='dash')
@@ -300,6 +375,5 @@ def create_forecast_comparison_chart(actual_series, forecast_results, title="年
         return fig
 
     except Exception as e:
-        # st.error(f"予測比較グラフ '{title}' 作成中にエラー: {e}") # UI要素なので呼び出し元で制御
-        print(f"Error in create_forecast_comparison_chart ('{title}'): {e}")
+        logger.error(f"予測比較グラフ '{title}' 作成中にエラー: {e}", exc_info=True)
         return None
