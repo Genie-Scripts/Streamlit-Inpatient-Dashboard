@@ -197,9 +197,9 @@ def display_alos_analysis_tab(df_filtered_by_period, start_date_ts, end_date_ts,
                     lambda x: get_ward_display_name(x, ward_map_display)
                 )
             elif selected_unit == '診療科別' and '集計単位名' in display_alos_data.columns:
-                # dept_map_display = st.session_state.get('dept_mapping', {}) # この行は不要
+                # dept_mapping パラメータを削除
                 display_alos_data['集計単位名'] = display_alos_data['集計単位名'].apply(
-                    lambda x: get_display_name_for_dept(x, default_name=x) # dept_mapping引数を削除
+                    lambda x: get_display_name_for_dept(x, default_name=x)  # dept_mapping引数を削除
                 )
 
             display_cols = ['集計期間', '集計単位名', ma_col_name, '日平均在院患者数', '平均在院日数_実測', '延べ在院患者数', '総入院患者数', '総退院患者数', '実日数'] #
@@ -249,8 +249,10 @@ def display_alos_analysis_tab(df_filtered_by_period, start_date_ts, end_date_ts,
             )
 
         elif group_by_column_metrics == '診療科名' and '集計単位' in display_metrics_df.columns:
-            # dept_map_metrics = st.session_state.get('dept_mapping', {}) # この行は不要
-            display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(lambda x: get_display_name_for_dept(x, default_name=x)) # dept_mapping引数を削除
+            # dept_mapping パラメータを削除
+            display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(
+                lambda x: get_display_name_for_dept(x, default_name=x)  # dept_mapping引数を削除
+            )
 
             # フィルタリングも表示名ベースではなく、元のコード(target_items)で行う必要があるため、
             # metrics_df のフィルタリングは表示名変換前に行う。
@@ -263,8 +265,10 @@ def display_alos_analysis_tab(df_filtered_by_period, start_date_ts, end_date_ts,
                 ward_map_metrics = st.session_state.get('ward_mapping', {})
                 display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(lambda x: get_ward_display_name(x, ward_map_metrics))
             elif group_by_column_metrics == '診療科名' and '集計単位' in display_metrics_df.columns:
-                # dept_map_metrics = st.session_state.get('dept_mapping', {}) # この行は不要
-                display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(lambda x: get_display_name_for_dept(x, default_name=x)) # dept_mapping引数を削除
+                # dept_mapping パラメータを削除
+                display_metrics_df['集計単位'] = display_metrics_df['集計単位'].apply(
+                    lambda x: get_display_name_for_dept(x, default_name=x)  # dept_mapping引数を削除
+                )
         else: # 病院全体の場合、またはフィルタリング不要の場合
             pass # display_metrics_df は既に変換済み（または全体なので変換不要）
 

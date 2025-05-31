@@ -170,9 +170,9 @@ def display_dow_analysis_tab(
                         lambda x: get_ward_display_name(x, ward_map_chart)
                     )
                 elif selected_unit == '診療科別':
-                    dept_map_chart = st.session_state.get('dept_mapping', {})
+                    # dept_mapping パラメータを削除
                     display_dow_data_for_chart['集計単位名'] = display_dow_data_for_chart['集計単位名'].apply(
-                        lambda x: get_display_name_for_dept(x, default_name=x, dept_mapping=dept_map_chart)
+                        lambda x: get_display_name_for_dept(x, default_name=x)
                     )
 
             if create_dow_chart: #
@@ -226,9 +226,9 @@ def display_dow_analysis_tab(
                         lambda x: get_ward_display_name(x, ward_map_summary)
                     )
                 elif selected_unit == '診療科別':
-                    # dept_map_summary = st.session_state.get('dept_mapping', {}) # この行は不要
+                    # dept_mapping パラメータを削除
                     display_summary_df['集計単位'] = display_summary_df['集計単位'].apply(
-                        lambda x: get_display_name_for_dept(x, default_name=x) # dept_mapping引数を削除
+                        lambda x: get_display_name_for_dept(x, default_name=x)  # dept_mapping引数を削除
                     )
             cols_to_show = ['集計単位', '曜日名', '集計日数'] #
             fmt = {'集計日数': "{:.0f}"} #
@@ -546,9 +546,9 @@ def display_dow_analysis_tab(
                         lambda x: get_ward_display_name(x, ward_map_comp_chart)
                     )
                 elif selected_unit == '診療科別':
-                    dept_map_comp_chart = st.session_state.get('dept_mapping', {})
+                    # dept_mapping パラメータを削除
                     display_comp_dow_data['集計単位名'] = display_comp_dow_data['集計単位名'].apply(
-                        lambda x: get_display_name_for_dept(x, default_name=x, dept_mapping=dept_map_comp_chart)
+                        lambda x: get_display_name_for_dept(x, default_name=x)
                     )
             # display_dow_data_for_chart も再度ここで変換（既に上で変換済みだが念のため）
             display_dow_data_for_chart_comp = dow_data_for_chart.copy()
@@ -559,9 +559,9 @@ def display_dow_analysis_tab(
                         lambda x: get_ward_display_name(x, ward_map_chart)
                     )
                 elif selected_unit == '診療科別':
-                    # dept_map_chart = st.session_state.get('dept_mapping', {}) # この行は不要
+                    # dept_mapping パラメータを削除
                     display_dow_data_for_chart['集計単位名'] = display_dow_data_for_chart['集計単位名'].apply(
-                        lambda x: get_display_name_for_dept(x, default_name=x) # dept_mapping引数を削除
+                        lambda x: get_display_name_for_dept(x, default_name=x)  # dept_mapping引数を削除
                     )
 
             if comp_mode == "縦に並べて表示": #

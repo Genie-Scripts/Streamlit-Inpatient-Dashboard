@@ -530,10 +530,10 @@ def create_department_table_section(df_filtered):
                 ascending = st.checkbox("昇順で並び替え", key="dept_table_ascending")
                 dept_summary = dept_summary.sort_values(sort_column, ascending=ascending)
             
-            # 診療科名の表示名変換
+            # 診療科名の表示名変換 - dept_mapping パラメータを削除
             if get_display_name_for_dept:
                 dept_summary['診療科表示名'] = dept_summary['診療科名'].apply(
-                    lambda x: get_display_name_for_dept(x, x)
+                    lambda x: get_display_name_for_dept(x, default_name=x)  # dept_mapping引数を削除
                 )
                 # 表示用に列の順序を調整
                 cols = dept_summary.columns.tolist()
