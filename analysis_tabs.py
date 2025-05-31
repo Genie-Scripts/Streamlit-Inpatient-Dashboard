@@ -345,8 +345,8 @@ def create_ward_table_section(df_filtered):
             return
         
         # 病棟マッピングの初期化
-        from utils import initialize_ward_mapping, get_ward_display_name
-        initialize_ward_mapping(df_filtered)
+        from utils import initialize_all_mappings, get_ward_display_name
+        initialize_all_mappings(df_filtered)
         ward_mapping = st.session_state.get('ward_mapping', {})
         
         # 期間情報の表示

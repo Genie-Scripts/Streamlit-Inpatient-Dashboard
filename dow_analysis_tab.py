@@ -26,7 +26,7 @@ from utils import (
     create_ward_name_mapping,
     get_ward_display_name,
     create_ward_display_options,
-    initialize_ward_mapping,
+    initialize_all_mappings,
     safe_date_filter
 )
 
@@ -64,7 +64,7 @@ def display_dow_analysis_tab(
         return
 
     # ---- 病棟マッピング初期化 ----
-    initialize_ward_mapping(df)
+    initialize_all_mappings(df)
 
     # ---- 開始日／終了日を Pandas Timestamp に統一 ----
     try:
