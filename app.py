@@ -882,7 +882,12 @@ def main():
         st.session_state['df'] = None
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
-
+        
+    # 緊急診断モードの追加
+    if st.sidebar.checkbox("🚨 緊急診断モード"):
+        emergency_diagnosis()
+        return
+        
     # 自動データ読み込み
     auto_loaded = auto_load_data()
     if auto_loaded:
@@ -1118,6 +1123,466 @@ def main():
         f'</div>',
         unsafe_allow_html=True
     )
+
+def emergency_diagnosis():
+    """緊急診断：フィルター問題の根本特定"""
+    
+    st.markdown("## 🚨 緊急診断モード")
+    st.markdown("以下の診断結果を確認してください")
+    
+    # 診断1: セッション状態の確認
+    st.markdown("### 1️⃣ セッション状態診断")
+    all_keys = list(st.session_state.keys())
+    filter_keys = [k for k in all_keys if 'filter' in k.lower()]
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**総セッション状態数**: {len(all_keys)}")
+        st.write(f"**フィルター関連キー数**: {len(filter_keys)}")
+        
+        if filter_keys:
+            st.write("**フィルターキー一覧**:")
+            for key in filter_keys:
+                value = st.session_state.get(key)
+                st.write(f"  • `{key}`: {type(value).__name__} = {value}")
+        else:
+            st.error("❌ フィルター関連セッション状態が見つかりません")
+    
+    with col2:
+        # 重要なキーの存在確認
+        critical_keys = [
+            'unified_filter_period_mode',
+            'unified_filter_start_date', 
+            'unified_filter_end_date',
+            'unified_filter_departments',
+            'unified_filter_wards',
+            'unified_filter_applied'
+        ]
+        
+        st.write("**重要キー存在確認**:")
+        for key in critical_keys:
+            exists = key in st.session_state
+            status = "✅" if exists else "❌"
+            st.write(f"  {status} `{key}`")
+    
+    # 診断2: データ状態の確認
+    st.markdown("### 2️⃣ データ状態診断")
+    df = st.session_state.get('df')
+    
+    if df is not None:
+        st.success(f"✅ データ読み込み済み: {len(df):,}行")
+        
+        # データの基本情報
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if '日付' in df.columns:
+                min_date = df['日付'].min()
+                max_date = df['日付'].max()
+                st.write(f"**日付範囲**: {min_date.date()} ～ {max_date.date()}")
+            else:
+                st.error("❌ '日付'列が見つかりません")
+        
+        with col2:
+            if '診療科名' in df.columns:
+                dept_count = df['診療科名'].nunique()
+                st.write(f"**診療科数**: {dept_count}")
+            else:
+                st.error("❌ '診療科名'列が見つかりません")
+        
+        with col3:
+            if '病棟コード' in df.columns:
+                ward_count = df['病棟コード'].nunique()
+                st.write(f"**病棟数**: {ward_count}")
+            else:
+                st.error("❌ '病棟コード'列が見つかりません")
+    else:
+        st.error("❌ データが読み込まれていません")
+    
+    # 診断3: フィルター関数の動作確認
+    st.markdown("### 3️⃣ フィルター関数診断")
+    
+    try:
+        from unified_filters import (
+            create_unified_filter_sidebar,
+            create_unified_filter_status_card,
+            apply_unified_filters,
+            get_unified_filter_summary,
+            validate_unified_filters
+        )
+        st.success("✅ unified_filters モジュールの基本インポート成功")
+        
+        # 各関数の存在確認
+        functions_to_check = [
+            create_unified_filter_sidebar,
+            create_unified_filter_status_card, 
+            apply_unified_filters,
+            get_unified_filter_summary,
+            validate_unified_filters
+        ]
+        
+        for func in functions_to_check:
+            st.write(f"  ✅ `{func.__name__}` 利用可能")
+            
+    except ImportError as e:
+        st.error(f"❌ unified_filters インポートエラー: {e}")
+        return
+    except Exception as e:
+        st.error(f"❌ フィルター関数チェックエラー: {e}")
+        return
+    
+    # 診断4: 実際のフィルター適用テスト
+    st.markdown("### 4️⃣ フィルター適用テスト")
+    
+    if df is not None:
+        try:
+            # 強制的にフィルター設定を作成
+            if 'unified_filter_period_mode' not in st.session_state:
+                st.session_state['unified_filter_period_mode'] = '最近90日'
+            
+            if 'unified_filter_start_date' not in st.session_state and '日付' in df.columns:
+                max_date = df['日付'].max()
+                start_date = max_date - pd.Timedelta(days=90)
+                st.session_state['unified_filter_start_date'] = start_date.date()
+                st.session_state['unified_filter_end_date'] = max_date.date()
+            
+            if 'unified_filter_departments' not in st.session_state and '診療科名' in df.columns:
+                st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
+            
+            if 'unified_filter_wards' not in st.session_state and '病棟コード' in df.columns:
+                st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
+            
+            # フィルター適用テスト
+            filtered_df = apply_unified_filters(df)
+            
+            if filtered_df is not None:
+                filter_ratio = len(filtered_df) / len(df) * 100 if len(df) > 0 else 0
+                
+                if len(filtered_df) == len(df):
+                    st.warning(f"⚠️ フィルター適用結果: {len(filtered_df):,}行 (元データと同じ - フィルターが効いていない)")
+                else:
+                    st.success(f"✅ フィルター適用結果: {len(filtered_df):,}行 ({filter_ratio:.1f}% 残存)")
+                    
+                # フィルター設定の表示
+                st.write("**現在のフィルター設定**:")
+                st.write(f"  • 期間モード: {st.session_state.get('unified_filter_period_mode', '未設定')}")
+                st.write(f"  • 開始日: {st.session_state.get('unified_filter_start_date', '未設定')}")
+                st.write(f"  • 終了日: {st.session_state.get('unified_filter_end_date', '未設定')}")
+                
+                selected_depts = st.session_state.get('unified_filter_departments', [])
+                total_depts = df['診療科名'].nunique() if '診療科名' in df.columns else 0
+                st.write(f"  • 診療科: {len(selected_depts)}/{total_depts}科選択")
+                
+                selected_wards = st.session_state.get('unified_filter_wards', [])
+                total_wards = df['病棟コード'].nunique() if '病棟コード' in df.columns else 0
+                st.write(f"  • 病棟: {len(selected_wards)}/{total_wards}病棟選択")
+                
+            else:
+                st.error("❌ フィルター適用が None を返しました")
+                
+        except Exception as e:
+            st.error(f"❌ フィルター適用テストエラー: {e}")
+            st.exception(e)
+    
+    # 診断5: 緊急修復オプション
+    st.markdown("### 5️⃣ 緊急修復オプション")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🗑️ 全セッション状態クリア"):
+            keys_to_remove = list(st.session_state.keys())
+            for key in keys_to_remove:
+                del st.session_state[key]
+            st.success("セッション状態をクリアしました")
+            st.rerun()
+    
+    with col2:
+        if st.button("🔄 フィルター強制初期化"):
+            if df is not None:
+                # 強制的にフィルター設定を初期化
+                if '日付' in df.columns:
+                    max_date = df['日付'].max()
+                    start_date = max_date - pd.Timedelta(days=90)
+                    st.session_state['unified_filter_period_mode'] = '最近90日'
+                    st.session_state['unified_filter_start_date'] = start_date.date()
+                    st.session_state['unified_filter_end_date'] = max_date.date()
+                
+                if '診療科名' in df.columns:
+                    st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
+                
+                if '病棟コード' in df.columns:
+                    st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
+                
+                st.session_state['unified_filter_applied'] = True
+                st.success("フィルター設定を強制初期化しました")
+                st.rerun()
+    
+    with col3:
+        if st.button("🔬 詳細デバッグ"):
+            st.session_state['debug_mode'] = True
+            st.success("詳細デバッグモードを有効にしました")
+    
+    # 診断結果サマリー
+    st.markdown("### 📋 診断結果サマリー")
+    
+    # 問題スコア計算
+    issues = []
+    
+    if not filter_keys:
+        issues.append("フィルター関連セッション状態が存在しない")
+    
+    if df is None:
+        issues.append("データが読み込まれていない")
+    
+    try:
+        filtered_df = apply_unified_filters(df) if df is not None else None
+        if filtered_df is not None and len(filtered_df) == len(df):
+            issues.append("フィルターが実際にデータを絞り込んでいない")
+    except:
+        issues.append("フィルター適用関数でエラーが発生")
+    
+    if issues:
+        st.error("🚨 **発見された問題**:")
+        for issue in issues:
+            st.write(f"  • {issue}")
+        
+        st.markdown("**推奨解決策**:")
+        st.write("1. 「フィルター強制初期化」ボタンを押す")
+        st.write("2. ブラウザを完全リフレッシュ (Ctrl+F5)")
+        st.write("3. 新しいブラウザタブで開き直す")
+    else:
+        st.success("✅ **基本的な設定は正常です**")
+        st.write("問題は設定レベルではなく、実装レベルにある可能性があります")
+    
+def emergency_diagnosis():
+    """緊急診断：フィルター問題の根本特定"""
+    
+    st.markdown("## 🚨 緊急診断モード")
+    st.markdown("以下の診断結果を確認してください")
+    
+    # 診断1: セッション状態の確認
+    st.markdown("### 1️⃣ セッション状態診断")
+    all_keys = list(st.session_state.keys())
+    filter_keys = [k for k in all_keys if 'filter' in k.lower()]
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**総セッション状態数**: {len(all_keys)}")
+        st.write(f"**フィルター関連キー数**: {len(filter_keys)}")
+        
+        if filter_keys:
+            st.write("**フィルターキー一覧**:")
+            for key in filter_keys:
+                value = st.session_state.get(key)
+                st.write(f"  • `{key}`: {type(value).__name__} = {value}")
+        else:
+            st.error("❌ フィルター関連セッション状態が見つかりません")
+    
+    with col2:
+        # 重要なキーの存在確認
+        critical_keys = [
+            'unified_filter_period_mode',
+            'unified_filter_start_date', 
+            'unified_filter_end_date',
+            'unified_filter_departments',
+            'unified_filter_wards',
+            'unified_filter_applied'
+        ]
+        
+        st.write("**重要キー存在確認**:")
+        for key in critical_keys:
+            exists = key in st.session_state
+            status = "✅" if exists else "❌"
+            st.write(f"  {status} `{key}`")
+    
+    # 診断2: データ状態の確認
+    st.markdown("### 2️⃣ データ状態診断")
+    df = st.session_state.get('df')
+    
+    if df is not None:
+        st.success(f"✅ データ読み込み済み: {len(df):,}行")
+        
+        # データの基本情報
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if '日付' in df.columns:
+                min_date = df['日付'].min()
+                max_date = df['日付'].max()
+                st.write(f"**日付範囲**: {min_date.date()} ～ {max_date.date()}")
+            else:
+                st.error("❌ '日付'列が見つかりません")
+        
+        with col2:
+            if '診療科名' in df.columns:
+                dept_count = df['診療科名'].nunique()
+                st.write(f"**診療科数**: {dept_count}")
+            else:
+                st.error("❌ '診療科名'列が見つかりません")
+        
+        with col3:
+            if '病棟コード' in df.columns:
+                ward_count = df['病棟コード'].nunique()
+                st.write(f"**病棟数**: {ward_count}")
+            else:
+                st.error("❌ '病棟コード'列が見つかりません")
+    else:
+        st.error("❌ データが読み込まれていません")
+    
+    # 診断3: フィルター関数の動作確認
+    st.markdown("### 3️⃣ フィルター関数診断")
+    
+    try:
+        from unified_filters import (
+            create_unified_filter_sidebar,
+            create_unified_filter_status_card,
+            apply_unified_filters,
+            get_unified_filter_summary,
+            validate_unified_filters
+        )
+        st.success("✅ unified_filters モジュールの基本インポート成功")
+        
+        # 各関数の存在確認
+        functions_to_check = [
+            create_unified_filter_sidebar,
+            create_unified_filter_status_card, 
+            apply_unified_filters,
+            get_unified_filter_summary,
+            validate_unified_filters
+        ]
+        
+        for func in functions_to_check:
+            st.write(f"  ✅ `{func.__name__}` 利用可能")
+            
+    except ImportError as e:
+        st.error(f"❌ unified_filters インポートエラー: {e}")
+        return
+    except Exception as e:
+        st.error(f"❌ フィルター関数チェックエラー: {e}")
+        return
+    
+    # 診断4: 実際のフィルター適用テスト
+    st.markdown("### 4️⃣ フィルター適用テスト")
+    
+    if df is not None:
+        try:
+            # 強制的にフィルター設定を作成
+            if 'unified_filter_period_mode' not in st.session_state:
+                st.session_state['unified_filter_period_mode'] = '最近90日'
+            
+            if 'unified_filter_start_date' not in st.session_state and '日付' in df.columns:
+                max_date = df['日付'].max()
+                start_date = max_date - pd.Timedelta(days=90)
+                st.session_state['unified_filter_start_date'] = start_date.date()
+                st.session_state['unified_filter_end_date'] = max_date.date()
+            
+            if 'unified_filter_departments' not in st.session_state and '診療科名' in df.columns:
+                st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
+            
+            if 'unified_filter_wards' not in st.session_state and '病棟コード' in df.columns:
+                st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
+            
+            # フィルター適用テスト
+            filtered_df = apply_unified_filters(df)
+            
+            if filtered_df is not None:
+                filter_ratio = len(filtered_df) / len(df) * 100 if len(df) > 0 else 0
+                
+                if len(filtered_df) == len(df):
+                    st.warning(f"⚠️ フィルター適用結果: {len(filtered_df):,}行 (元データと同じ - フィルターが効いていない)")
+                else:
+                    st.success(f"✅ フィルター適用結果: {len(filtered_df):,}行 ({filter_ratio:.1f}% 残存)")
+                    
+                # フィルター設定の表示
+                st.write("**現在のフィルター設定**:")
+                st.write(f"  • 期間モード: {st.session_state.get('unified_filter_period_mode', '未設定')}")
+                st.write(f"  • 開始日: {st.session_state.get('unified_filter_start_date', '未設定')}")
+                st.write(f"  • 終了日: {st.session_state.get('unified_filter_end_date', '未設定')}")
+                
+                selected_depts = st.session_state.get('unified_filter_departments', [])
+                total_depts = df['診療科名'].nunique() if '診療科名' in df.columns else 0
+                st.write(f"  • 診療科: {len(selected_depts)}/{total_depts}科選択")
+                
+                selected_wards = st.session_state.get('unified_filter_wards', [])
+                total_wards = df['病棟コード'].nunique() if '病棟コード' in df.columns else 0
+                st.write(f"  • 病棟: {len(selected_wards)}/{total_wards}病棟選択")
+                
+            else:
+                st.error("❌ フィルター適用が None を返しました")
+                
+        except Exception as e:
+            st.error(f"❌ フィルター適用テストエラー: {e}")
+            st.exception(e)
+    
+    # 診断5: 緊急修復オプション
+    st.markdown("### 5️⃣ 緊急修復オプション")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🗑️ 全セッション状態クリア"):
+            keys_to_remove = list(st.session_state.keys())
+            for key in keys_to_remove:
+                del st.session_state[key]
+            st.success("セッション状態をクリアしました")
+            st.rerun()
+    
+    with col2:
+        if st.button("🔄 フィルター強制初期化"):
+            if df is not None:
+                # 強制的にフィルター設定を初期化
+                if '日付' in df.columns:
+                    max_date = df['日付'].max()
+                    start_date = max_date - pd.Timedelta(days=90)
+                    st.session_state['unified_filter_period_mode'] = '最近90日'
+                    st.session_state['unified_filter_start_date'] = start_date.date()
+                    st.session_state['unified_filter_end_date'] = max_date.date()
+                
+                if '診療科名' in df.columns:
+                    st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
+                
+                if '病棟コード' in df.columns:
+                    st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
+                
+                st.session_state['unified_filter_applied'] = True
+                st.success("フィルター設定を強制初期化しました")
+                st.rerun()
+    
+    with col3:
+        if st.button("🔬 詳細デバッグ"):
+            st.session_state['debug_mode'] = True
+            st.success("詳細デバッグモードを有効にしました")
+    
+    # 診断結果サマリー
+    st.markdown("### 📋 診断結果サマリー")
+    
+    # 問題スコア計算
+    issues = []
+    
+    if not filter_keys:
+        issues.append("フィルター関連セッション状態が存在しない")
+    
+    if df is None:
+        issues.append("データが読み込まれていない")
+    
+    try:
+        filtered_df = apply_unified_filters(df) if df is not None else None
+        if filtered_df is not None and len(filtered_df) == len(df):
+            issues.append("フィルターが実際にデータを絞り込んでいない")
+    except:
+        issues.append("フィルター適用関数でエラーが発生")
+    
+    if issues:
+        st.error("🚨 **発見された問題**:")
+        for issue in issues:
+            st.write(f"  • {issue}")
+        
+        st.markdown("**推奨解決策**:")
+        st.write("1. 「フィルター強制初期化」ボタンを押す")
+        st.write("2. ブラウザを完全リフレッシュ (Ctrl+F5)")
+        st.write("3. 新しいブラウザタブで開き直す")
+    else:
+        st.success("✅ **基本的な設定は正常です**")
+        st.write("問題は設定レベルではなく、実装レベルにある可能性があります")
 
 if __name__ == "__main__":
     main()
