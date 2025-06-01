@@ -1,10 +1,7 @@
-# dashboard_overview_tab.py
-
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-
-# --- dashboard_charts.py からグラフ関数をインポート ---
+# from datetime import datetime # display_unified_metrics_layout_colorized では直接不要
+# dashboard_charts.py からのインポートは維持
 try:
     from dashboard_charts import (
         create_monthly_trend_chart,
@@ -17,7 +14,7 @@ except ImportError:
     create_admissions_discharges_chart = None
     create_occupancy_chart = None
 
-# --- kpi_calculator.py からKPI計算関数をインポート ---
+# kpi_calculator.py からのインポートは維持
 try:
     from kpi_calculator import calculate_kpis, analyze_kpi_insights, get_kpi_status
 except ImportError:
@@ -25,6 +22,297 @@ except ImportError:
     calculate_kpis = None
     analyze_kpi_insights = None
     get_kpi_status = None
+
+# config.py から定数をインポート (display_unified_metrics_layout_colorizedで必要)
+from config import DEFAULT_OCCUPANCY_RATE, DEFAULT_ADMISSION_FEE, DEFAULT_TARGET_PATIENT_DAYS, APP_VERSION, NUMBER_FORMAT, DEFAULT_TOTAL_BEDS
+
+
+# ===== 新しく配置する関数 =====
+def format_number_with_config(value, unit="", format_type="default"):
+    """設定に基づいた数値フォーマット"""
+    if pd.isna(value) or value is None: # None もチェック
+        return f"0{unit}" if unit else "0" # 単位がない場合は0のみ
+    if isinstance(value, str): # 文字列の場合は数値変換を試みる
+        try:
+            value = float(value)
+        except ValueError:
+            return str(value) # 変換できなければそのまま文字列を返す
+
+    # 0 の場合の処理を修正
+    if value == 0:
+        return f"0{unit}" if unit else "0"
+
+    if format_type == "currency":
+        return f"{value:,.0f}{NUMBER_FORMAT['currency_symbol']}"
+    elif format_type == "percentage":
+        return f"{value:.1f}{NUMBER_FORMAT['percentage_symbol']}"
+    else: # default and other cases
+        # unit が指定されていればそれを使い、なければ空文字列
+        return f"{value:,.1f}{unit}" if isinstance(value, float) else f"{value:,.0f}{unit}"
+
+
+def display_unified_metrics_layout_colorized(metrics, selected_period_info):
+    """統一メトリクスレイアウトの表示 (dashboard_overview_tab.py に配置)"""
+    if not metrics:
+        st.warning("表示するメトリクスデータがありません。")
+        return
+
+    # 期間情報表示
+    st.info(f"📊 平均値計算期間: {selected_period_info}")
+    st.caption("※延べ在院日数、病床利用率などは、それぞれの指標の計算ロジックに基づいた期間の値を表示します。")
+
+    # 主要指標セクション
+    st.markdown("### 📊 主要指標")
+    # st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True) # このdivはCSSで定義されていれば有効
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        avg_daily_census_val = metrics.get('avg_daily_census', 0)
+        avg_daily_census_30d_val = metrics.get('avg_daily_census_30d', 0)
+        st.metric(
+            "日平均在院患者数",
+            f"{avg_daily_census_val:.1f}人",
+            delta=f"参考(直近30日): {avg_daily_census_30d_val:.1f}人" if avg_daily_census_30d_val is not None else None,
+            help=f"{selected_period_info}の日平均在院患者数"
+        )
+
+    with col2:
+        bed_occupancy_rate_val = metrics.get('bed_occupancy_rate', 0)
+        target_occupancy = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE) * 100
+        occupancy_delta = bed_occupancy_rate_val - target_occupancy if bed_occupancy_rate_val is not None else 0
+        delta_color = "normal" if abs(occupancy_delta) <= 5 else ("inverse" if occupancy_delta < -5 else "off")
+
+
+        st.metric(
+            "病床利用率",
+            f"{bed_occupancy_rate_val:.1f}%" if bed_occupancy_rate_val is not None else "N/A",
+            delta=f"{occupancy_delta:+.1f}% (対目標{target_occupancy:.0f}%)" if bed_occupancy_rate_val is not None else None,
+            delta_color=delta_color,
+            help="選択期間の日平均在院患者数と基本設定の総病床数から算出" # ヘルプテキスト修正
+        )
+
+    with col3:
+        avg_los_val = metrics.get('avg_los', 0)
+        # 標準的な目標在院日数をconfigから取得できるようにするとより良い
+        avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
+        st.metric(
+            "平均在院日数",
+            f"{avg_los_val:.1f}日",
+            delta=f"目標: {avg_length_of_stay_target:.1f}日", # 目標値を表示
+            help=f"{selected_period_info}の平均在院日数"
+        )
+
+    # st.markdown('</div>', unsafe_allow_html=True) # 上記divに対応
+    st.markdown("---")
+
+    # 収益指標セクション
+    st.markdown("### 💰 収益関連指標") # 「収益指標」から「収益関連指標」へ変更
+    col_rev1, col_rev2, col_rev3 = st.columns(3) # 変数名変更
+
+    with col_rev1:
+        estimated_revenue_val = metrics.get('estimated_revenue', 0) # 'estimated_revenue_30d' から変更
+        avg_admission_fee_val = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
+        st.metric(
+            f"推計収益 ({selected_period_info})", # 期間を明記
+            format_number_with_config(estimated_revenue_val, format_type="currency"),
+            delta=f"単価: {avg_admission_fee_val:,}円/日",
+            help=f"{selected_period_info}の推計収益"
+        )
+
+    with col_rev2:
+        total_patient_days_val = metrics.get('total_patient_days', 0) # 'total_patient_days_30d' から変更
+        monthly_target_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS)
+        # 達成率は月間目標日数と、選択期間の日数に基づいて按分計算する
+        days_in_selected_period = metrics.get('period_days', 1) # 0除算を避ける
+        proportional_target_days = (monthly_target_days / 30.44) * days_in_selected_period if days_in_selected_period > 0 else 0 # 30.44は月の平均日数
+        achievement_days = (total_patient_days_val / proportional_target_days) * 100 if proportional_target_days > 0 else 0
+
+        st.metric(
+            f"延べ在院日数 ({selected_period_info})", # 期間を明記
+            format_number_with_config(total_patient_days_val, "人日"),
+            delta=f"対期間目標: {achievement_days:.1f}%" if proportional_target_days > 0 else "目標計算不可",
+            delta_color="normal" if achievement_days >= 95 else "inverse",
+            help=f"{selected_period_info}の延べ在院日数。目標は月間目標を選択期間日数で按分して計算。"
+        )
+
+    with col_rev3:
+        avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
+        period_days_val = metrics.get('period_days', 0)
+        st.metric(
+            "日平均新入院患者数",
+            f"{avg_daily_admissions_val:.1f}人",
+            delta=f"期間: {period_days_val}日間",
+            help=f"{selected_period_info}の日平均新入院患者数"
+        )
+
+    # 詳細情報セクション
+    with st.expander("📋 詳細データと設定値 (経営ダッシュボード)", expanded=False): # キー名変更
+        detail_col1, detail_col2, detail_col3 = st.columns(3)
+
+        with detail_col1:
+            st.markdown("**🏥 基本設定**")
+            st.write(f"• 総病床数: {metrics.get('total_beds', st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)):,}床")
+            st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE):.1%}")
+            st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE):,}円/日")
+            st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY):.1f}日")
+
+
+        with detail_col2:
+            st.markdown("**📅 期間情報**")
+            st.write(f"• 計算対象期間: {selected_period_info}")
+            # st.write(f"• 固定値計算: 直近30日") # これは廃止または説明変更
+            st.write(f"• アプリバージョン: v{APP_VERSION}")
+
+        with detail_col3:
+            st.markdown("**🎯 月間目標値**") # 「目標値」から「月間目標値」へ
+            st.write(f"• 延べ在院日数: {format_number_with_config(st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), '人日')}")
+            # target_revenue は metrics 辞書からではなく、基本設定と月間目標から再計算
+            target_rev = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
+            st.write(f"• 推定収益: {format_number_with_config(target_rev, format_type='currency')}")
+            st.write(f"• 新入院患者数: {st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS):,}人")
+
+# ===== ここまでが新しく配置する関数 =====
+
+
+def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent): # target_occupancy_setting を % に変更
+    """
+    KPIカードのみを表示する関数。
+    内部で display_unified_metrics_layout_colorized を呼び出すように変更。
+    """
+    if df is None or df.empty:
+        st.warning("データが読み込まれていません。")
+        return
+
+    if calculate_kpis is None:
+        st.error("KPI計算関数が利用できません。")
+        return
+
+    # 選択された期間のKPIを計算
+    kpis_selected_period = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
+
+    if kpis_selected_period is None or kpis_selected_period.get("error"):
+        st.warning(f"選択された期間のKPI計算に失敗しました。理由: {kpis_selected_period.get('error', '不明') if kpis_selected_period else '不明'}")
+        return
+
+    # 「直近30日」のKPIも計算（display_unified_metrics_layout_colorized が期待するため）
+    # dfの最新日付を基準とする
+    latest_date_in_df = df['日付'].max()
+    start_30d = latest_date_in_df - pd.Timedelta(days=29)
+    df_30d = df[(df['日付'] >= start_30d) & (df['日付'] <= latest_date_in_df)]
+    kpis_30d = calculate_kpis(df_30d, start_30d, latest_date_in_df, total_beds=total_beds_setting)
+
+    if kpis_30d is None or kpis_30d.get("error"):
+        st.warning(f"直近30日のKPI計算に失敗しました。理由: {kpis_30d.get('error', '不明') if kpis_30d else '不明'}")
+        # 30日データがない場合でも、選択期間のデータで表示を試みる
+        kpis_30d = {} # 空の辞書でフォールバック
+
+    # display_unified_metrics_layout_colorized に渡す metrics 辞書を構築
+    metrics_for_display = {
+        'avg_daily_census': kpis_selected_period.get('avg_daily_census'),
+        'avg_daily_census_30d': kpis_30d.get('avg_daily_census'), # 30日データ
+        'bed_occupancy_rate': kpis_selected_period.get('bed_occupancy_rate'),
+        'avg_los': kpis_selected_period.get('alos'),
+        'estimated_revenue': kpis_selected_period.get('total_patient_days', 0) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE), # 選択期間の推計収益
+        'total_patient_days': kpis_selected_period.get('total_patient_days'), # 選択期間の延べ在院日数
+        'avg_daily_admissions': kpis_selected_period.get('avg_daily_admissions'),
+        'period_days': kpis_selected_period.get('days_count'),
+        'total_beds': total_beds_setting,
+        # 'target_revenue' は display_unified_metrics_layout_colorized 内部で計算されるか、セッションから取得される
+    }
+    
+    # 期間の説明
+    period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
+    
+    display_unified_metrics_layout_colorized(metrics_for_display, period_description)
+
+
+def display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent): # target_occupancy_setting を % に変更
+    """トレンドグラフのみを表示する関数"""
+    if df is None or df.empty:
+        st.warning("データが読み込まれていません。")
+        return
+    if calculate_kpis is None: return # display_kpi_cards_only でチェック済みだが念のため
+    if not all([create_monthly_trend_chart, create_admissions_discharges_chart, create_occupancy_chart]):
+        st.warning("グラフ生成関数の一部が利用できません。")
+        return
+
+    # KPIデータはグラフ生成に必要なため再計算 (キャッシュが効くはず)
+    kpi_data = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
+
+    if kpi_data is None or kpi_data.get("error"):
+        st.warning(f"グラフ表示用のKPIデータ計算に失敗しました。")
+        return
+
+    # --- 時系列チャート ---
+    col1_chart, col2_chart = st.columns(2)
+    with col1_chart:
+        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
+        st.markdown("<div class='chart-title'>月別 平均在院日数と入退院患者数の推移</div>", unsafe_allow_html=True)
+        monthly_chart = create_monthly_trend_chart(kpi_data)
+        if monthly_chart:
+            st.plotly_chart(monthly_chart, use_container_width=True)
+        else:
+            st.info("月次トレンドチャート: データ不足のため表示できません。")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col2_chart:
+        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
+        st.markdown("<div class='chart-title'>週別 入退院バランス</div>", unsafe_allow_html=True)
+        balance_chart = create_admissions_discharges_chart(kpi_data)
+        if balance_chart:
+            st.plotly_chart(balance_chart, use_container_width=True)
+        else:
+            st.info("入退院バランスチャート: データ不足のため表示できません。")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- 病床利用率チャート（全幅） ---
+    st.markdown("<div class='chart-container full-width'>", unsafe_allow_html=True)
+    st.markdown(f"<div class='chart-title'>月別 病床利用率の推移 (総病床数: {total_beds_setting}床)</div>", unsafe_allow_html=True)
+    occupancy_chart_fig = create_occupancy_chart(kpi_data, total_beds_setting, target_occupancy_setting_percent) # %で渡す
+    if occupancy_chart_fig:
+        st.plotly_chart(occupancy_chart_fig, use_container_width=True)
+    else:
+        st.info("病床利用率チャート: データ不足または総病床数未設定のため表示できません。")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- 分析インサイト ---
+    display_insights(kpi_data, total_beds_setting)
+
+
+def display_insights(kpi_data, total_beds_setting):
+    """分析インサイトを表示する関数"""
+    # ... (既存のコードをそのまま使用) ...
+    if analyze_kpi_insights and kpi_data:
+        insights = analyze_kpi_insights(kpi_data, total_beds_setting)
+        st.markdown("<div class='chart-container full-width'>", unsafe_allow_html=True)
+        st.markdown("<div class='chart-title'>分析インサイトと考慮事項</div>", unsafe_allow_html=True)
+        insight_col1, insight_col2 = st.columns(2)
+        with insight_col1:
+            if insights.get("alos"):
+                st.markdown("<div class='info-card'><h4>平均在院日数 (ALOS) に関する考察</h4>" + "".join([f"<p>- {i}</p>" for i in insights["alos"]]) + "</div>", unsafe_allow_html=True)
+            if insights.get("weekday_pattern"):
+                st.markdown("<div class='neutral-card'><h4>曜日別パターンの活用</h4>" + "".join([f"<p>- {i}</p>" for i in insights["weekday_pattern"]]) + "</div>", unsafe_allow_html=True)
+        with insight_col2:
+            if insights.get("occupancy"):
+                st.markdown("<div class='success-card'><h4>病床利用率と回転数</h4>" + "".join([f"<p>- {i}</p>" for i in insights["occupancy"]]) + "</div>", unsafe_allow_html=True)
+            if insights.get("general"):
+                st.markdown("<div class='warning-card'><h4>データ解釈上の注意点</h4>" + "".join([f"<p>- {i}</p>" for i in insights["general"]]) + "</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.info("インサイトを生成するためのデータまたは関数が不足しています。")
+
+
+# display_dashboard_overview は app.py から直接 display_kpi_cards_only や display_trend_graphs_only を呼び出すため、
+# このファイル内での display_dashboard_overview は不要になるか、あるいは app.py の create_management_dashboard_tab の
+# ロジックをこちらに集約する形も考えられます。
+# 今回は app.py 側で制御するため、ここでは display_dashboard_overview はコメントアウトまたは削除します。
+# def display_dashboard_overview(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
+#     """ダッシュボード概要タブの内容を表示するメイン関数"""
+#     display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent)
+#     st.markdown("---")
+#     display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent)
+
 
 def get_color_from_status_string(status_string):
     """KPIステータス文字列に基づいて色コードを返します。"""

@@ -1,5 +1,3 @@
-# app.py (修正版)
-
 import streamlit as st
 import pandas as pd
 import numpy as np # 必要に応じて
@@ -40,10 +38,11 @@ try:
     import pdf_output_tab
     from forecast_analysis_tab import display_forecast_analysis_tab
     from kpi_calculator import calculate_kpis
-    # dashboard_overview_tab から display_kpi_cards_only のみをインポート
-    from dashboard_overview_tab import display_kpi_cards_only # ★★★ 変更点 ★★★
-    from unified_filters import create_unified_filter_sidebar, apply_unified_filters, get_unified_filter_summary, initialize_unified_filters, get_unified_filter_config, validate_unified_filters
-
+    # dashboard_overview_tab から display_unified_metrics_layout_colorized をインポート
+    from dashboard_overview_tab import display_unified_metrics_layout_colorized # ★★★ 変更点 ★★★
+    from unified_filters import (create_unified_filter_sidebar, apply_unified_filters,
+                                 get_unified_filter_summary, initialize_unified_filters,
+                                 get_unified_filter_config, validate_unified_filters)
     FORECAST_AVAILABLE = True
 except ImportError as e:
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
@@ -62,6 +61,8 @@ except ImportError as e:
     initialize_unified_filters = lambda df: None
     get_unified_filter_config = lambda: {}
     validate_unified_filters = lambda df: (False, "フィルター検証機能利用不可")
+    display_unified_metrics_layout_colorized = lambda metrics, period_info: st.error("KPI表示機能利用不可") # ★★★ フォールバック追加 ★★★
+
 
 
 def calculate_preset_period_dates(df, preset_period):
@@ -354,8 +355,8 @@ def create_sidebar():
     return True
 
 
-def create_management_dashboard_tab(): # ★★★ この関数全体を修正 ★★★
-    """経営ダッシュボードタブ（数値のみバージョン）"""
+def create_management_dashboard_tab():
+    """経営ダッシュボードタブ（統一KPIレイアウト使用）"""
     st.header(f"{APP_ICON} 経営ダッシュボード")
 
     if not st.session_state.get('data_processed', False) or st.session_state.get('df') is None:
@@ -363,31 +364,57 @@ def create_management_dashboard_tab(): # ★★★ この関数全体を修正 �
         return
 
     df_original = st.session_state.get('df')
+    total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
+    # avg_admission_fee = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE) # display_unified_metrics_layout_colorized内で使用
+    # monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS) # display_unified_metrics_layout_colorized内で使用
 
+    # 統一フィルターから期間設定を取得
     start_date_ts, end_date_ts, period_description = get_analysis_period()
 
     if start_date_ts is None or end_date_ts is None:
         st.error("分析期間が設定されていません。サイドバーの「分析フィルター」で期間を設定してください。")
         return
 
-    st.info(f"📊 分析期間: {period_description} ({start_date_ts.strftime('%Y/%m/%d')} ～ {end_date_ts.strftime('%Y/%m/%d')})")
-    st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
+    # 選択期間のKPIを計算
+    df_selected_period = df_original[(df_original['日付'] >= start_date_ts) & (df_original['日付'] <= end_date_ts)]
+    kpis_selected = calculate_kpis(df_selected_period, start_date_ts, end_date_ts, total_beds=total_beds) if calculate_kpis else {}
 
-    df_for_dashboard = filter_data_by_analysis_period(df_original)
-
-    if df_for_dashboard.empty:
-        st.warning("選択されたフィルター条件に合致するデータがありません。")
+    if not kpis_selected or kpis_selected.get("error"):
+        st.warning(f"選択期間のKPI計算に失敗: {kpis_selected.get('error', '不明') if kpis_selected else '不明'}")
+        # グラフなしでKPIカードだけ表示する場合、ここで metrics_for_display を構築して表示を試みるか、return する
+        # 今回は display_unified_metrics_layout_colorized がグラフも含むため、ここで return するのが無難
         return
 
-    total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
-    target_occupancy_rate_percent = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE) * 100 # dashboard_overview_tab.pyの期待に合わせる
 
-    # display_kpi_cards_only を呼び出す
-    # この関数は dashboard_overview_tab.py からインポートされている想定
-    if display_kpi_cards_only:
-        display_kpi_cards_only(df_for_dashboard, start_date_ts, end_date_ts, total_beds, target_occupancy_rate_percent)
+    # 「直近30日」のKPIを計算 (display_unified_metrics_layout_colorized が期待するため)
+    latest_date_in_data = df_original['日付'].max()
+    start_30d = latest_date_in_data - pd.Timedelta(days=29)
+    end_30d = latest_date_in_data # end_30d を定義
+    df_30d = df_original[(df_original['日付'] >= start_30d) & (df_original['日付'] <= end_30d)] # end_30d を使用
+    kpis_30d = calculate_kpis(df_30d, start_30d, end_30d, total_beds=total_beds) if calculate_kpis and not df_30d.empty else {}
+
+
+    # display_unified_metrics_layout_colorized に渡す metrics 辞書を構築
+    metrics_for_display = {
+        'avg_daily_census': kpis_selected.get('avg_daily_census'),
+        'avg_daily_census_30d': kpis_30d.get('avg_daily_census'),
+        'bed_occupancy_rate': kpis_selected.get('bed_occupancy_rate'), # 選択期間の利用率を表示するように変更
+        'avg_los': kpis_selected.get('alos'),
+        'estimated_revenue': kpis_selected.get('total_patient_days', 0) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE),
+        'total_patient_days': kpis_selected.get('total_patient_days'),
+        # 'estimated_revenue_30d': kpis_30d.get('total_patient_days', 0) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE), # もし30日収益も必要なら
+        # 'total_patient_days_30d': kpis_30d.get('total_patient_days'), # もし30日延べ患者数も必要なら
+        'avg_daily_admissions': kpis_selected.get('avg_daily_admissions'),
+        'period_days': kpis_selected.get('days_count'),
+        'total_beds': total_beds,
+        # 'target_revenue' は display_unified_metrics_layout_colorized の中で計算されるか、セッションから取得される
+    }
+
+    if display_unified_metrics_layout_colorized:
+        display_unified_metrics_layout_colorized(metrics_for_display, period_description)
+        # 経営ダッシュボードではグラフは表示しないため、display_trend_graphs_only の呼び出しは行わない
     else:
-        st.error("KPIカード表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
+        st.error("KPI表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
 
 
 def main():
@@ -408,8 +435,6 @@ def main():
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
 
     settings_valid = create_sidebar()
-    # if not settings_valid:
-    #     pass # グローバル設定が不備でもアプリは継続させる
 
     tab_names = ["💰 経営ダッシュボード"]
     if FORECAST_AVAILABLE: tab_names.append("🔮 予測分析")
@@ -431,7 +456,7 @@ def main():
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         with tabs[0]: # 経営ダッシュボードタブ
             try:
-                create_management_dashboard_tab() # ★★★ 修正された関数を呼び出す ★★★
+                create_management_dashboard_tab()
             except Exception as e:
                 st.error(f"経営ダッシュボードでエラー: {str(e)}\n{traceback.format_exc()}")
 
