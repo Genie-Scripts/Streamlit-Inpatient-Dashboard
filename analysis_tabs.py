@@ -272,53 +272,93 @@ def create_weekday_analysis_section(df_filtered, filter_config, common_config):
         st.warning("曜日別分析機能が利用できません。dow_analysis_tab.pyを確認してください。")
         create_fallback_dow_analysis(df_filtered, filter_config)
 
-def create_individual_analysis_section(df_filtered, filter_config_from_caller):
+def create_individual_analysis_section(df_filtered, filter_config_from_caller): # df_filtered は統一フィルター適用済み
     """個別分析セクション（統一フィルター対応版）"""
     st.subheader("🔍 個別分析")
 
-    if display_individual_analysis_tab:
-        original_df_in_session = st.session_state.get('df')
-        original_all_results = st.session_state.get('all_results') # 元のall_resultsを保持
-        original_latest_date_str = st.session_state.get('latest_data_date_str') # 元のlatest_data_date_strを保持
-
-
-        # フィルター済みデータに基づいて all_results を生成/設定
-        if generate_filtered_summaries and df_filtered is not None and not df_filtered.empty:
-            st.session_state.all_results = generate_filtered_summaries(df_filtered, None, None)
-        else:
-            st.session_state.all_results = None
-
-        # フィルター済みデータに基づいて latest_data_date_str を設定
-        if df_filtered is not None and not df_filtered.empty and '日付' in df_filtered.columns:
-            st.session_state.latest_data_date_str = df_filtered['日付'].max().strftime("%Y年%m月%d日")
-        elif original_latest_date_str: # フォールバックとして元の値
-             st.session_state.latest_data_date_str = original_latest_date_str
-        else: # それもなければ現在時刻
-            st.session_state.latest_data_date_str = pd.Timestamp.now().strftime("%Y年%m月%d日")
-
-
-        st.session_state['df'] = df_filtered
-        st.session_state['unified_filter_applied'] = True
-        # filter_config_from_caller は individual_analysis_tab.py が get_unified_filter_config() で取得するため、
-        # ここでセッションに 'current_filter_config' として保存する必要はない。
-        # get_unified_filter_config() が正しく filter_config_from_caller (または同等のもの) を返すように
-        # unified_filters.py が st.session_state[self.config_key] に保存していることが前提。
-
-        try:
-            display_individual_analysis_tab()
-        except Exception as e:
-            logger.error(f"個別分析でエラー: {e}", exc_info=True)
-            st.error(f"個別分析でエラーが発生しました: {e}")
-            st.info("詳細なエラー情報はログを確認してください。")
-        finally:
-            st.session_state['df'] = original_df_in_session
-            st.session_state['unified_filter_applied'] = False
-            st.session_state['all_results'] = original_all_results # 元のall_resultsに戻す
-            st.session_state['latest_data_date_str'] = original_latest_date_str # 元の日付文字列に戻す
-
-    else:
+    if display_individual_analysis_tab is None:
         st.warning("個別分析機能が利用できません。individual_analysis_tab.pyを確認してください。")
-        create_fallback_individual_analysis(df_filtered, filter_config_from_caller)
+        # create_fallback_individual_analysis(df_filtered, filter_config_from_caller) # 必要ならフォールバック
+        return
+
+    # 呼び出し元 (create_detailed_analysis_tab) で df_filtered が None でないことは確認済みと想定
+    # if df_filtered is None or df_filtered.empty:
+    #     st.warning("個別分析のためのフィルター適用後データがありません。")
+    #     return
+
+    # individual_analysis_tab に渡すための準備
+    # 1. all_results の準備 (フィルター適用後の全体集計)
+    #    これは individual_analysis_tab がタブ内フィルター「全体」を選んだ時に使用される
+    if generate_filtered_summaries and not df_filtered.empty:
+        # 統一フィルター適用後の df_filtered から「全体」の集計を作成しセッションに保存
+        # この all_results は individual_analysis_tab 内で再計算される可能性もあるが、
+        # 呼び出し側で設定しておくことで、初回表示や「全体」選択時の効率が上がる。
+        st.session_state.all_results = generate_filtered_summaries(df_filtered, None, None)
+    elif df_filtered.empty :
+        st.session_state.all_results = {"summary": pd.DataFrame(), "weekday": pd.DataFrame(), "holiday": pd.DataFrame(),
+                                       "monthly_all":pd.DataFrame(), "monthly_weekday":pd.DataFrame(), "monthly_holiday":pd.DataFrame()}
+        # もし df_filtered が空でもタブを表示したい場合、空のサマリーを渡す
+    else: # generate_filtered_summaries が利用できない場合
+        st.session_state.all_results = None # または適切なエラーメッセージ
+        # st.error("集計関数 generate_filtered_summaries が利用できません。")
+        # return
+
+    # 2. latest_data_date_str の準備 (フィルター適用後のデータ基準日)
+    if not df_filtered.empty and '日付' in df_filtered.columns:
+        st.session_state.latest_data_date_str = df_filtered['日付'].max().strftime("%Y年%m月%d日")
+    else:
+        # フォールバックとして、もしセッションに既に存在すればそれを使うか、現在の日付を使う
+        st.session_state.latest_data_date_str = st.session_state.get('latest_data_date_str', pd.Timestamp.now().strftime("%Y年%m月%d日"))
+        if df_filtered.empty :
+             st.warning("フィルター適用後のデータが空のため、日付情報は不正確かもしれません。")
+
+
+    # 3. unified_filter_applied フラグの設定
+    st.session_state['unified_filter_applied'] = True # このセクションは常に統一フィルタ適用済み
+
+    # 4. target_data は st.session_state から直接 individual_analysis_tab が参照する
+
+    # 元のセッションステートを保持する必要がなくなる
+    # original_df_in_session = st.session_state.get('df') # 不要
+    original_all_results = st.session_state.get('all_results_backup_for_individual_analysis') # 万が一のためのバックアップキー(通常は不要になるはず)
+    original_latest_date_str = st.session_state.get('latest_data_date_str_backup_for_individual_analysis') # 万が一のため
+
+    # バックアップ（通常は不要だが、他のタブへの影響を完全に避けるため一時的に）
+    if 'all_results' in st.session_state and st.session_state.all_results is not None:
+         st.session_state.all_results_backup_for_individual_analysis = st.session_state.all_results.copy() if isinstance(st.session_state.all_results, dict) else st.session_state.all_results
+    if 'latest_data_date_str' in st.session_state :
+        st.session_state.latest_data_date_str_backup_for_individual_analysis = st.session_state.latest_data_date_str
+
+
+    # filter_config_from_caller は display_individual_analysis_tab には直接渡さない。
+    # individual_analysis_tab.py は get_unified_filter_config() で現在の統一フィルター設定を取得する。
+    # よって、unified_filters.py の filter_manager が st.session_state[self.config_key] に
+    # 正しい filter_config を保存していることが前提。
+
+    try:
+        # フィルタリング済みのdf_filteredを直接引数として渡す
+        display_individual_analysis_tab(df_filtered)
+    except Exception as e:
+        logger.error(f"個別分析タブの表示中にエラー: {e}", exc_info=True)
+        st.error(f"個別分析タブの表示中にエラーが発生しました: {e}")
+        st.info("詳細なエラー情報はログを確認してください。")
+    finally:
+        # 個別分析タブが終了したら、他のタブに影響を与えないように
+        # all_results や latest_data_date_str を元に戻す (もし必要であれば)
+        # ただし、統一フィルターシステム全体としてセッションステートを一貫して管理する方が望ましい。
+        # ここでの復元は、他のタブが予期せず individual_analysis タブ用に変更された値を使ってしまうことを防ぐ一時的な措置。
+        if 'all_results_backup_for_individual_analysis' in st.session_state:
+            st.session_state.all_results = st.session_state.all_results_backup_for_individual_analysis
+            del st.session_state.all_results_backup_for_individual_analysis # バックアップを削除
+        if 'latest_data_date_str_backup_for_individual_analysis' in st.session_state:
+            st.session_state.latest_data_date_str = st.session_state.latest_data_date_str_backup_for_individual_analysis
+            del st.session_state.latest_data_date_str_backup_for_individual_analysis
+
+        # unified_filter_applied フラグは、このセクションのスコープ外では意味が異なる可能性があるため、
+        # 元に戻すか、あるいは各タブで適切に設定・解釈する。
+        # ここでは、analysis_tabs.py の外のコンテキストでこのフラグがどう使われるか不明なため、
+        # 一旦リセットしないでおく。もし他のタブで問題があれば、適切な初期値に戻す必要がある。
+        # st.session_state['unified_filter_applied'] = False # 必要に応じて
 
 # ===============================================================================
 # データテーブルセクション（統一フィルター対応版）
