@@ -11,6 +11,7 @@ import time
 import hashlib
 import gc
 import logging
+logger = logging.getLogger(__name__) # logger の初期化
 import traceback # NameError 解消のため追加
 
 # 統一フィルター関連のインポート
@@ -32,6 +33,7 @@ try:
     from dow_analysis_tab import display_dow_analysis_tab
     from individual_analysis_tab import display_individual_analysis_tab
     from forecast_analysis_tab import display_forecast_analysis_tab
+    from forecast import generate_filtered_summaries
     from chart import (
         create_interactive_patient_chart,
         create_interactive_dual_axis_chart,
@@ -58,8 +60,6 @@ except ImportError as e:
     analyze_kpi_insights = None
     get_display_name_for_dept = None
     # get_unified_filter_config は上でインポート済み
-
-logger = logging.getLogger(__name__)
 
 # ===============================================================================
 # メイン関数群（統一フィルター対応版）
@@ -135,6 +135,61 @@ def create_data_tables_tab(): # この関数は「データ出力」タブ内で
 
 # このファイルは主に create_data_tables_tab とそのヘルパー関数に特化する形になります。
 # 以下、データテーブルタブ関連の関数は残します。
+def create_individual_analysis_section(df_filtered, filter_config_from_caller):
+    """個別分析セクション（統一フィルター対応版）"""
+    st.subheader("🔍 個別分析")
+
+    if display_individual_analysis_tab is None:
+        st.warning("個別分析機能が利用できません。individual_analysis_tab.pyを確認してください。")
+        return
+
+    if df_filtered is None or df_filtered.empty:
+        st.warning("個別分析のためのフィルター適用後データがありません。")
+        # 統一フィルターが適用されているが結果が空の場合のメッセージ
+        filter_summary = get_unified_filter_summary()
+        st.info(f"🔍 適用中のフィルター: {filter_summary}")
+        return
+
+
+    # individual_analysis_tab に渡すための準備
+    if generate_filtered_summaries and not df_filtered.empty:
+        st.session_state.all_results = generate_filtered_summaries(df_filtered, None, None)
+    elif df_filtered.empty :
+        st.session_state.all_results = {"summary": pd.DataFrame(), "weekday": pd.DataFrame(), "holiday": pd.DataFrame(),
+                                       "monthly_all":pd.DataFrame(), "monthly_weekday":pd.DataFrame(), "monthly_holiday":pd.DataFrame()}
+    else:
+        st.session_state.all_results = None
+
+
+    if not df_filtered.empty and '日付' in df_filtered.columns:
+        st.session_state.latest_data_date_str = df_filtered['日付'].max().strftime("%Y年%m月%d日")
+    else:
+        st.session_state.latest_data_date_str = st.session_state.get('latest_data_date_str', pd.Timestamp.now().strftime("%Y年%m月%d日"))
+        if df_filtered.empty :
+             st.warning("フィルター適用後のデータが空のため、日付情報は不正確かもしれません。")
+
+    st.session_state['unified_filter_applied'] = True
+
+    # 元のセッションステートのバックアップ（他のタブへの影響を最小限に）
+    original_all_results_backup = None
+    if 'all_results' in st.session_state and st.session_state.all_results is not None:
+        original_all_results_backup = st.session_state.all_results.copy() if isinstance(st.session_state.all_results, dict) else st.session_state.all_results
+
+    original_latest_date_str_backup = st.session_state.get('latest_data_date_str')
+
+    try:
+        display_individual_analysis_tab(df_filtered)
+    except Exception as e:
+        logger.error(f"個別分析タブの表示中にエラー: {e}", exc_info=True)
+        st.error(f"個別分析タブの表示中にエラーが発生しました: {e}")
+        st.info("詳細なエラー情報はログを確認してください。")
+    finally:
+        # バックアップからセッションステートを復元
+        if original_all_results_backup is not None:
+            st.session_state.all_results = original_all_results_backup
+        if original_latest_date_str_backup is not None:
+            st.session_state.latest_data_date_str = original_latest_date_str_backup
+        # st.session_state['unified_filter_applied'] = False # 必要に応じてリセット
 
 def create_ward_table_section(df_filtered):
     """病棟別データテーブルセクション（統一フィルター対応版）"""

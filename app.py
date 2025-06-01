@@ -44,6 +44,7 @@ try:
 
     FORECAST_AVAILABLE = True
 except ImportError as e:
+    problematic_imports = e
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
     st.error(traceback.format_exc())
     FORECAST_AVAILABLE = False
