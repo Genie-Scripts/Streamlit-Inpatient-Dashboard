@@ -63,37 +63,6 @@ except ImportError as e:
     validate_unified_filters = lambda df: (False, "フィルター検証機能利用不可")
     display_unified_metrics_layout_colorized = lambda metrics, period_info: st.error("KPI表示機能利用不可") # ★★★ フォールバック追加 ★★★
 
-def calculate_preset_period_dates(df, preset_period):
-    if df is None or df.empty or '日付' not in df.columns:
-        today = pd.Timestamp.now().normalize()
-        if preset_period == "直近30日":
-            return today - pd.Timedelta(days=29), today
-        return today - pd.Timedelta(days=29), today
-
-    latest_date = df['日付'].max()
-    min_data_date = df['日付'].min()
-
-    if preset_period == "直近30日":
-        start_date_ts = latest_date - pd.Timedelta(days=29)
-    elif preset_period == "前月完了分":
-        first_day_of_current_month = latest_date.replace(day=1)
-        last_day_of_previous_month = first_day_of_current_month - pd.Timedelta(days=1)
-        start_date_ts = last_day_of_previous_month.replace(day=1)
-        end_date_ts = last_day_of_previous_month
-        return start_date_ts.normalize(), end_date_ts.normalize()
-    elif preset_period == "今年度":
-        current_year = latest_date.year
-        if latest_date.month >= 4:
-            start_date_ts = pd.Timestamp(f"{current_year}-04-01")
-        else:
-            start_date_ts = pd.Timestamp(f"{current_year-1}-04-01")
-    else:
-        start_date_ts = latest_date - pd.Timedelta(days=29)
-
-    start_date_ts = max(start_date_ts, min_data_date)
-    return start_date_ts.normalize(), latest_date.normalize()
-
-
 def get_analysis_period():
     if not st.session_state.get('data_processed', False):
         return None, None, "データ未処理"
@@ -276,83 +245,110 @@ def create_sidebar_data_settings():
                 except Exception as e:
                     st.error(f"読み込みエラー: {e}")
 
-
 def create_sidebar():
+    """サイドバーの設定UI（改修版）"""
+    # セクション1: データ設定
     create_sidebar_data_settings()
     st.sidebar.markdown("---")
+
+    # セクション2: グローバル設定 (病院基本設定とKPI目標値)
     st.sidebar.header("⚙️ グローバル設定")
-    with st.sidebar.expander("🏥 基本病院設定", expanded=True):
+    with st.sidebar.expander("🏥 基本病院設定", expanded=False): # expanded=False に変更
         if 'settings_loaded' not in st.session_state:
             saved_settings = load_settings_from_file()
             if saved_settings:
                 for key, value in saved_settings.items():
                     st.session_state[key] = value
             st.session_state.settings_loaded = True
-        def get_safe_value(key, default, value_type=int):
+        def get_safe_value(key, default, value_type=int): # この関数はローカルでよい
             value = st.session_state.get(key, default)
             if isinstance(value, list): value = value[0] if value else default
             elif not isinstance(value, (int, float)): value = default
             return value_type(value)
+
         total_beds = st.number_input(
             "総病床数", min_value=HOSPITAL_SETTINGS['min_beds'], max_value=HOSPITAL_SETTINGS['max_beds'],
-            value=get_safe_value('total_beds', DEFAULT_TOTAL_BEDS), step=1, help="病院の総病床数"
+            value=get_safe_value('total_beds', DEFAULT_TOTAL_BEDS), step=1, help="病院の総病床数",
+            key="sidebar_total_beds"
         )
         st.session_state.total_beds = total_beds
+
         current_occupancy_percent = st.session_state.get('bed_occupancy_rate_percent', int(DEFAULT_OCCUPANCY_RATE * 100))
         bed_occupancy_rate = st.slider(
             "目標病床稼働率 (%)", min_value=int(HOSPITAL_SETTINGS['min_occupancy_rate'] * 100),
             max_value=int(HOSPITAL_SETTINGS['max_occupancy_rate'] * 100),
-            value=current_occupancy_percent, step=1, help="目標とする病床稼働率"
+            value=current_occupancy_percent, step=1, help="目標とする病床稼働率",
+            key="sidebar_bed_occupancy_rate_percent_slider"
         ) / 100
         st.session_state.bed_occupancy_rate = bed_occupancy_rate
         st.session_state.bed_occupancy_rate_percent = int(bed_occupancy_rate * 100)
+
         avg_length_of_stay = st.number_input(
             "平均在院日数目標", min_value=HOSPITAL_SETTINGS['min_avg_stay'], max_value=HOSPITAL_SETTINGS['max_avg_stay'],
-            value=get_safe_value('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY, float), step=0.1, help="目標とする平均在院日数"
+            value=get_safe_value('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY, float), step=0.1, help="目標とする平均在院日数",
+            key="sidebar_avg_length_of_stay"
         )
         st.session_state.avg_length_of_stay = avg_length_of_stay
+
         avg_admission_fee = st.number_input(
             "平均入院料（円/日）", min_value=1000, max_value=100000,
-            value=get_safe_value('avg_admission_fee', DEFAULT_ADMISSION_FEE), step=1000, help="1日あたりの平均入院料"
+            value=get_safe_value('avg_admission_fee', DEFAULT_ADMISSION_FEE), step=1000, help="1日あたりの平均入院料",
+            key="sidebar_avg_admission_fee"
         )
         st.session_state.avg_admission_fee = avg_admission_fee
-        if st.button("💾 グローバル設定を保存", key="save_global_settings_sidebar"): # キー変更
-            settings_to_save = {
-                'total_beds': total_beds, 'bed_occupancy_rate': bed_occupancy_rate,
-                'bed_occupancy_rate_percent': int(bed_occupancy_rate * 100),
-                'avg_length_of_stay': avg_length_of_stay, 'avg_admission_fee': avg_admission_fee
-            }
-            if 'monthly_target_patient_days' in st.session_state:
-                settings_to_save['monthly_target_patient_days'] = st.session_state.monthly_target_patient_days
-            if 'monthly_target_admissions' in st.session_state:
-                settings_to_save['monthly_target_admissions'] = st.session_state.monthly_target_admissions
-            if save_settings_to_file(settings_to_save): st.success("設定保存完了!")
-            else: st.error("設定保存失敗")
 
-    with st.sidebar.expander("🎯 KPI目標値設定", expanded=False):
+    with st.sidebar.expander("🎯 KPI目標値設定", expanded=False): # expanded=False に変更
         monthly_target_patient_days = st.number_input(
             "月間延べ在院日数目標（人日）", min_value=100, max_value=50000,
-            value=get_safe_value('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), step=100, help="月間の延べ在院日数目標"
+            value=get_safe_value('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), step=100, help="月間の延べ在院日数目標",
+            key="sidebar_monthly_target_patient_days"
         )
         st.session_state.monthly_target_patient_days = monthly_target_patient_days
+
         monthly_target_admissions = st.number_input(
             "月間新入院患者数目標（人）", min_value=10, max_value=5000,
-            value=get_safe_value('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS), step=10, help="月間の新入院患者数目標"
+            value=get_safe_value('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS), step=10, help="月間の新入院患者数目標",
+            key="sidebar_monthly_target_admissions"
         )
         st.session_state.monthly_target_admissions = monthly_target_admissions
 
+    # グローバル設定の保存ボタンは、設定セクションの外、または専用のセクションに配置
+    if st.sidebar.button("💾 グローバル設定とKPI目標値を保存", key="save_all_global_settings_sidebar", use_container_width=True):
+        settings_to_save = {
+            'total_beds': st.session_state.total_beds,
+            'bed_occupancy_rate': st.session_state.bed_occupancy_rate,
+            'bed_occupancy_rate_percent': st.session_state.bed_occupancy_rate_percent,
+            'avg_length_of_stay': st.session_state.avg_length_of_stay,
+            'avg_admission_fee': st.session_state.avg_admission_fee,
+            'monthly_target_patient_days': st.session_state.monthly_target_patient_days,
+            'monthly_target_admissions': st.session_state.monthly_target_admissions
+        }
+        if save_settings_to_file(settings_to_save):
+            st.sidebar.success("設定保存完了!")
+        else:
+            st.sidebar.error("設定保存失敗")
+
     st.sidebar.markdown("---")
+
+    # セクション3: 統一分析フィルター
+    # このセクションは、データが読み込まれている場合にのみ表示
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         df_for_filter_init = st.session_state.get('df')
-        initialize_unified_filters(df_for_filter_init)
-        filter_config = create_unified_filter_sidebar(df_for_filter_init)
-        if filter_config:
-            st.session_state['current_unified_filter_config'] = filter_config
+        if not df_for_filter_init.empty:
+            # フィルターのデフォルト値は、データがロードされるたびに現在のデータに基づいて初期化
+            initialize_unified_filters(df_for_filter_init)
+            # 統一フィルターUIの描画と設定の取得
+            filter_config = create_unified_filter_sidebar(df_for_filter_init)
+            if filter_config:
+                # 現在のフィルター設定をセッションに保存 (分析タブがこれを参照できるように)
+                st.session_state['current_unified_filter_config'] = filter_config
+        else:
+            st.sidebar.warning("分析フィルターを表示するためのデータが空です。")
     else:
-        st.sidebar.info("データを読み込むと分析フィルターが表示されます。")
-    return True
+        st.sidebar.info("「データ処理」タブでデータを読み込むと、ここに分析フィルターが表示されます。")
 
-
+    return True # settings_valid の判定ロジックは一旦Trueを返す
+    
 def create_management_dashboard_tab():
     """経営ダッシュボードタブ（統一KPIレイアウト使用）"""
     st.header(f"{APP_ICON} 経営ダッシュボード")
@@ -414,7 +410,6 @@ def create_management_dashboard_tab():
     else:
         st.error("KPI表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
 
-
 def main():
     if 'app_initialized' not in st.session_state:
         st.session_state.app_initialized = True
@@ -422,17 +417,22 @@ def main():
     if 'data_processed' not in st.session_state: st.session_state['data_processed'] = False
     if 'df' not in st.session_state: st.session_state['df'] = None
     if 'forecast_model_results' not in st.session_state: st.session_state.forecast_model_results = {}
+    if 'mappings_initialized_after_processing' not in st.session_state: st.session_state.mappings_initialized_after_processing = False
+
 
     auto_loaded = auto_load_data()
     if auto_loaded and st.session_state.get('df') is not None:
         st.success(MESSAGES['auto_load_success'])
         if 'target_data' not in st.session_state: st.session_state.target_data = None
         initialize_all_mappings(st.session_state.df, st.session_state.target_data)
+        # 自動ロード後にも統一フィルターの初期化を行う
+        initialize_unified_filters(st.session_state.df)
+        st.session_state.mappings_initialized_after_processing = True # マッピングも初期化済みとみなす
 
 
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
 
-    settings_valid = create_sidebar()
+    create_sidebar() # サイドバーの描画
 
     tab_names = ["💰 経営ダッシュボード"]
     if FORECAST_AVAILABLE: tab_names.append("🔮 予測分析")
@@ -440,19 +440,26 @@ def main():
 
     tabs = st.tabs(tab_names)
 
-    with tabs[-1]: # データ処理タブ
+    # データ処理タブは最初に評価されるようにする（データがない場合でもUIは表示される）
+    with tabs[-1]:
         try:
             create_data_processing_tab()
-            if st.session_state.get('data_processed') and st.session_state.get('df') is not None \
-               and not st.session_state.get('mappings_initialized_after_processing', False):
-                initialize_all_mappings(st.session_state.df, st.session_state.get('target_data'))
-                st.session_state.mappings_initialized_after_processing = True
+            # データ処理タブ内でデータがロード/処理された後、
+            # initialize_all_mappings と initialize_unified_filters が呼び出される。
+            # mappings_initialized_after_processing フラグは data_processing_tab.py 側で管理。
+            # ここで再度 initialize_unified_filters を呼ぶのは、
+            # data_processing_tab.py の実行後にセッションステートのdfが更新された場合に備える。
+            if st.session_state.get('data_processed') and st.session_state.get('df') is not None:
+                 initialize_unified_filters(st.session_state.df)
+
+
         except Exception as e:
             st.error(f"データ処理タブでエラー: {str(e)}\n{traceback.format_exc()}")
 
-
+    # 他のタブはデータ処理後に表示
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
-        with tabs[0]: # 経営ダッシュボードタブ
+        # 経営ダッシュボードタブ
+        with tabs[0]:
             try:
                 create_management_dashboard_tab()
             except Exception as e:
@@ -471,24 +478,27 @@ def main():
 
         with tabs[1 + tab_offset]: # 詳細分析タブ
             try:
+                # create_detailed_analysis_tab は内部で get_unified_filter_config() を使い、
+                # apply_unified_filters(st.session_state.df) を実行する
                 create_detailed_analysis_tab()
             except Exception as e:
                 st.error(f"詳細分析でエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[2 + tab_offset]: # データテーブルタブ
             try:
+                # create_data_tables_tab も同様
                 create_data_tables_tab()
             except Exception as e:
                 st.error(f"データテーブルでエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[3 + tab_offset]: # PDF出力タブ
             try:
+                # pdf_output_tab.create_pdf_output_tab() も同様
                 pdf_output_tab.create_pdf_output_tab()
             except Exception as e:
                 st.error(f"PDF出力機能でエラー: {str(e)}\n{traceback.format_exc()}")
-
-    else:
-        for i in range(len(tabs) - 1):
+    else: # データ未処理の場合
+        for i in range(len(tabs) - 1): # データ処理タブ以外
             with tabs[i]:
                 st.info(MESSAGES['insufficient_data'])
                 data_info = get_data_info()
@@ -504,6 +514,4 @@ def main():
     )
 
 if __name__ == "__main__":
-    if 'mappings_initialized_after_processing' not in st.session_state:
-        st.session_state.mappings_initialized_after_processing = False
     main()
