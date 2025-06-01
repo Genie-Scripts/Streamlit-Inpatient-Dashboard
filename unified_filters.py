@@ -1,512 +1,490 @@
-# unified_filters.py - キー重複問題修正版
+# unified_filters.py (修正版 - フィルター適用とUI修正)
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
 
-# utilsから必要な関数をインポート
-from utils import (
-    safe_date_filter, 
-    create_ward_display_options, 
-    create_dept_display_options, 
-    get_ward_display_name,
-    get_display_name_for_dept
-)
-
 logger = logging.getLogger(__name__)
 
-class UnifiedFilterManager:
-    """統一フィルター管理クラス（キー重複問題修正版）"""
+# 統一フィルター設定
+UNIFIED_FILTER_CONFIG = {
+    'period_modes': ['全期間', '最近30日', '最近90日', '最近180日', '最近1年', 'カスタム期間'],
+    'default_period_mode': '最近90日',
+    'session_keys': {
+        'period_mode': 'unified_filter_period_mode',
+        'start_date': 'unified_filter_start_date',
+        'end_date': 'unified_filter_end_date',
+        'departments': 'unified_filter_departments',
+        'wards': 'unified_filter_wards',
+        'applied': 'unified_filter_applied',
+        'last_raw_df_hash': 'unified_filter_last_raw_df_hash'
+    }
+}
+
+def get_df_hash(df):
+    """データフレームのハッシュ値を計算"""
+    if df is None or df.empty:
+        return "empty"
+    try:
+        # 形状とデータ型の情報でハッシュを作成
+        shape_str = f"{df.shape[0]}_{df.shape[1]}"
+        cols_str = "_".join(sorted(df.columns.astype(str)))
+        return f"{shape_str}_{hash(cols_str)}"
+    except Exception:
+        return "unknown"
+
+def initialize_filter_session_state(df=None):
+    """統一フィルターのセッション状態を初期化"""
     
-    def __init__(self):
-        self.session_prefix = "unified_filter_"
-        self.config_key = f"{self.session_prefix}config"
-        self.sidebar_created_key = f"{self.session_prefix}sidebar_created"
+    # 基本フィルター設定の初期化
+    if UNIFIED_FILTER_CONFIG['session_keys']['period_mode'] not in st.session_state:
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['period_mode']] = UNIFIED_FILTER_CONFIG['default_period_mode']
     
-    def initialize_default_filters(self, df):
-        """デフォルトフィルター値の初期化"""
-        if df is None or df.empty or '日付' not in df.columns:
-            logger.warning("initialize_default_filters: 有効なデータフレームまたは日付列が見つかりません")
-            return
-        
-        try:
-            # データの日付範囲を取得
-            valid_dates = df['日付'].dropna()
-            if valid_dates.empty:
-                logger.warning("initialize_default_filters: 有効な日付データがありません")
-                return
-                
-            max_date = valid_dates.max()
-            min_date = valid_dates.min()
-            
-            # デフォルト期間（直近3ヶ月）
-            default_start = max_date - pd.Timedelta(days=90)
-            default_start = max(default_start, min_date)
-            
-            # セッションにデフォルト値を設定（既に値がない場合のみ）
-            if not st.session_state.get(f"{self.session_prefix}initialized", False):
-                st.session_state[f"{self.session_prefix}start_date"] = default_start
-                st.session_state[f"{self.session_prefix}end_date"] = max_date
-                st.session_state[f"{self.session_prefix}period_mode"] = "プリセット期間"
-                st.session_state[f"{self.session_prefix}preset"] = "直近3ヶ月"
-                st.session_state[f"{self.session_prefix}dept_mode"] = "全診療科"
-                st.session_state[f"{self.session_prefix}ward_mode"] = "全病棟"
-                st.session_state[f"{self.session_prefix}initialized"] = True
-                logger.info("統一フィルターのデフォルト値を初期化しました")
-        
-        except Exception as e:
-            logger.error(f"initialize_default_filters でエラー: {e}")
+    if UNIFIED_FILTER_CONFIG['session_keys']['applied'] not in st.session_state:
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['applied']] = False
     
-    def create_filter_status_card(self, df):
-        """フィルター状態表示カードの作成（画面上部用）"""
-        config = st.session_state.get(self.config_key)
-        if not config:
-            st.warning("🔍 フィルター未設定 - サイドバーで設定してください")
-            return None, None
+    # データが提供された場合の初期化
+    if df is not None and not df.empty:
+        current_df_hash = get_df_hash(df)
+        last_df_hash = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['last_raw_df_hash'])
         
-        try:
-            # フィルター情報の整理
-            start_date = config['start_date']
-            end_date = config['end_date']
-            period_days = (end_date - start_date).days + 1
-            
-            # データ件数計算
-            total_records = len(df) if df is not None and not df.empty else 0
-            filtered_df = self.apply_filters(df) if df is not None and not df.empty else pd.DataFrame()
-            filtered_records = len(filtered_df)
-            
-            # フィルター状態カードの表示
-            st.markdown("""
-            <div style="
-                background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                padding: 16px;
-                margin: 8px 0;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            ">
-            """, unsafe_allow_html=True)
-            
-            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
-            
-            with col1:
-                # 期間情報
-                if config.get('period_mode') == "プリセット期間" and config.get('preset'):
-                    period_text = f"📅 {config['preset']}"
-                else:
-                    period_text = f"📅 カスタム期間"
-                
-                st.markdown(f"**{period_text}**")
-                st.caption(f"{start_date.strftime('%Y/%m/%d')} ～ {end_date.strftime('%Y/%m/%d')} ({period_days}日間)")
-            
-            with col2:
-                # 診療科情報
-                if config['dept_filter_mode'] == "特定診療科":
-                    dept_count = len(config['selected_depts'])
-                    if dept_count > 0:
-                        dept_text = f"🏥 診療科: {dept_count}件選択"
-                    else:
-                        dept_text = "🏥 診療科: 選択なし ⚠️"
-                else:
-                    dept_text = "🏥 診療科: 全て"
-                st.markdown(f"**{dept_text}**")
-            
-            with col3:
-                # 病棟情報
-                if config['ward_filter_mode'] == "特定病棟":
-                    ward_count = len(config['selected_wards'])
-                    if ward_count > 0:
-                        ward_text = f"🏨 病棟: {ward_count}件選択"
-                    else:
-                        ward_text = "🏨 病棟: 選択なし ⚠️"
-                else:
-                    ward_text = "🏨 病棟: 全て"
-                st.markdown(f"**{ward_text}**")
-            
-            with col4:
-                # データ件数
-                filter_ratio = (filtered_records / total_records * 100) if total_records > 0 else 0
-                if filter_ratio > 75:
-                    color = "#28a745"  # 緑
-                elif filter_ratio > 25:
-                    color = "#ffc107"  # 黄
-                else:
-                    color = "#dc3545"  # 赤
-                
-                st.markdown(f"**📊 データ件数**")
-                st.markdown(f'<span style="color: {color}; font-weight: bold;">{filtered_records:,}件 ({filter_ratio:.1f}%)</span>', unsafe_allow_html=True)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            return filtered_df, config
-            
-        except Exception as e:
-            logger.error(f"create_filter_status_card でエラー: {e}")
-            st.error(f"フィルター状態の表示でエラーが発生しました: {e}")
-            return None, None
-    
-    def create_unified_sidebar(self, df):
-        """統一フィルターサイドバーの作成（重複防止版）"""
-        # 既にサイドバーが作成されている場合はスキップ
-        if st.session_state.get(self.sidebar_created_key, False):
-            logger.info("統一フィルターサイドバーは既に作成済みです")
-            return st.session_state.get(self.config_key)
+        # データが変更された場合は設定をリセット
+        if current_df_hash != last_df_hash:
+            logger.info("データ変更検出：統一フィルター設定をリセット")
+            reset_filter_settings()
+            st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['last_raw_df_hash']] = current_df_hash
         
-        if df is None or df.empty:
-            st.sidebar.error("📊 データが読み込まれていません")
-            return None
-        
-        if '日付' not in df.columns:
-            st.sidebar.error("📅 日付列が見つかりません")
-            return None
-        
-        # デフォルト値の初期化
-        self.initialize_default_filters(df)
-        
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("## 🔍 分析フィルター")
-        
-        # ユニークキーの生成
-        current_time = datetime.now().strftime("%H%M%S")
-        key_suffix = f"_{current_time}"
-        
-        # 期間設定セクション
-        with st.sidebar.expander("📅 分析期間", expanded=True):
-            period_mode = st.radio(
-                "期間選択方法",
-                ["プリセット期間", "カスタム期間"],
-                key=f"{self.session_prefix}period_mode{key_suffix}",
-                help="プリセット期間で簡単選択、またはカスタム期間で詳細指定"
-            )
+        # 日付範囲の初期化
+        if '日付' in df.columns and not df['日付'].empty:
+            min_date = pd.to_datetime(df['日付']).min().date()
+            max_date = pd.to_datetime(df['日付']).max().date()
             
-            if period_mode == "プリセット期間":
-                preset = st.selectbox(
-                    "期間プリセット",
-                    ["直近1ヶ月", "直近3ヶ月", "直近6ヶ月", "直近12ヶ月", "全期間"],
-                    index=1,  # デフォルト：直近3ヶ月
-                    key=f"{self.session_prefix}preset{key_suffix}",
-                    help="よく使われる期間から選択"
-                )
-                start_date, end_date = self._get_preset_dates(df, preset)
-                
-                # プリセット期間の表示
-                period_days = (end_date - start_date).days + 1
-                st.sidebar.info(f"📅 {start_date.strftime('%Y/%m/%d')} ～ {end_date.strftime('%Y/%m/%d')}\n（{period_days}日間）")
-                
+            # 期間モードに基づく日付設定
+            period_mode = st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['period_mode']]
+            if period_mode != 'カスタム期間':
+                start_date, end_date = calculate_period_dates(max_date, period_mode)
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['start_date']] = start_date
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['end_date']] = end_date
             else:
-                # カスタム期間選択
-                data_min = df['日付'].min().date()
-                data_max = df['日付'].max().date()
-                
-                # 現在のセッション値または計算されたデフォルト値を使用
-                default_start = st.session_state.get(f"{self.session_prefix}start_date", data_max - timedelta(days=90))
-                default_end = st.session_state.get(f"{self.session_prefix}end_date", data_max)
-                
-                if isinstance(default_start, pd.Timestamp):
-                    default_start = default_start.date()
-                if isinstance(default_end, pd.Timestamp):
-                    default_end = default_end.date()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    start_date_input = st.date_input(
-                        "開始日",
-                        value=max(default_start, data_min),
-                        min_value=data_min,
-                        max_value=data_max,
-                        key=f"{self.session_prefix}custom_start{key_suffix}"
-                    )
-                with col2:
-                    end_date_input = st.date_input(
-                        "終了日",
-                        value=min(default_end, data_max),
-                        min_value=start_date_input,
-                        max_value=data_max,
-                        key=f"{self.session_prefix}custom_end{key_suffix}"
-                    )
-                
-                start_date = pd.Timestamp(start_date_input)
-                end_date = pd.Timestamp(end_date_input)
-                
-                # カスタム期間の妥当性チェック
-                if start_date > end_date:
-                    st.sidebar.error("⚠️ 開始日は終了日より前に設定してください")
-                    return None
+                # カスタム期間の場合、既存の設定を保持または全期間を設定
+                if UNIFIED_FILTER_CONFIG['session_keys']['start_date'] not in st.session_state:
+                    st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['start_date']] = min_date
+                if UNIFIED_FILTER_CONFIG['session_keys']['end_date'] not in st.session_state:
+                    st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['end_date']] = max_date
         
-        # 診療科選択セクション
-        with st.sidebar.expander("🏥 診療科フィルター", expanded=False):
-            dept_filter_mode = st.radio(
-                "診療科選択",
-                ["全診療科", "特定診療科"],
-                key=f"{self.session_prefix}dept_mode{key_suffix}",
-                help="全診療科を対象にするか、特定の診療科のみを選択"
-            )
+        # 部門・病棟フィルターの初期化
+        if '診療科名' in df.columns:
+            available_depts = sorted(df['診療科名'].dropna().unique().astype(str))
+            if UNIFIED_FILTER_CONFIG['session_keys']['departments'] not in st.session_state:
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['departments']] = available_depts
+        
+        if '病棟コード' in df.columns:
+            available_wards = sorted(df['病棟コード'].dropna().unique().astype(str))
+            if UNIFIED_FILTER_CONFIG['session_keys']['wards'] not in st.session_state:
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['wards']] = available_wards
+
+def reset_filter_settings():
+    """フィルター設定をリセット"""
+    keys_to_reset = [
+        UNIFIED_FILTER_CONFIG['session_keys']['departments'],
+        UNIFIED_FILTER_CONFIG['session_keys']['wards'],
+        UNIFIED_FILTER_CONFIG['session_keys']['start_date'],
+        UNIFIED_FILTER_CONFIG['session_keys']['end_date']
+    ]
+    
+    for key in keys_to_reset:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['applied']] = False
+
+def calculate_period_dates(max_date, period_mode):
+    """期間モードに基づいて開始・終了日を計算"""
+    end_date = max_date
+    
+    if period_mode == '全期間':
+        # データの最小日付を使用（後で設定）
+        start_date = max_date - timedelta(days=365*2)  # 仮の値
+    elif period_mode == '最近30日':
+        start_date = max_date - timedelta(days=30)
+    elif period_mode == '最近90日':
+        start_date = max_date - timedelta(days=90)
+    elif period_mode == '最近180日':
+        start_date = max_date - timedelta(days=180)
+    elif period_mode == '最近1年':
+        start_date = max_date - timedelta(days=365)
+    else:  # カスタム期間
+        start_date = max_date - timedelta(days=90)  # デフォルト
+    
+    return start_date, end_date
+
+def create_unified_filter_sidebar(df):
+    """統一フィルターのサイドバーUI作成"""
+    
+    if df is None or df.empty:
+        st.sidebar.warning("⚠️ データが読み込まれていません")
+        return
+    
+    # セッション状態の初期化
+    initialize_filter_session_state(df)
+    
+    st.sidebar.markdown("## 🔍 統一分析フィルター")
+    st.sidebar.markdown("*全タブで共通使用*")
+    
+    # データ情報表示
+    with st.sidebar.expander("📊 データ情報", expanded=False):
+        if '日付' in df.columns and not df['日付'].empty:
+            min_date = pd.to_datetime(df['日付']).min().date()
+            max_date = pd.to_datetime(df['日付']).max().date()
+            st.write(f"**データ期間**: {min_date} ～ {max_date}")
+        st.write(f"**総データ数**: {len(df):,}行")
+        if '診療科名' in df.columns:
+            dept_count = df['診療科名'].nunique()
+            st.write(f"**診療科数**: {dept_count}")
+        if '病棟コード' in df.columns:
+            ward_count = df['病棟コード'].nunique()
+            st.write(f"**病棟数**: {ward_count}")
+    
+    # 期間フィルター
+    st.sidebar.markdown("### 📅 期間フィルター")
+    
+    current_period_mode = st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['period_mode']]
+    period_mode = st.sidebar.selectbox(
+        "期間選択",
+        UNIFIED_FILTER_CONFIG['period_modes'],
+        index=UNIFIED_FILTER_CONFIG['period_modes'].index(current_period_mode),
+        key="period_mode_selector",
+        help="分析対象期間を選択します"
+    )
+    
+    # 期間モード変更時の処理
+    if period_mode != current_period_mode:
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['period_mode']] = period_mode
+        
+        if '日付' in df.columns and not df['日付'].empty:
+            max_date = pd.to_datetime(df['日付']).max().date()
+            min_date = pd.to_datetime(df['日付']).min().date()
             
-            selected_depts = []
-            if dept_filter_mode == "特定診療科":
-                if '診療科名' in df.columns:
-                    available_depts = sorted(df['診療科名'].astype(str).unique())
-                    dept_mapping = st.session_state.get('dept_mapping', {})
-                    
-                    try:
-                        dept_options, dept_map = create_dept_display_options(available_depts, dept_mapping)
-                        
-                        selected_dept_displays = st.multiselect(
-                            "対象診療科",
-                            dept_options,
-                            key=f"{self.session_prefix}selected_depts{key_suffix}",
-                            help="分析対象とする診療科を選択（複数選択可）"
-                        )
-                        selected_depts = [dept_map[d] for d in selected_dept_displays if d in dept_map]
-                        
-                        if selected_dept_displays:
-                            st.sidebar.success(f"✅ {len(selected_depts)}件の診療科を選択")
-                        else:
-                            st.sidebar.warning("⚠️ 診療科が選択されていません")
-                            
-                    except Exception as e:
-                        logger.error(f"診療科フィルター作成エラー: {e}")
-                        st.sidebar.error("診療科フィルターの作成に失敗しました")
-                else:
-                    st.sidebar.warning("📋 診療科名列が見つかりません")
-        
-        # 病棟選択セクション
-        with st.sidebar.expander("🏨 病棟フィルター", expanded=False):
-            ward_filter_mode = st.radio(
-                "病棟選択",
-                ["全病棟", "特定病棟"],
-                key=f"{self.session_prefix}ward_mode{key_suffix}",
-                help="全病棟を対象にするか、特定の病棟のみを選択"
-            )
+            if period_mode == '全期間':
+                start_date, end_date = min_date, max_date
+            elif period_mode != 'カスタム期間':
+                start_date, end_date = calculate_period_dates(max_date, period_mode)
+            else:
+                # カスタム期間の場合は現在の設定を保持
+                start_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['start_date'], min_date)
+                end_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['end_date'], max_date)
             
-            selected_wards = []
-            if ward_filter_mode == "特定病棟":
-                if '病棟コード' in df.columns:
-                    available_wards = sorted(df['病棟コード'].astype(str).unique())
-                    ward_mapping = st.session_state.get('ward_mapping', {})
-                    
-                    try:
-                        ward_options, ward_map = create_ward_display_options(available_wards, ward_mapping)
-                        
-                        selected_ward_displays = st.multiselect(
-                            "対象病棟",
-                            ward_options,
-                            key=f"{self.session_prefix}selected_wards{key_suffix}",
-                            help="分析対象とする病棟を選択（複数選択可）"
-                        )
-                        selected_wards = [ward_map[w] for w in selected_ward_displays if w in ward_map]
-                        
-                        if selected_ward_displays:
-                            st.sidebar.success(f"✅ {len(selected_wards)}件の病棟を選択")
-                        else:
-                            st.sidebar.warning("⚠️ 病棟が選択されていません")
-                            
-                    except Exception as e:
-                        logger.error(f"病棟フィルター作成エラー: {e}")
-                        st.sidebar.error("病棟フィルターの作成に失敗しました")
-                else:
-                    st.sidebar.warning("📋 病棟コード列が見つかりません")
+            st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['start_date']] = start_date
+            st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['end_date']] = end_date
         
-        # フィルター情報の保存
-        filter_config = {
-            'start_date': start_date,
-            'end_date': end_date,
-            'selected_depts': selected_depts,
-            'selected_wards': selected_wards,
-            'dept_filter_mode': dept_filter_mode,
-            'ward_filter_mode': ward_filter_mode,
-            'period_mode': period_mode,
-            'preset': preset if period_mode == "プリセット期間" else None
-        }
+        st.rerun()  # 画面を再描画
+    
+    # カスタム期間の場合の日付選択
+    if period_mode == 'カスタム期間' and '日付' in df.columns:
+        min_date = pd.to_datetime(df['日付']).min().date()
+        max_date = pd.to_datetime(df['日付']).max().date()
         
-        # セッションに保存
-        st.session_state[self.config_key] = filter_config
-        st.session_state[self.sidebar_created_key] = True  # 作成済みフラグ
-        
-        # フィルター操作ボタン
-        st.sidebar.markdown("---")
         col1, col2 = st.sidebar.columns(2)
         with col1:
-            if st.button("🔄 適用", key=f"{self.session_prefix}apply{key_suffix}", help="フィルター設定を適用して再分析"):
-                logger.info("統一フィルターが適用されました")
+            start_date = st.date_input(
+                "開始日",
+                value=st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['start_date'], min_date),
+                min_value=min_date,
+                max_value=max_date,
+                key="custom_start_date"
+            )
+        with col2:
+            end_date = st.date_input(
+                "終了日",
+                value=st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['end_date'], max_date),
+                min_value=min_date,
+                max_value=max_date,
+                key="custom_end_date"
+            )
+        
+        # 日付の妥当性チェック
+        if start_date > end_date:
+            st.sidebar.error("❌ 開始日は終了日より前に設定してください")
+            return
+        
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['start_date']] = start_date
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['end_date']] = end_date
+    
+    # 診療科フィルター
+    if '診療科名' in df.columns:
+        st.sidebar.markdown("### 🏥 診療科フィルター")
+        available_depts = sorted(df['診療科名'].dropna().unique().astype(str))
+        
+        # 全選択/全解除のボタン
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("全選択", key="select_all_depts", use_container_width=True):
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['departments']] = available_depts
                 st.rerun()
         with col2:
-            if st.button("🗑️ リセット", key=f"{self.session_prefix}reset{key_suffix}", help="全てのフィルター設定をリセット"):
-                self._reset_filters()
-                logger.info("統一フィルターがリセットされました")
+            if st.button("全解除", key="deselect_all_depts", use_container_width=True):
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['departments']] = []
                 st.rerun()
         
-        return filter_config
+        current_depts = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['departments'], available_depts)
+        selected_depts = st.sidebar.multiselect(
+            "診療科選択",
+            available_depts,
+            default=current_depts,
+            key="dept_multiselect",
+            help="分析対象の診療科を選択します"
+        )
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['departments']] = selected_depts
     
-    def _get_preset_dates(self, df, preset):
-        """プリセット期間から開始日・終了日を取得"""
-        try:
-            valid_dates = df['日付'].dropna()
-            max_date = valid_dates.max()
-            min_date = valid_dates.min()
-            
-            if preset == "直近1ヶ月":
-                start_date = max_date - pd.Timedelta(days=30)
-            elif preset == "直近3ヶ月":
-                start_date = max_date - pd.Timedelta(days=90)
-            elif preset == "直近6ヶ月":
-                start_date = max_date - pd.Timedelta(days=180)
-            elif preset == "直近12ヶ月":
-                start_date = max_date - pd.Timedelta(days=365)
-            else:  # 全期間
-                start_date = min_date
-            
-            start_date = max(start_date, min_date)
-            return start_date, max_date
-            
-        except Exception as e:
-            logger.error(f"_get_preset_dates でエラー: {e}")
-            # フォールバック値を返す
-            return df['日付'].min(), df['日付'].max()
+    # 病棟フィルター
+    if '病棟コード' in df.columns:
+        st.sidebar.markdown("### 🏢 病棟フィルター")
+        available_wards = sorted(df['病棟コード'].dropna().unique().astype(str))
+        
+        # 全選択/全解除のボタン
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("全選択", key="select_all_wards", use_container_width=True):
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['wards']] = available_wards
+                st.rerun()
+        with col2:
+            if st.button("全解除", key="deselect_all_wards", use_container_width=True):
+                st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['wards']] = []
+                st.rerun()
+        
+        current_wards = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['wards'], available_wards)
+        selected_wards = st.sidebar.multiselect(
+            "病棟選択",
+            available_wards,
+            default=current_wards,
+            key="ward_multiselect",
+            help="分析対象の病棟を選択します"
+        )
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['wards']] = selected_wards
     
-    def _reset_filters(self):
-        """フィルター設定をリセット"""
-        try:
-            keys_to_reset = [key for key in st.session_state.keys() 
-                            if key.startswith(self.session_prefix)]
-            for key in keys_to_reset:
-                del st.session_state[key]
-            logger.info(f"{len(keys_to_reset)}個のフィルター設定をリセットしました")
-        except Exception as e:
-            logger.error(f"フィルターリセット中にエラー: {e}")
+    # フィルター適用ボタン
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 フィルター適用", type="primary", use_container_width=True):
+        st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['applied']] = True
+        st.rerun()
     
-    def apply_filters(self, df):
-        """フィルターを適用してデータフレームを返す"""
-        config = st.session_state.get(self.config_key)
-        if not config:
-            logger.warning("フィルター設定が見つかりません。元のデータフレームを返します。")
-            return df
-        
-        try:
-            # 期間フィルター
-            filtered_df = safe_date_filter(df, config['start_date'], config['end_date'])
-            original_count = len(df)
-            after_date_filter = len(filtered_df)
-            
-            # 診療科フィルター
-            if config['dept_filter_mode'] == "特定診療科" and config['selected_depts']:
-                if '診療科名' in filtered_df.columns:
-                    filtered_df = filtered_df[filtered_df['診療科名'].isin(config['selected_depts'])]
-                    after_dept_filter = len(filtered_df)
-                    logger.debug(f"診療科フィルター適用: {after_date_filter} → {after_dept_filter}行")
-            
-            # 病棟フィルター
-            if config['ward_filter_mode'] == "特定病棟" and config['selected_wards']:
-                if '病棟コード' in filtered_df.columns:
-                    filtered_df = filtered_df[filtered_df['病棟コード'].isin(config['selected_wards'])]
-                    final_count = len(filtered_df)
-                    logger.debug(f"病棟フィルター適用: 最終 {final_count}行")
-            
-            logger.info(f"フィルター適用完了: {original_count} → {len(filtered_df)}行")
-            return filtered_df
-            
-        except Exception as e:
-            logger.error(f"フィルター適用中にエラー: {e}")
-            st.sidebar.error(f"フィルター適用エラー: {e}")
-            return df
-    
-    def get_filter_summary(self):
-        """現在のフィルター設定のサマリーを返す"""
-        config = st.session_state.get(self.config_key)
-        if not config:
-            return "📋 フィルター未設定"
-        
-        try:
-            summary = []
-            
-            # 期間情報
-            start = config['start_date'].strftime('%Y/%m/%d')
-            end = config['end_date'].strftime('%Y/%m/%d')
-            period_days = (config['end_date'] - config['start_date']).days + 1
-            
-            if config.get('period_mode') == "プリセット期間" and config.get('preset'):
-                summary.append(f"📅 期間: {config['preset']} ({start}～{end}, {period_days}日間)")
-            else:
-                summary.append(f"📅 期間: {start}～{end} ({period_days}日間)")
-            
-            # 診療科情報
-            if config['dept_filter_mode'] == "特定診療科":
-                dept_count = len(config['selected_depts'])
-                if dept_count > 0:
-                    summary.append(f"🏥 診療科: {dept_count}件選択")
-                else:
-                    summary.append("🏥 診療科: 選択なし")
-            else:
-                summary.append("🏥 診療科: 全て")
-            
-            # 病棟情報
-            if config['ward_filter_mode'] == "特定病棟":
-                ward_count = len(config['selected_wards'])
-                if ward_count > 0:
-                    summary.append(f"🏨 病棟: {ward_count}件選択")
-                else:
-                    summary.append("🏨 病棟: 選択なし")
-            else:
-                summary.append("🏨 病棟: 全て")
-            
-            return " | ".join(summary)
-            
-        except Exception as e:
-            logger.error(f"get_filter_summary でエラー: {e}")
-            return "📋 フィルター情報取得エラー"
-    
-    def get_config(self):
-        """現在のフィルター設定を取得"""
-        return st.session_state.get(self.config_key)
-    
-    def validate_filters(self, df):
-        """フィルター設定の妥当性をチェック"""
-        config = st.session_state.get(self.config_key)
-        if not config:
-            return False, "フィルター設定が見つかりません"
-        
-        # 期間の妥当性チェック
-        if config['start_date'] > config['end_date']:
-            return False, "開始日が終了日より後になっています"
-        
-        # 特定診療科選択時のチェック
-        if config['dept_filter_mode'] == "特定診療科" and not config['selected_depts']:
-            return False, "特定診療科が選択されていますが、診療科が選択されていません"
-        
-        # 特定病棟選択時のチェック
-        if config['ward_filter_mode'] == "特定病棟" and not config['selected_wards']:
-            return False, "特定病棟が選択されていますが、病棟が選択されていません"
-        
-        return True, "フィルター設定は有効です"
-
-# グローバルインスタンス
-filter_manager = UnifiedFilterManager()
-
-# 外部関数（既存コードとの互換性のため）
-def create_unified_filter_sidebar(df):
-    """統一フィルターサイドバーを作成（外部関数）"""
-    return filter_manager.create_unified_sidebar(df)
-
-def create_unified_filter_status_card(df):
-    """統一フィルター状態カードを作成（新機能）"""
-    return filter_manager.create_filter_status_card(df)
+    # フィルタークリアボタン
+    if st.sidebar.button("🗑️ フィルタークリア", use_container_width=True):
+        reset_filter_settings()
+        initialize_filter_session_state(df)
+        st.rerun()
 
 def apply_unified_filters(df):
-    """統一フィルターを適用（外部関数）"""
-    return filter_manager.apply_filters(df)
+    """統一フィルターをデータフレームに適用"""
+    
+    if df is None or df.empty:
+        return df
+    
+    try:
+        filtered_df = df.copy()
+        
+        # 期間フィルターの適用
+        if '日付' in filtered_df.columns:
+            start_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['start_date'])
+            end_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['end_date'])
+            
+            if start_date and end_date:
+                filtered_df['日付'] = pd.to_datetime(filtered_df['日付'])
+                start_datetime = pd.to_datetime(start_date)
+                end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                
+                filtered_df = filtered_df[
+                    (filtered_df['日付'] >= start_datetime) & 
+                    (filtered_df['日付'] <= end_datetime)
+                ]
+                
+                logger.info(f"期間フィルター適用: {start_date} ～ {end_date}, 結果: {len(filtered_df)}行")
+        
+        # 診療科フィルターの適用
+        if '診療科名' in filtered_df.columns:
+            selected_depts = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['departments'], [])
+            if selected_depts:
+                filtered_df = filtered_df[filtered_df['診療科名'].astype(str).isin(selected_depts)]
+                logger.info(f"診療科フィルター適用: {len(selected_depts)}科選択, 結果: {len(filtered_df)}行")
+        
+        # 病棟フィルターの適用
+        if '病棟コード' in filtered_df.columns:
+            selected_wards = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['wards'], [])
+            if selected_wards:
+                filtered_df = filtered_df[filtered_df['病棟コード'].astype(str).isin(selected_wards)]
+                logger.info(f"病棟フィルター適用: {len(selected_wards)}病棟選択, 結果: {len(filtered_df)}行")
+        
+        return filtered_df
+        
+    except Exception as e:
+        logger.error(f"統一フィルター適用エラー: {e}", exc_info=True)
+        st.error(f"フィルター適用中にエラーが発生しました: {e}")
+        return df
 
-def get_unified_filter_summary():
-    """統一フィルターのサマリーを取得（外部関数）"""
-    return filter_manager.get_filter_summary()
-
-def initialize_unified_filters(df):
-    """統一フィルターを初期化（外部関数）"""
-    return filter_manager.initialize_default_filters(df)
-
-def get_unified_filter_config():
-    """統一フィルターの設定を取得（外部関数）"""
-    return filter_manager.get_config()
+def create_unified_filter_status_card(df):
+    """統一フィルターの状態表示カードとフィルター適用"""
+    
+    if df is None or df.empty:
+        st.warning("⚠️ データが読み込まれていません")
+        return df, {}
+    
+    # セッション状態の初期化
+    initialize_filter_session_state(df)
+    
+    # フィルターの適用
+    filtered_df = apply_unified_filters(df)
+    
+    # フィルター設定の取得
+    period_mode = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['period_mode'], '全期間')
+    start_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['start_date'])
+    end_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['end_date'])
+    selected_depts = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['departments'], [])
+    selected_wards = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['wards'], [])
+    
+    # フィルター設定の構成
+    filter_config = {
+        'period_mode': period_mode,
+        'start_date': start_date,
+        'end_date': end_date,
+        'departments': selected_depts,
+        'wards': selected_wards,
+        'original_count': len(df),
+        'filtered_count': len(filtered_df)
+    }
+    
+    # 状態表示カードの作成
+    with st.container():
+        st.markdown("### 🔍 適用中のフィルター")
+        
+        col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+        
+        with col1:
+            # 期間情報
+            if period_mode == 'カスタム期間' and start_date and end_date:
+                period_text = f"📅 {start_date} ～ {end_date}"
+            else:
+                period_text = f"📅 {period_mode}"
+            st.metric("期間", period_text)
+        
+        with col2:
+            # データ件数
+            filter_rate = (len(filtered_df) / len(df) * 100) if len(df) > 0 else 0
+            st.metric(
+                "データ件数", 
+                f"{len(filtered_df):,}行",
+                f"{filter_rate:.1f}% ({len(df):,}行中)"
+            )
+        
+        with col3:
+            # 診療科情報
+            if '診療科名' in df.columns:
+                total_depts = df['診療科名'].nunique()
+                selected_dept_count = len(selected_depts)
+                if selected_dept_count == total_depts:
+                    dept_text = "全科"
+                else:
+                    dept_text = f"{selected_dept_count}/{total_depts}科"
+                st.metric("診療科", dept_text)
+        
+        with col4:
+            # 病棟情報
+            if '病棟コード' in df.columns:
+                total_wards = df['病棟コード'].nunique()
+                selected_ward_count = len(selected_wards)
+                if selected_ward_count == total_wards:
+                    ward_text = "全病棟"
+                else:
+                    ward_text = f"{selected_ward_count}/{total_wards}病棟"
+                st.metric("病棟", ward_text)
+    
+    # データ不足の警告
+    if len(filtered_df) == 0:
+        st.error("⚠️ フィルター条件に該当するデータがありません。条件を見直してください。")
+    elif len(filtered_df) < 100:
+        st.warning(f"⚠️ フィルター適用後のデータが少なくなっています（{len(filtered_df)}行）。分析結果の精度が低下する可能性があります。")
+    
+    # フィルター適用状態をセッション状態に記録
+    st.session_state[UNIFIED_FILTER_CONFIG['session_keys']['applied']] = True
+    
+    return filtered_df, filter_config
 
 def validate_unified_filters(df):
-    """統一フィルターの妥当性をチェック（外部関数）"""
-    return filter_manager.validate_filters(df)
+    """統一フィルターの妥当性チェック"""
+    
+    if df is None or df.empty:
+        return False, "データが読み込まれていません"
+    
+    try:
+        # 基本的な妥当性チェック
+        start_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['start_date'])
+        end_date = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['end_date'])
+        
+        if start_date and end_date and start_date > end_date:
+            return False, "開始日が終了日より後に設定されています"
+        
+        # フィルター適用後のデータ件数チェック
+        filtered_df = apply_unified_filters(df)
+        if len(filtered_df) == 0:
+            return False, "フィルター条件に該当するデータがありません"
+        
+        return True, "フィルター設定は有効です"
+        
+    except Exception as e:
+        logger.error(f"フィルター妥当性チェックエラー: {e}", exc_info=True)
+        return False, f"フィルター設定の検証中にエラーが発生しました: {e}"
+
+def get_unified_filter_summary():
+    """統一フィルターの設定概要を取得"""
+    
+    try:
+        period_mode = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['period_mode'], '設定なし')
+        selected_depts = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['departments'], [])
+        selected_wards = st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['wards'], [])
+        
+        summary_parts = [f"期間: {period_mode}"]
+        
+        if selected_depts:
+            summary_parts.append(f"診療科: {len(selected_depts)}科選択")
+        
+        if selected_wards:
+            summary_parts.append(f"病棟: {len(selected_wards)}病棟選択")
+        
+        return " | ".join(summary_parts)
+        
+    except Exception as e:
+        logger.error(f"フィルター概要取得エラー: {e}", exc_info=True)
+        return "フィルター設定の取得に失敗"
+
+def get_unified_filter_config():
+    """統一フィルターの詳細設定を取得"""
+    
+    try:
+        return {
+            'period_mode': st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['period_mode']),
+            'start_date': st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['start_date']),
+            'end_date': st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['end_date']),
+            'departments': st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['departments'], []),
+            'wards': st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['wards'], []),
+            'applied': st.session_state.get(UNIFIED_FILTER_CONFIG['session_keys']['applied'], False)
+        }
+    except Exception as e:
+        logger.error(f"フィルター設定取得エラー: {e}", exc_info=True)
+        return {}
+
+# デバッグ用関数
+def debug_filter_state():
+    """デバッグ用：フィルター状態の表示"""
+    
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("🔧 デバッグ情報"):
+        st.write("**セッション状態:**")
+        for key, session_key in UNIFIED_FILTER_CONFIG['session_keys'].items():
+            value = st.session_state.get(session_key, "未設定")
+            st.write(f"{key}: {value}")
+        
+        if st.button("🗑️ 全フィルター状態クリア", key="debug_clear_all"):
+            for session_key in UNIFIED_FILTER_CONFIG['session_keys'].values():
+                if session_key in st.session_state:
+                    del st.session_state[session_key]
+            st.rerun()

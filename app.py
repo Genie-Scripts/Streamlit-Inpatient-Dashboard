@@ -24,9 +24,9 @@ from unified_filters import (
     create_unified_filter_status_card,
     apply_unified_filters,
     get_unified_filter_summary,
-    initialize_unified_filters,
     get_unified_filter_config,
-    validate_unified_filters
+    validate_unified_filters,
+    initialize_filter_session_state  # 追加
 )
 
 # データ永続化機能のインポート
@@ -65,48 +65,58 @@ except ImportError as e:
     st.stop()
 
 def create_main_filter_interface(df):
-    """メイン画面上部のフィルターインターフェース（キー重複修正版）"""
+    """メイン画面上部のフィルターインターフェース（修正版）"""
     if df is None or df.empty:
         st.warning("📊 データが読み込まれていません - データ処理タブでデータをアップロードしてください")
         return None, None
     
-    st.markdown("### 🔍 分析フィルター")
+    # セッション状態の初期化
+    initialize_filter_session_state(df)
     
-    # 統一フィルター状態カードの表示
-    filtered_df, filter_config = create_unified_filter_status_card(df)
+    st.markdown("### 🔍 分析フィルター状態")
     
-    if filter_config is None:
-        st.info("📋 フィルター未設定 - サイドバーで設定してください")
-        return df, None
-    
-    # フィルター妥当性チェック
-    is_valid, validation_message = validate_unified_filters(df)
-    if not is_valid:
-        st.error(f"❌ フィルター設定エラー: {validation_message}")
-        return df, None
-    
-    # フィルター適用結果の確認
-    if filtered_df is None or filtered_df.empty:
-        st.warning("⚠️ 選択されたフィルター条件にマッチするデータがありません")
-        st.info("💡 フィルター条件を調整してください：")
+    try:
+        # 統一フィルターの適用と状態表示
+        filtered_df, filter_config = create_unified_filter_status_card(df)
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("• より広い期間を選択")
-            st.write("• 診療科・病棟の選択を見直し")
-        with col2:
-            if st.button("🔄 フィルターをリセット", key="main_filter_reset"):
-                # フィルターリセット処理
-                from unified_filters import filter_manager
-                filter_manager._reset_filters()
-                st.rerun()
+        if filter_config is None:
+            st.info("📋 フィルター未設定 - サイドバーで設定してください")
+            return df, None
         
-        return df, filter_config
-    
-    # 成功時の表示
-    st.success(f"✅ フィルター適用完了 - {len(filtered_df):,}件のデータで分析を実行します")
-    
-    return filtered_df, filter_config
+        # フィルター妥当性チェック
+        is_valid, validation_message = validate_unified_filters(df)
+        if not is_valid:
+            st.error(f"❌ フィルター設定エラー: {validation_message}")
+            # エラー時でも元データを返す
+            return df, filter_config
+        
+        # フィルター適用結果の確認
+        if filtered_df is None or filtered_df.empty:
+            st.warning("⚠️ 選択されたフィルター条件にマッチするデータがありません")
+            
+            # 解決案の提示
+            with st.expander("💡 解決方法", expanded=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**フィルター条件を調整：**")
+                    st.write("• より広い期間を選択")
+                    st.write("• 診療科・病棟の選択を追加")
+                with col2:
+                    st.write("**現在の設定：**")
+                    filter_summary = get_unified_filter_summary()
+                    st.write(f"• {filter_summary}")
+            
+            return df, filter_config
+        
+        # 成功時の表示
+        st.success(f"✅ フィルター適用完了 - {len(filtered_df):,}件のデータで分析します")
+        
+        return filtered_df, filter_config
+        
+    except Exception as e:
+        st.error(f"フィルター処理エラー: {e}")
+        # エラー時は元データを返す
+        return df, None
 
 def calculate_preset_period_dates(df, preset_period):
     """プリセット期間から具体的な日付を計算 (pd.Timestampを返すように変更)"""
@@ -485,32 +495,33 @@ def create_sidebar_data_settings():
                     st.write(f"  • {name}: {size}")
 
 def create_sidebar():
-    """サイドバーの設定UI（統一フィルター対応版・重複修正）"""
+    """サイドバーの設定UI（フィルター重複修正版）"""
+    
     # データ設定セクション
     create_sidebar_data_settings()
     
     st.sidebar.markdown("---")
     
-    # 統一フィルター設定（データが読み込まれている場合）
-    # ★ 重要：ここで一度だけ統一フィルターを作成
+    # 統一フィルター設定（データが読み込まれている場合のみ）
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         df = st.session_state.get('df')
         
-        # 統一フィルターの初期化
-        initialize_unified_filters(df)
-        
-        # 統一フィルターサイドバーの作成（一度だけ）
-        filter_config = create_unified_filter_sidebar(df)
-        
-        if filter_config is None:
-            st.sidebar.error("フィルター設定でエラーが発生しました")
+        try:
+            # ★ 重要：サイドバーでフィルターUIを一度だけ作成
+            create_unified_filter_sidebar(df)
+            
+        except Exception as e:
+            st.sidebar.error(f"フィルター設定エラー: {e}")
+            # デバッグ情報を表示
+            if st.sidebar.checkbox("🔧 エラー詳細を表示"):
+                st.sidebar.exception(e)
     else:
         st.sidebar.info("📊 データ読み込み後にフィルター設定が利用できます")
     
     st.sidebar.markdown("---")
     st.sidebar.header("⚙️ 基本設定")
     
-    # 基本設定セクション
+    # 基本設定セクション（既存のコードをそのまま使用）
     with st.sidebar.expander("🏥 基本設定", expanded=True):
         # 設定値の自動読み込み
         if 'settings_loaded' not in st.session_state:
@@ -586,7 +597,7 @@ def create_sidebar():
             else:
                 st.error("設定保存失敗")
 
-    # 目標値設定セクション
+    # 目標値設定セクション（既存のコードをそのまま使用）
     with st.sidebar.expander("🎯 目標値設定", expanded=True):
         # 目標値の計算
         monthly_target_patient_days = st.number_input(
@@ -628,7 +639,7 @@ def create_sidebar():
             avg_length_of_stay > 0 and avg_admission_fee > 0)
 
 def create_management_dashboard_tab():
-    """経営ダッシュボードタブ（統一フィルター対応版・重複修正）"""
+    """経営ダッシュボードタブ（修正版）"""
     st.header("💰 経営ダッシュボード")
     
     if 'df' not in st.session_state or st.session_state['df'] is None:
@@ -637,18 +648,27 @@ def create_management_dashboard_tab():
     
     df = st.session_state['df']
     
-    # メインフィルターインターフェース
+    # ★ 重要：メインフィルターインターフェースを一度だけ呼び出し
     filtered_df, filter_config = create_main_filter_interface(df)
     
-    if filter_config is None or filtered_df is None or filtered_df.empty:
-        st.info("💡 フィルター設定を完了してから分析を開始してください")
+    if filter_config is None:
+        st.info("💡 サイドバーでフィルター設定を行ってから分析を開始してください")
+        return
+    
+    if filtered_df is None or filtered_df.empty:
+        st.warning("⚠️ フィルター条件に該当するデータがありません")
         return
     
     # フィルター適用済みデータでの分析
     try:
-        start_date = filter_config['start_date']
-        end_date = filter_config['end_date']
-        period_days = (end_date - start_date).days + 1
+        # フィルター設定から日付を取得
+        start_date = filter_config.get('start_date')
+        end_date = filter_config.get('end_date')
+        
+        if start_date and end_date:
+            period_days = (end_date - start_date).days + 1
+        else:
+            period_days = len(filtered_df)
         
         # KPI計算
         total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
@@ -693,6 +713,9 @@ def create_management_dashboard_tab():
         
     except Exception as e:
         st.error(f"ダッシュボード表示エラー: {e}")
+        # デバッグ情報
+        if st.checkbox("🔧 エラー詳細を表示"):
+            st.exception(e)
         
 def calculate_dashboard_metrics(df, selected_period):
     """フィルタリング済みデータでのダッシュボードメトリクス計算"""
@@ -851,7 +874,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         )
 
 def main():
-    """メイン関数（統一フィルター対応版・キー重複修正）"""
+    """メイン関数（修正版）"""
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
         st.session_state['data_processed'] = False
@@ -897,7 +920,7 @@ def main():
             "📊 データ処理"
         ])
 
-    # データ処理済みの場合のみ最初のタブ群を有効化
+    # データ処理済みの場合のみタブ群を有効化
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         
         # 経営ダッシュボードタブ
@@ -906,6 +929,8 @@ def main():
                 create_management_dashboard_tab()
             except Exception as e:
                 st.error(f"経営ダッシュボードでエラーが発生しました: {str(e)}")
+                if st.checkbox("🔧 エラー詳細を表示"):
+                    st.exception(e)
         
         # 予測分析タブ（利用可能な場合）
         if FORECAST_AVAILABLE:
@@ -928,45 +953,130 @@ def main():
                         st.info("💡 フィルター設定を完了してから予測分析を開始してください")
                 except Exception as e:
                     st.error(f"予測分析でエラーが発生しました: {str(e)}")
+                    if st.checkbox("🔧 予測分析エラー詳細", key="forecast_error_detail"):
+                        st.exception(e)
             
-            # 詳細分析タブ（★ 重要：ここでは統一フィルターを再作成しない）
+            # 詳細分析タブ
             with tabs[2]:
                 try:
-                    create_detailed_analysis_tab()
+                    # ★ 重要：他のタブでは統一フィルターを再作成せず、状態表示のみ
+                    df = st.session_state.get('df')
+                    filtered_df, filter_config = create_main_filter_interface(df)
+                    
+                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
+                        # フィルター済みデータで詳細分析を実行
+                        original_df = st.session_state.get('df')
+                        st.session_state['df'] = filtered_df
+                        
+                        create_detailed_analysis_tab()
+                        
+                        # 元のデータに戻す
+                        st.session_state['df'] = original_df
+                    else:
+                        st.info("💡 フィルター設定を完了してから詳細分析を開始してください")
+                        
                 except Exception as e:
                     st.error(f"詳細分析でエラーが発生しました: {str(e)}")
+                    if st.checkbox("🔧 詳細分析エラー詳細", key="detail_error_detail"):
+                        st.exception(e)
             
             # データテーブルタブ
             with tabs[3]:
                 try:
-                    create_data_tables_tab()
+                    # フィルター適用
+                    df = st.session_state.get('df')
+                    filtered_df, filter_config = create_main_filter_interface(df)
+                    
+                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
+                        original_df = st.session_state.get('df')
+                        st.session_state['df'] = filtered_df
+                        
+                        create_data_tables_tab()
+                        
+                        st.session_state['df'] = original_df
+                    else:
+                        st.info("💡 フィルター設定を完了してからデータテーブルを表示してください")
+                        
                 except Exception as e:
                     st.error(f"データテーブルでエラーが発生しました: {str(e)}")
+                    if st.checkbox("🔧 データテーブルエラー詳細", key="table_error_detail"):
+                        st.exception(e)
             
             # 出力・予測タブ
             with tabs[4]:
                 try:
-                    create_pdf_output_tab()
+                    # フィルター適用
+                    df = st.session_state.get('df')
+                    filtered_df, filter_config = create_main_filter_interface(df)
+                    
+                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
+                        original_df = st.session_state.get('df')
+                        st.session_state['df'] = filtered_df
+                        
+                        create_pdf_output_tab()
+                        
+                        st.session_state['df'] = original_df
+                    else:
+                        st.info("💡 フィルター設定を完了してから出力機能を使用してください")
+                        
                 except Exception as e:
                     st.error(f"出力機能でエラーが発生しました: {str(e)}")
+                    if st.checkbox("🔧 出力エラー詳細", key="output_error_detail"):
+                        st.exception(e)
         
         else:
-            # 予測機能なしの場合（同様に統一フィルター対応）
+            # 予測機能なしの場合
             with tabs[1]:
                 try:
-                    create_detailed_analysis_tab()
+                    df = st.session_state.get('df')
+                    filtered_df, filter_config = create_main_filter_interface(df)
+                    
+                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
+                        original_df = st.session_state.get('df')
+                        st.session_state['df'] = filtered_df
+                        
+                        create_detailed_analysis_tab()
+                        
+                        st.session_state['df'] = original_df
+                    else:
+                        st.info("💡 フィルター設定を完了してから詳細分析を開始してください")
+                        
                 except Exception as e:
                     st.error(f"詳細分析でエラーが発生しました: {str(e)}")
             
             with tabs[2]:
                 try:
-                    create_data_tables_tab()
+                    df = st.session_state.get('df')
+                    filtered_df, filter_config = create_main_filter_interface(df)
+                    
+                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
+                        original_df = st.session_state.get('df')
+                        st.session_state['df'] = filtered_df
+                        
+                        create_data_tables_tab()
+                        
+                        st.session_state['df'] = original_df
+                    else:
+                        st.info("💡 フィルター設定を完了してからデータテーブルを表示してください")
+                        
                 except Exception as e:
                     st.error(f"データテーブルでエラーが発生しました: {str(e)}")
             
             with tabs[3]:
                 try:
-                    create_pdf_output_tab()
+                    df = st.session_state.get('df')
+                    filtered_df, filter_config = create_main_filter_interface(df)
+                    
+                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
+                        original_df = st.session_state.get('df')
+                        st.session_state['df'] = filtered_df
+                        
+                        create_pdf_output_tab()
+                        
+                        st.session_state['df'] = original_df
+                    else:
+                        st.info("💡 フィルター設定を完了してから出力機能を使用してください")
+                        
                 except Exception as e:
                     st.error(f"出力機能でエラーが発生しました: {str(e)}")
         
@@ -980,7 +1090,7 @@ def main():
                 st.error(f"データ処理タブでエラーが発生しました: {str(e)}")
     
     else:
-        # データ未処理の場合（従来通り）
+        # データ未処理の場合
         for i in range(len(tabs) - 1):
             with tabs[i]:
                 st.info("📊 データを読み込み後に利用可能になります。")
