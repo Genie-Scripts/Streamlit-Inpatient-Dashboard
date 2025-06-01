@@ -60,7 +60,7 @@ except ImportError as e:
     get_unified_filter_summary = lambda: "フィルター情報取得不可"
     initialize_unified_filters = lambda df: None
     get_unified_filter_config = lambda: {}
-    validate_unified_filters = lambda df: (False, "フィルター検証機能利用不可"))
+    validate_unified_filters = lambda df: (False, "フィルター検証機能利用不可")
 
 def main():
     if 'app_initialized' not in st.session_state:
