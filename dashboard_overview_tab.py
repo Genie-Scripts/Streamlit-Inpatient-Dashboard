@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 # from datetime import datetime # display_unified_metrics_layout_colorized では直接不要
+
 # dashboard_charts.py からのインポートは維持
 try:
     from dashboard_charts import (
@@ -23,48 +24,48 @@ except ImportError:
     analyze_kpi_insights = None
     get_kpi_status = None
 
-# config.py から定数をインポート (display_unified_metrics_layout_colorizedで必要)
-from config import DEFAULT_OCCUPANCY_RATE, DEFAULT_ADMISSION_FEE, DEFAULT_TARGET_PATIENT_DAYS, APP_VERSION, NUMBER_FORMAT, DEFAULT_TOTAL_BEDS
+# config.py から定数をインポート
+from config import (
+    DEFAULT_OCCUPANCY_RATE,
+    DEFAULT_ADMISSION_FEE,
+    DEFAULT_TARGET_PATIENT_DAYS,
+    APP_VERSION,
+    NUMBER_FORMAT,
+    DEFAULT_TOTAL_BEDS,
+    DEFAULT_AVG_LENGTH_OF_STAY  # ★★★ この行を追加 ★★★
+)
 
 
 # ===== 新しく配置する関数 =====
 def format_number_with_config(value, unit="", format_type="default"):
-    """設定に基づいた数値フォーマット"""
-    if pd.isna(value) or value is None: # None もチェック
-        return f"0{unit}" if unit else "0" # 単位がない場合は0のみ
-    if isinstance(value, str): # 文字列の場合は数値変換を試みる
+    # ... (既存のコード) ...
+    if pd.isna(value) or value is None:
+        return f"0{unit}" if unit else "0"
+    if isinstance(value, str):
         try:
             value = float(value)
         except ValueError:
-            return str(value) # 変換できなければそのまま文字列を返す
-
-    # 0 の場合の処理を修正
+            return str(value)
     if value == 0:
         return f"0{unit}" if unit else "0"
-
     if format_type == "currency":
         return f"{value:,.0f}{NUMBER_FORMAT['currency_symbol']}"
     elif format_type == "percentage":
         return f"{value:.1f}{NUMBER_FORMAT['percentage_symbol']}"
-    else: # default and other cases
-        # unit が指定されていればそれを使い、なければ空文字列
+    else:
         return f"{value:,.1f}{unit}" if isinstance(value, float) else f"{value:,.0f}{unit}"
 
 
 def display_unified_metrics_layout_colorized(metrics, selected_period_info):
-    """統一メトリクスレイアウトの表示 (dashboard_overview_tab.py に配置)"""
+    # ... (既存のコード) ...
     if not metrics:
         st.warning("表示するメトリクスデータがありません。")
         return
 
-    # 期間情報表示
     st.info(f"📊 平均値計算期間: {selected_period_info}")
     st.caption("※延べ在院日数、病床利用率などは、それぞれの指標の計算ロジックに基づいた期間の値を表示します。")
 
-    # 主要指標セクション
     st.markdown("### 📊 主要指標")
-    # st.markdown('<div class="management-dashboard-kpi-card">', unsafe_allow_html=True) # このdivはCSSで定義されていれば有効
-
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -82,60 +83,49 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
         target_occupancy = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE) * 100
         occupancy_delta = bed_occupancy_rate_val - target_occupancy if bed_occupancy_rate_val is not None else 0
         delta_color = "normal" if abs(occupancy_delta) <= 5 else ("inverse" if occupancy_delta < -5 else "off")
-
-
         st.metric(
             "病床利用率",
             f"{bed_occupancy_rate_val:.1f}%" if bed_occupancy_rate_val is not None else "N/A",
             delta=f"{occupancy_delta:+.1f}% (対目標{target_occupancy:.0f}%)" if bed_occupancy_rate_val is not None else None,
             delta_color=delta_color,
-            help="選択期間の日平均在院患者数と基本設定の総病床数から算出" # ヘルプテキスト修正
+            help="選択期間の日平均在院患者数と基本設定の総病床数から算出"
         )
 
     with col3:
         avg_los_val = metrics.get('avg_los', 0)
-        # 標準的な目標在院日数をconfigから取得できるようにするとより良い
-        avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
+        avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY) # ここで参照
         st.metric(
             "平均在院日数",
             f"{avg_los_val:.1f}日",
-            delta=f"目標: {avg_length_of_stay_target:.1f}日", # 目標値を表示
+            delta=f"目標: {avg_length_of_stay_target:.1f}日",
             help=f"{selected_period_info}の平均在院日数"
         )
-
-    # st.markdown('</div>', unsafe_allow_html=True) # 上記divに対応
+    # ... (以降のコードは変更なし) ...
     st.markdown("---")
-
-    # 収益指標セクション
-    st.markdown("### 💰 収益関連指標") # 「収益指標」から「収益関連指標」へ変更
-    col_rev1, col_rev2, col_rev3 = st.columns(3) # 変数名変更
-
+    st.markdown("### 💰 収益関連指標")
+    col_rev1, col_rev2, col_rev3 = st.columns(3)
     with col_rev1:
-        estimated_revenue_val = metrics.get('estimated_revenue', 0) # 'estimated_revenue_30d' から変更
+        estimated_revenue_val = metrics.get('estimated_revenue', 0)
         avg_admission_fee_val = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
         st.metric(
-            f"推計収益 ({selected_period_info})", # 期間を明記
+            f"推計収益 ({selected_period_info})",
             format_number_with_config(estimated_revenue_val, format_type="currency"),
             delta=f"単価: {avg_admission_fee_val:,}円/日",
             help=f"{selected_period_info}の推計収益"
         )
-
     with col_rev2:
-        total_patient_days_val = metrics.get('total_patient_days', 0) # 'total_patient_days_30d' から変更
+        total_patient_days_val = metrics.get('total_patient_days', 0)
         monthly_target_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS)
-        # 達成率は月間目標日数と、選択期間の日数に基づいて按分計算する
-        days_in_selected_period = metrics.get('period_days', 1) # 0除算を避ける
-        proportional_target_days = (monthly_target_days / 30.44) * days_in_selected_period if days_in_selected_period > 0 else 0 # 30.44は月の平均日数
+        days_in_selected_period = metrics.get('period_days', 1)
+        proportional_target_days = (monthly_target_days / 30.44) * days_in_selected_period if days_in_selected_period > 0 else 0
         achievement_days = (total_patient_days_val / proportional_target_days) * 100 if proportional_target_days > 0 else 0
-
         st.metric(
-            f"延べ在院日数 ({selected_period_info})", # 期間を明記
+            f"延べ在院日数 ({selected_period_info})",
             format_number_with_config(total_patient_days_val, "人日"),
             delta=f"対期間目標: {achievement_days:.1f}%" if proportional_target_days > 0 else "目標計算不可",
             delta_color="normal" if achievement_days >= 95 else "inverse",
             help=f"{selected_period_info}の延べ在院日数。目標は月間目標を選択期間日数で按分して計算。"
         )
-
     with col_rev3:
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
         period_days_val = metrics.get('period_days', 0)
@@ -145,34 +135,24 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             delta=f"期間: {period_days_val}日間",
             help=f"{selected_period_info}の日平均新入院患者数"
         )
-
-    # 詳細情報セクション
-    with st.expander("📋 詳細データと設定値 (経営ダッシュボード)", expanded=False): # キー名変更
+    with st.expander("📋 詳細データと設定値 (経営ダッシュボード)", expanded=False):
         detail_col1, detail_col2, detail_col3 = st.columns(3)
-
         with detail_col1:
             st.markdown("**🏥 基本設定**")
             st.write(f"• 総病床数: {metrics.get('total_beds', st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)):,}床")
             st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE):.1%}")
             st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE):,}円/日")
-            st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY):.1f}日")
-
-
+            st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY):.1f}日") # ここも参照
         with detail_col2:
             st.markdown("**📅 期間情報**")
             st.write(f"• 計算対象期間: {selected_period_info}")
-            # st.write(f"• 固定値計算: 直近30日") # これは廃止または説明変更
             st.write(f"• アプリバージョン: v{APP_VERSION}")
-
         with detail_col3:
-            st.markdown("**🎯 月間目標値**") # 「目標値」から「月間目標値」へ
+            st.markdown("**🎯 月間目標値**")
             st.write(f"• 延べ在院日数: {format_number_with_config(st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), '人日')}")
-            # target_revenue は metrics 辞書からではなく、基本設定と月間目標から再計算
             target_rev = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
             st.write(f"• 推定収益: {format_number_with_config(target_rev, format_type='currency')}")
             st.write(f"• 新入院患者数: {st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS):,}人")
-
-# ===== ここまでが新しく配置する関数 =====
 
 
 def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent): # target_occupancy_setting を % に変更

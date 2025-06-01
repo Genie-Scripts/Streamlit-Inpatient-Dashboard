@@ -63,8 +63,6 @@ except ImportError as e:
     validate_unified_filters = lambda df: (False, "フィルター検証機能利用不可")
     display_unified_metrics_layout_colorized = lambda metrics, period_info: st.error("KPI表示機能利用不可") # ★★★ フォールバック追加 ★★★
 
-
-
 def calculate_preset_period_dates(df, preset_period):
     if df is None or df.empty or '日付' not in df.columns:
         today = pd.Timestamp.now().normalize()
