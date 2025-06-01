@@ -26,6 +26,7 @@ from unified_filters import (
     get_unified_filter_summary,
     get_unified_filter_config,
     validate_unified_filters,
+    initialize_filter_session_state  # この行を追加
 )
 
 # データ永続化機能のインポート
