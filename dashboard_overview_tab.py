@@ -2,7 +2,7 @@
 
 import streamlit as st
 import pandas as pd
-# from datetime import datetime # display_unified_metrics_layout_colorized では直接不要
+from datetime import timedelta # pd.Timedelta のために必要
 
 # dashboard_charts.py からのインポートは維持
 try:
@@ -34,13 +34,13 @@ from config import (
     APP_VERSION,
     NUMBER_FORMAT,
     DEFAULT_TOTAL_BEDS,
-    DEFAULT_AVG_LENGTH_OF_STAY  # ★★★ この行を追加 ★★★
+    DEFAULT_AVG_LENGTH_OF_STAY,
+    DEFAULT_TARGET_ADMISSIONS  # ★★★ この行が重要 ★★★
 )
 
 
 # ===== 新しく配置する関数 =====
 def format_number_with_config(value, unit="", format_type="default"):
-    # ... (既存のコード) ...
     if pd.isna(value) or value is None:
         return f"0{unit}" if unit else "0"
     if isinstance(value, str):
@@ -50,6 +50,7 @@ def format_number_with_config(value, unit="", format_type="default"):
             return str(value)
     if value == 0:
         return f"0{unit}" if unit else "0"
+
     if format_type == "currency":
         return f"{value:,.0f}{NUMBER_FORMAT['currency_symbol']}"
     elif format_type == "percentage":
@@ -59,7 +60,6 @@ def format_number_with_config(value, unit="", format_type="default"):
 
 
 def display_unified_metrics_layout_colorized(metrics, selected_period_info):
-    # ... (既存のコード) ...
     if not metrics:
         st.warning("表示するメトリクスデータがありません。")
         return
@@ -95,17 +95,18 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
 
     with col3:
         avg_los_val = metrics.get('avg_los', 0)
-        avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY) # ここで参照
+        avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
         st.metric(
             "平均在院日数",
             f"{avg_los_val:.1f}日",
             delta=f"目標: {avg_length_of_stay_target:.1f}日",
             help=f"{selected_period_info}の平均在院日数"
         )
-    # ... (以降のコードは変更なし) ...
     st.markdown("---")
+
     st.markdown("### 💰 収益関連指標")
     col_rev1, col_rev2, col_rev3 = st.columns(3)
+
     with col_rev1:
         estimated_revenue_val = metrics.get('estimated_revenue', 0)
         avg_admission_fee_val = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
@@ -115,6 +116,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             delta=f"単価: {avg_admission_fee_val:,}円/日",
             help=f"{selected_period_info}の推計収益"
         )
+
     with col_rev2:
         total_patient_days_val = metrics.get('total_patient_days', 0)
         monthly_target_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS)
@@ -128,6 +130,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             delta_color="normal" if achievement_days >= 95 else "inverse",
             help=f"{selected_period_info}の延べ在院日数。目標は月間目標を選択期間日数で按分して計算。"
         )
+
     with col_rev3:
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
         period_days_val = metrics.get('period_days', 0)
@@ -137,6 +140,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             delta=f"期間: {period_days_val}日間",
             help=f"{selected_period_info}の日平均新入院患者数"
         )
+
     with st.expander("📋 詳細データと設定値 (経営ダッシュボード)", expanded=False):
         detail_col1, detail_col2, detail_col3 = st.columns(3)
         with detail_col1:
@@ -144,7 +148,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             st.write(f"• 総病床数: {metrics.get('total_beds', st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)):,}床")
             st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE):.1%}")
             st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE):,}円/日")
-            st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY):.1f}日") # ここも参照
+            st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY):.1f}日")
         with detail_col2:
             st.markdown("**📅 期間情報**")
             st.write(f"• 計算対象期間: {selected_period_info}")
@@ -154,9 +158,9 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             st.write(f"• 延べ在院日数: {format_number_with_config(st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), '人日')}")
             target_rev = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
             st.write(f"• 推定収益: {format_number_with_config(target_rev, format_type='currency')}")
-            st.write(f"• 新入院患者数: {st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS):,}人")
+            st.write(f"• 新入院患者数: {st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS):,}人") # ここで参照
 
-# ... (display_kpi_cards_only, display_trend_graphs_only, display_insights 関数の定義は変更なし) ...
+
 def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     if df is None or df.empty:
         st.warning("データが読み込まれていません。")
@@ -170,8 +174,9 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         return
     latest_date_in_df = df['日付'].max()
     start_30d = latest_date_in_df - pd.Timedelta(days=29)
-    df_30d = df[(df['日付'] >= start_30d) & (df['日付'] <= latest_date_in_df)]
-    kpis_30d = calculate_kpis(df_30d, start_30d, latest_date_in_df, total_beds=total_beds_setting) if not df_30d.empty else {}
+    end_30d = latest_date_in_df
+    df_30d = df[(df['日付'] >= start_30d) & (df['日付'] <= end_30d)]
+    kpis_30d = calculate_kpis(df_30d, start_30d, end_30d, total_beds=total_beds_setting) if not df_30d.empty else {}
     metrics_for_display = {
         'avg_daily_census': kpis_selected_period.get('avg_daily_census'),
         'avg_daily_census_30d': kpis_30d.get('avg_daily_census'),
