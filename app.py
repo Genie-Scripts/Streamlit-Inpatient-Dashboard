@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 import datetime
 import traceback
+# ===== ページ設定 (スクリプトの最初に移動) と config.py のインポート =====
+# config.py を st.set_page_config より先にインポート
+from config import *
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -12,7 +15,6 @@ st.set_page_config(
 )
 
 # ===== 設定値とスタイルの読み込み =====
-from config import *
 from style import inject_global_css
 from utils import initialize_all_mappings
 
