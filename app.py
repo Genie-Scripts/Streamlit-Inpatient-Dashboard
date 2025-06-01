@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np # 必要に応じて
 import plotly.express as px # 必要に応じて
 import plotly.graph_objects as go # 必要に応じて
+import traceback # ★★★ この行を追加 ★★★
 from plotly.subplots import make_subplots # 必要に応じて
 import datetime
 # try:

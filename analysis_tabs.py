@@ -11,6 +11,7 @@ import time
 import hashlib
 import gc
 import logging
+import traceback # NameError 解消のため追加
 
 # 統一フィルター関連のインポート
 from unified_filters import (
@@ -76,21 +77,30 @@ def create_detailed_analysis_tab():
         st.error("分析対象のデータがありません。")
         return
 
-    if get_unified_filter_config is None:
+    if get_unified_filter_config is None: # unified_filters.py の関数が利用可能かチェック
         st.error("統一フィルター機能が利用できません。unified_filters.py を確認してください。")
         return
 
-    initialize_unified_filters(df)
-    filter_config = create_unified_filter_sidebar(df)
-    if filter_config is None:
-        return
+    # initialize_unified_filters(df) # これは app.py の create_sidebar で実行される想定
+    # filter_config = create_unified_filter_sidebar(df) # ★★★ この行を削除 ★★★
+                                                      # サイドバーのフィルターUIは app.py で一度だけ描画する
 
-    is_valid, validation_message = validate_unified_filters(df)
+    # 現在のフィルター設定をセッションから取得する
+    filter_config = get_unified_filter_config()
+    if filter_config is None:
+        # フィルターがまだ設定されていない場合（初回アクセスなど）
+        # app.py 側で initialize_unified_filters と create_unified_filter_sidebar が呼ばれているはずなので、
+        # 通常ここが None になることはない想定。もし None ならエラーとして扱うか、デフォルトを促す。
+        st.warning("分析フィルターがまだ設定されていません。サイドバーで設定してください。")
+        # return # 設定がない場合は処理を中断することも検討
+
+    # is_valid, validation_message = validate_unified_filters(df) # validate_unified_filters は df を引数に取らない
+    is_valid, validation_message = validate_unified_filters(st.session_state.get('df')) # df を渡す
     if not is_valid:
         st.error(f"フィルター設定エラー: {validation_message}")
         return
 
-    df_filtered = apply_unified_filters(df)
+    df_filtered = apply_unified_filters(df) # df はセッションから取得した元のdf
 
     if df_filtered.empty:
         filter_summary_on_empty = get_unified_filter_summary()
@@ -112,13 +122,17 @@ def create_detailed_analysis_tab():
     ])
 
     with los_tab:
-        create_los_analysis_section(df_filtered, filter_config, common_config)
+        # create_los_analysis_section(df_filtered, filter_config, common_config) # filter_config は get_unified_filter_config() で取得できる
+        create_los_analysis_section(df_filtered, get_unified_filter_config(), common_config)
+
 
     with weekday_tab:
-        create_weekday_analysis_section(df_filtered, filter_config, common_config)
+        # create_weekday_analysis_section(df_filtered, filter_config, common_config)
+        create_weekday_analysis_section(df_filtered, get_unified_filter_config(), common_config)
 
     with individual_tab:
-        create_individual_analysis_section(df_filtered, filter_config)
+        # create_individual_analysis_section(df_filtered, filter_config)
+        create_individual_analysis_section(df_filtered, get_unified_filter_config())
 
 def create_data_tables_tab():
     """データテーブルタブのメイン関数（統一フィルター対応版）"""
