@@ -541,40 +541,6 @@ def create_data_processing_tab(): #
             help="部門別の目標値データ（CSV形式）"
         )
 
-    if st.session_state.get('target_data') is not None:
-        with st.sidebar: # サイドバーに表示
-            st.markdown("---")
-            st.subheader("🎯 目標値ファイル状況")
-            st.success("✅ 目標値ファイル読み込み済み")
-            extracted_targets = st.session_state.get('extracted_targets')
-            if extracted_targets:
-                if extracted_targets.get('target_days') or extracted_targets.get('target_admissions'):
-                    st.success("✅ 目標値ファイルから取得:")
-                    if extracted_targets.get('target_days'):
-                        st.write(f"- 延べ在院日数目標: {extracted_targets['target_days']:,.0f}人日")
-                    if extracted_targets.get('target_admissions'):
-                        st.write(f"- 新入院患者数目標: {extracted_targets['target_admissions']:,.0f}人")
-                    if extracted_targets.get('used_pattern'):
-                        st.info(f"検索条件: {extracted_targets['used_pattern']}")
-                else:
-                    st.warning("⚠️ 目標値を抽出できませんでした")
-            with st.expander("🔍 目標値ファイル内容確認", expanded=False):
-                target_data_disp = st.session_state.get('target_data')
-                if target_data_disp is not None:
-                    st.write(f"**ファイル情報:** {target_data_disp.shape[0]}行 × {target_data_disp.shape[1]}列")
-                    st.write("**列名:**", list(target_data_disp.columns))
-                    st.dataframe(target_data_disp.head(), use_container_width=True)
-                    debug_info_disp = st.session_state.get('target_file_debug_info')
-                    if debug_info_disp and debug_info_disp.get('search_results'):
-                        st.write("**検索結果詳細:**")
-                        for keyword, results in debug_info_disp['search_results'].items():
-                            if results:
-                                st.write(f"「{keyword}」の検索結果:")
-                                for result in results:
-                                    st.write(f"  - {result['column']}: {result['matches']}件")
-                            else:
-                                st.write(f"「{keyword}」: 該当なし")
-
     if base_file_uploader:
         with st.expander("📋 固定ファイル列名確認", expanded=False):
             show_excel_column_info(base_file_uploader)
