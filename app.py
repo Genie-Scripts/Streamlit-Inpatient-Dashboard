@@ -26,7 +26,6 @@ from unified_filters import (
     get_unified_filter_summary,
     get_unified_filter_config,
     validate_unified_filters,
-    initialize_filter_session_state  # 追加
 )
 
 # データ永続化機能のインポート
@@ -495,7 +494,7 @@ def create_sidebar_data_settings():
                     st.write(f"  • {name}: {size}")
 
 def create_sidebar():
-    """サイドバーの設定UI（フィルター重複修正版）"""
+    """サイドバーの設定UI（修正版）"""
     
     # データ設定セクション
     create_sidebar_data_settings()
@@ -507,7 +506,10 @@ def create_sidebar():
         df = st.session_state.get('df')
         
         try:
-            # ★ 重要：サイドバーでフィルターUIを一度だけ作成
+            # ★ 修正：initialize_unified_filters を削除
+            # initialize_filter_session_state(df)  # 必要に応じて
+            
+            # サイドバーでフィルターUIを作成
             create_unified_filter_sidebar(df)
             
         except Exception as e:
@@ -521,7 +523,7 @@ def create_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.header("⚙️ 基本設定")
     
-    # 基本設定セクション（既存のコードをそのまま使用）
+    # 基本設定セクション（既存コードはそのまま）
     with st.sidebar.expander("🏥 基本設定", expanded=True):
         # 設定値の自動読み込み
         if 'settings_loaded' not in st.session_state:
@@ -597,7 +599,7 @@ def create_sidebar():
             else:
                 st.error("設定保存失敗")
 
-    # 目標値設定セクション（既存のコードをそのまま使用）
+    # 目標値設定セクション（既存コードはそのまま使用）
     with st.sidebar.expander("🎯 目標値設定", expanded=True):
         # 目標値の計算
         monthly_target_patient_days = st.number_input(
