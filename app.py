@@ -1,20 +1,10 @@
 import streamlit as st
-
-# ===== ページ設定（最初に実行）=====
-st.set_page_config(
-    page_title="入退院分析ダッシュボード",  # 一時的にハードコード
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
-
 try:
     import jpholiday
     JPHOLIDAY_AVAILABLE = True
@@ -28,38 +18,26 @@ from config import *
 from style import inject_global_css
 from utils import safe_date_filter, initialize_all_mappings
 
-# ===== 統一フィルター機能のインポート =====
-try:
-    from unified_filters import (
-        create_unified_filter_sidebar,
-        create_unified_filter_status_card,
-        apply_unified_filters,
-        get_unified_filter_summary,
-        get_unified_filter_config,
-        validate_unified_filters,
-        initialize_filter_session_state
-    )
-    UNIFIED_FILTERS_AVAILABLE = True
-except ImportError as e:
-    # インポートエラーは後で表示
-    UNIFIED_FILTERS_AVAILABLE = False
-    IMPORT_ERROR = str(e)
+# データ永続化機能のインポート
+from data_persistence import (
+    auto_load_data, save_data_to_file, load_data_from_file, 
+    get_data_info, delete_saved_data, get_file_sizes,
+    save_settings_to_file, load_settings_from_file,
+    get_backup_info, restore_from_backup
+)
 
-# ===== データ永続化機能のインポート =====
-try:
-    from data_persistence import (
-        auto_load_data, save_data_to_file, load_data_from_file, 
-        get_data_info, delete_saved_data, get_file_sizes,
-        save_settings_to_file, load_settings_from_file,
-        get_backup_info, restore_from_backup
-    )
-except ImportError as e:
-    DATA_PERSISTENCE_ERROR = str(e)
+# ページ設定
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon=APP_ICON,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # グローバルCSS適用
 inject_global_css(FONT_SCALE)
 
-# ===== カスタムモジュールのインポート =====
+# カスタムモジュールのインポート
 try:
     from integrated_preprocessing import integrated_preprocess_data
     from loader import load_files
@@ -71,72 +49,108 @@ try:
     from kpi_calculator import calculate_kpis
     FORECAST_AVAILABLE = True
 except ImportError as e:
+    st.error(f"必要なモジュールのインポートに失敗しました: {e}")
     FORECAST_AVAILABLE = False
-    FORECAST_ERROR = str(e)
+    st.stop()
 
-# ===== エラー表示（インポート完了後） =====
-if not UNIFIED_FILTERS_AVAILABLE:
-    st.error(f"統一フィルターインポートエラー: {IMPORT_ERROR}")
+from data_persistence import (
+    auto_load_data, save_data_to_file, load_data_from_file, 
+    get_data_info, delete_saved_data, get_file_sizes,
+    save_settings_to_file, load_settings_from_file,
+    get_backup_info, restore_from_backup
+)
 
-if not FORECAST_AVAILABLE:
-    st.error(f"予測機能インポートエラー: {FORECAST_ERROR}")
-
-
-# ===== 修正版のcreate_main_filter_interface関数 =====
-def create_main_filter_interface(df):
-    """メイン画面上部のフィルターインターフェース（エラー対応版）"""
-    if df is None or df.empty:
-        st.warning("📊 データが読み込まれていません - データ処理タブでデータをアップロードしてください")
-        return None, None
-    
-    if not UNIFIED_FILTERS_AVAILABLE:
-        st.error("❌ 統一フィルター機能が利用できません")
-        return df, {}
-    
-    try:
-        # セッション状態の初期化
-        initialize_filter_session_state(df)
-        
-        st.markdown("### 🔍 分析フィルター状態")
-        
-        # 統一フィルターの適用と状態表示
-        filtered_df, filter_config = create_unified_filter_status_card(df)
-        
-        if filter_config is None:
-            st.info("📋 フィルター未設定 - サイドバーで設定してください")
-            return df, None
-        
-        # フィルター妥当性チェック
-        is_valid, validation_message = validate_unified_filters(df)
-        if not is_valid:
-            st.error(f"❌ フィルター設定エラー: {validation_message}")
-            return df, filter_config
-        
-        # フィルター適用結果の確認
-        if filtered_df is None or filtered_df.empty:
-            st.warning("⚠️ 選択されたフィルター条件にマッチするデータがありません")
+def create_sidebar_period_settings():
+    """サイドバーの期間設定（改修版 - Timestampで統一）"""
+    with st.sidebar.expander("📅 分析期間設定", expanded=True):
+        if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
+            df = st.session_state.df
+            min_date_dt = df['日付'].min().date() # st.date_input の min_value/max_value は date 型
+            max_date_dt = df['日付'].max().date() # st.date_input の min_value/max_value は date 型
             
-            with st.expander("💡 解決方法", expanded=True):
+            period_mode = st.radio(
+                "期間設定方法",
+                ["プリセット期間", "カスタム期間"],
+                key="period_mode", # このキー名は現状のままでも良いか、sidebar_period_mode のように変更するか検討
+                help="プリセットまたはカスタム期間を選択"
+            )
+            
+            final_start_date_ts = None
+            final_end_date_ts = None
+
+            if period_mode == "プリセット期間":
+                preset_period = st.selectbox(
+                    "期間選択",
+                    PERIOD_OPTIONS, # config.py からインポートされている想定
+                    index=0, # デフォルトは PERIOD_OPTIONS[0]
+                    key="global_preset_period", # このキー名も検討
+                    help="事前定義された期間から選択"
+                )
+                # calculate_preset_period_dates は Timestamp を返すように修正済み
+                start_ts, end_ts = calculate_preset_period_dates(df, preset_period)
+                final_start_date_ts = start_ts
+                final_end_date_ts = end_ts
+                
+                st.session_state.analysis_period_type = "preset" # これは文字列なので問題なし
+                st.session_state.analysis_preset_period = preset_period # これも文字列
+                
+            else:  # カスタム期間
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.write("**フィルター条件を調整：**")
-                    st.write("• より広い期間を選択")
-                    st.write("• 診療科・病棟の選択を追加")
+                    # st.date_input の value は datetime.date 型を期待
+                    # セッションステートに保存されているTimestampをdate型に変換してデフォルト値とする
+                    default_start_val_dt = st.session_state.get('analysis_start_date', pd.Timestamp(max_date_dt) - pd.Timedelta(days=30)).date()
+                    start_date_input_dt = st.date_input(
+                        "開始日",
+                        value=default_start_val_dt,
+                        min_value=min_date_dt,
+                        max_value=max_date_dt,
+                        key="custom_start_date", # このキー名も検討
+                        help="分析開始日を選択してください"
+                    )
+                    final_start_date_ts = pd.to_datetime(start_date_input_dt).normalize() # Timestamp に変換
+                    
                 with col2:
-                    st.write("**現在の設定：**")
-                    filter_summary = get_unified_filter_summary()
-                    st.write(f"• {filter_summary}")
+                    default_end_val_dt = st.session_state.get('analysis_end_date', pd.Timestamp(max_date_dt)).date()
+                    # カスタム終了日の最小値は、選択されたカスタム開始日以降にする
+                    min_custom_end_dt = start_date_input_dt 
+                    # デフォルト値が最小値より前にならないように調整
+                    if default_end_val_dt < min_custom_end_dt:
+                        default_end_val_dt = min_custom_end_dt
+
+                    end_date_input_dt = st.date_input(
+                        "終了日",
+                        value=default_end_val_dt,
+                        min_value=min_custom_end_dt, # 動的に設定
+                        max_value=max_date_dt,
+                        key="custom_end_date", # このキー名も検討
+                        help="分析終了日を選択してください"
+                    )
+                    final_end_date_ts = pd.to_datetime(end_date_input_dt).normalize() # Timestamp に変換
+                
+                st.session_state.analysis_period_type = "custom"
+
+            # セッションステートに Timestamp として保存
+            if final_start_date_ts and final_end_date_ts:
+                st.session_state.analysis_start_date = final_start_date_ts
+                st.session_state.analysis_end_date = final_end_date_ts
+
+                # 表示用 (strftime は Timestamp オブジェクトでも使用可能)
+                st.info(f"📊 期間: {final_start_date_ts.strftime('%Y/%m/%d')} - {final_end_date_ts.strftime('%Y/%m/%d')}")
+
+                if final_start_date_ts <= final_end_date_ts:
+                    period_days = (final_end_date_ts - final_start_date_ts).days + 1
+                    st.success(f"✅ 選択期間: {period_days}日間")
+                else:
+                    st.error("開始日は終了日より前に設定してください")
             
-            return df, filter_config
-        
-        # 成功時の表示
-        st.success(f"✅ フィルター適用完了 - {len(filtered_df):,}件のデータで分析します")
-        
-        return filtered_df, filter_config
-        
-    except Exception as e:
-        st.error(f"フィルター処理エラー: {e}")
-        return df, None
+            if st.button("🔄 全タブに期間を適用", key="apply_global_period", use_container_width=True): # キー名検討
+                st.session_state.period_applied = True # このフラグの用途を確認
+                st.success("期間設定を全タブに適用しました")
+                st.experimental_rerun() # 変更を即時反映
+                
+        else:
+            st.info("データを読み込み後に期間設定が利用できます。")
 
 def calculate_preset_period_dates(df, preset_period):
     """プリセット期間から具体的な日付を計算 (pd.Timestampを返すように変更)"""
@@ -469,10 +483,7 @@ def create_sidebar_data_settings():
                             latest_date = df['日付'].max()
                             st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
                         
-                        # マッピング初期化
-                        initialize_all_mappings(df, target_data)
-                        
-                        st.rerun()
+                        st.experimental_rerun()
     
     # データ操作
     with st.sidebar.expander("🔧 データ操作", expanded=False):
@@ -486,7 +497,7 @@ def create_sidebar_data_settings():
                     
                     if save_data_to_file(df, target_data):
                         st.success("保存完了!")
-                        st.rerun()
+                        st.experimental_rerun()
                     else:
                         st.error("保存失敗")
                 else:
@@ -502,7 +513,7 @@ def create_sidebar_data_settings():
                     for key in keys_to_clear:
                         if key in st.session_state:
                             del st.session_state[key]
-                    st.rerun()
+                    st.experimental_rerun()
                 else:
                     st.error(f"削除失敗: {result}")
         
@@ -513,37 +524,82 @@ def create_sidebar_data_settings():
             for name, size in file_sizes.items():
                 if size != "未保存":
                     st.write(f"  • {name}: {size}")
+    
+    # バックアップ管理
+    with st.sidebar.expander("🗂️ バックアップ管理", expanded=False):
+        backup_info = get_backup_info()
+        if backup_info:
+            st.write("📋 **利用可能なバックアップ:**")
+            for backup in backup_info:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"📄 {backup['timestamp']}")
+                    st.caption(f"サイズ: {backup['size']}")
+                with col2:
+                    if st.button("復元", key=f"restore_{backup['filename']}", use_container_width=True):
+                        success, message = restore_from_backup(backup['filename'])
+                        if success:
+                            st.success(message)
+                            st.experimental_rerun()
+                        else:
+                            st.error(message)
+        else:
+            st.info("バックアップファイルはありません")
+    
+    # 新しいデータのアップロード
+    with st.sidebar.expander("📤 簡易データアップロード", expanded=False):
+        st.write("**簡易的なファイル読み込み**")
+        st.caption("詳細な処理は「データ処理」タブを使用")
+        
+        # 直接ファイルアップロード（簡易版）
+        uploaded_file = st.file_uploader(
+            "ファイルを選択",
+            type=SUPPORTED_FILE_TYPES,
+            key="sidebar_file_upload",
+            help="Excel/CSVファイルをアップロード"
+        )
+        
+        if uploaded_file is not None:
+            if st.button("⚡ 簡易処理で読み込む", key="quick_process", use_container_width=True):
+                try:
+                    # 簡易的なファイル読み込み
+                    if uploaded_file.name.endswith('.csv'):
+                        df = pd.read_csv(uploaded_file, encoding='utf-8')
+                    else:
+                        df = pd.read_excel(uploaded_file)
+                    
+                    # 基本的な前処理
+                    if '日付' in df.columns:
+                        df['日付'] = pd.to_datetime(df['日付'])
+                    
+                    # セッション状態に保存
+                    st.session_state['df'] = df
+                    st.session_state['data_processed'] = True
+                    st.session_state['data_source'] = 'sidebar_upload'
+                    st.session_state['target_data'] = None
+                    
+                    if '日付' in df.columns:
+                        latest_date = df['日付'].max()
+                        st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
+                    
+                    st.success("簡易読み込み完了!")
+                    st.experimental_rerun()
+                    
+                except Exception as e:
+                    st.error(f"読み込みエラー: {e}")
 
 def create_sidebar():
-    """サイドバーの設定UI（エラー対応版）"""
-    
+    """サイドバーの設定UI（改修版）"""
     # データ設定セクション
     create_sidebar_data_settings()
     
     st.sidebar.markdown("---")
-    
-    # 統一フィルター設定（データが読み込まれている場合のみ）
-    if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
-        df = st.session_state.get('df')
-        
-        if UNIFIED_FILTERS_AVAILABLE:
-            try:
-                # サイドバーでフィルターUIを作成
-                create_unified_filter_sidebar(df)
-                
-            except Exception as e:
-                st.sidebar.error(f"フィルター設定エラー: {e}")
-                if st.sidebar.checkbox("🔧 エラー詳細を表示"):
-                    st.sidebar.exception(e)
-        else:
-            st.sidebar.error("❌ フィルター機能が利用できません")
-    else:
-        st.sidebar.info("📊 データ読み込み後にフィルター設定が利用できます")
-    
-    st.sidebar.markdown("---")
     st.sidebar.header("⚙️ 基本設定")
     
-    # 基本設定セクション（既存コードはそのまま）
+    # 期間設定セクション（統合版）
+    create_sidebar_period_settings()
+    
+    # 基本設定セクション
     with st.sidebar.expander("🏥 基本設定", expanded=True):
         # 設定値の自動読み込み
         if 'settings_loaded' not in st.session_state:
@@ -619,7 +675,7 @@ def create_sidebar():
             else:
                 st.error("設定保存失敗")
 
-    # 目標値設定セクション（既存コードはそのまま使用）
+    # 目標値設定セクション
     with st.sidebar.expander("🎯 目標値設定", expanded=True):
         # 目標値の計算
         monthly_target_patient_days = st.number_input(
@@ -659,85 +715,108 @@ def create_sidebar():
 
     return (total_beds > 0 and bed_occupancy_rate > 0 and 
             avg_length_of_stay > 0 and avg_admission_fee > 0)
-
+            
 def create_management_dashboard_tab():
-    """経営ダッシュボードタブ（修正版）"""
-    st.header("💰 経営ダッシュボード")
-    
+    """経営ダッシュボードタブ（期間設定統合版）"""
     if 'df' not in st.session_state or st.session_state['df'] is None:
         st.warning(MESSAGES['data_not_loaded'])
         return
     
     df = st.session_state['df']
+    st.header("💰 経営ダッシュボード")
     
-    # ★ 重要：メインフィルターインターフェースを一度だけ呼び出し
-    filtered_df, filter_config = create_main_filter_interface(df)
+    # サイドバーの期間設定を表示
+    start_date, end_date, period_type = get_analysis_period()
     
-    if filter_config is None:
-        st.info("💡 サイドバーでフィルター設定を行ってから分析を開始してください")
-        return
-    
-    if filtered_df is None or filtered_df.empty:
-        st.warning("⚠️ フィルター条件に該当するデータがありません")
-        return
-    
-    # フィルター適用済みデータでの分析
-    try:
-        # フィルター設定から日付を取得
-        start_date = filter_config.get('start_date')
-        end_date = filter_config.get('end_date')
+    if start_date and end_date:
+        period_days = (end_date - start_date).days + 1
+        st.info(f"📊 分析期間: {start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')} ({period_days}日間)")
+        st.caption("※期間設定はサイドバーで変更できます")
         
-        if start_date and end_date:
-            period_days = (end_date - start_date).days + 1
-        else:
-            period_days = len(filtered_df)
+        # 期間でフィルタリングされたデータを使用
+        filtered_df = filter_data_by_analysis_period(df)
         
-        # KPI計算
+        if len(filtered_df) == 0:
+            st.warning("選択期間にデータがありません。サイドバーで期間を調整してください。")
+            return
+        
+        st.success(f"✅ 対象データ: {len(filtered_df):,}件")
+        
+        # 直近30日の計算（既存のロジックを使用）
+        latest_date = filtered_df['日付'].max()
+        fixed_start_date = latest_date - pd.Timedelta(days=29)
+        fixed_end_date = latest_date
+        
         total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
-        kpis = calculate_kpis(filtered_df, start_date, end_date, total_beds=total_beds)
+        fixed_kpis = calculate_kpis(filtered_df, fixed_start_date, fixed_end_date, total_beds=total_beds)
         
-        if kpis and kpis.get("error"):
-            st.error(f"KPI計算エラー: {kpis['error']}")
+        if fixed_kpis and fixed_kpis.get("error"):
+            st.error(f"KPI計算エラー: {fixed_kpis['error']}")
+            return
+        
+        # 選択期間の計算
+        period_kpis = calculate_kpis(filtered_df, start_date, end_date, total_beds=total_beds)
+        
+        if period_kpis and period_kpis.get("error"):
+            st.error(f"期間KPI計算エラー: {period_kpis['error']}")
             return
         
         # 基本設定値
         avg_admission_fee = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
         monthly_target_patient_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS)
-        
-        # メトリクス計算
-        total_patient_days = kpis.get('total_patient_days', 0)
-        avg_daily_census = kpis.get('avg_daily_census', 0)
-        bed_occupancy_rate = kpis.get('bed_occupancy_rate', 0)
-        avg_los = kpis.get('alos', 0)
-        avg_daily_admissions = kpis.get('avg_daily_admissions', 0)
-        
-        # 推計収益
-        estimated_revenue = total_patient_days * avg_admission_fee
         target_revenue = monthly_target_patient_days * avg_admission_fee
         
-        # メトリクス辞書
+        # 固定値（直近30日）
+        total_patient_days_30d = fixed_kpis.get('total_patient_days', 0)
+        avg_daily_census_30d = fixed_kpis.get('avg_daily_census', 0)
+        bed_occupancy_rate = fixed_kpis.get('bed_occupancy_rate', 0)
+        
+        # 直近30日の推計収益
+        estimated_revenue_30d = total_patient_days_30d * avg_admission_fee
+        
+        # 平均値（選択期間）
+        avg_daily_census = period_kpis.get('avg_daily_census', 0)
+        avg_los = period_kpis.get('alos', 0)
+        avg_daily_admissions = period_kpis.get('avg_daily_admissions', 0)
+        period_days_count = period_kpis.get('days_count', 1)
+        
+        # メトリクス辞書を作成（既存のdisplay_unified_metrics_layout_colorized関数に合わせる）
         metrics = {
-            'total_patient_days_30d': total_patient_days,
+            'total_patient_days_30d': total_patient_days_30d,
             'bed_occupancy_rate': bed_occupancy_rate,
-            'estimated_revenue_30d': estimated_revenue,
-            'avg_daily_census_30d': avg_daily_census,
+            'estimated_revenue_30d': estimated_revenue_30d,
+            'avg_daily_census_30d': avg_daily_census_30d,
             'avg_daily_census': avg_daily_census,
             'avg_los': avg_los,
             'avg_daily_admissions': avg_daily_admissions,
-            'period_days': period_days,
+            'period_days': period_days_count,
             'total_beds': total_beds,
             'target_revenue': target_revenue,
-            'selected_period': f"フィルター期間({period_days}日間)"
+            'selected_period': f"カスタム期間({period_days}日間)"
         }
         
-        # メトリクス表示
-        display_unified_metrics_layout_colorized(metrics, f"フィルター期間({period_days}日間)")
+        # 既存の表示関数を使用
+        display_unified_metrics_layout_colorized(metrics, f"カスタム期間({period_days}日間)")
         
-    except Exception as e:
-        st.error(f"ダッシュボード表示エラー: {e}")
-        # デバッグ情報
-        if st.checkbox("🔧 エラー詳細を表示"):
-            st.exception(e)
+    else:
+        st.error("期間設定に問題があります。サイドバーで期間を設定してください。")
+        
+        # フォールバック：従来の方法で表示
+        st.markdown("---")
+        st.markdown("### 📊 従来の期間選択")
+        selected_period = st.radio(
+            "期間選択（平均値計算用）",
+            PERIOD_OPTIONS,
+            index=0,
+            horizontal=True,
+            key="dashboard_period_selector_fallback",
+            help="日平均在院患者数、平均在院日数、日平均新入院患者数の計算期間"
+        )
+        
+        # 既存のロジックを使用
+        metrics = calculate_dashboard_metrics(df, selected_period)
+        if metrics:
+            display_unified_metrics_layout_colorized(metrics, selected_period)
         
 def calculate_dashboard_metrics(df, selected_period):
     """フィルタリング済みデータでのダッシュボードメトリクス計算"""
@@ -822,9 +901,10 @@ def format_number_with_config(value, unit="", format_type="default"):
         return f"{value:,.0f}{unit}"
 
 def display_unified_metrics_layout_colorized(metrics, selected_period):
-    """統一メトリクスレイアウトの表示（統一フィルター対応版）"""
+    """統一メトリクスレイアウトの表示"""
     # 期間情報表示
-    st.info(f"📊 分析期間: {selected_period}")
+    st.info(f"📊 平均値計算期間: {selected_period}")
+    st.caption("※延べ在院日数、病床利用率は直近30日固定。")
     
     # 主要指標セクション
     st.markdown("### 📊 主要指標")
@@ -836,6 +916,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         st.metric(
             "日平均在院患者数",
             f"{metrics['avg_daily_census']:.1f}人",
+            delta=f"参考：直近30日 {metrics['avg_daily_census_30d']:.1f}人",
             help=f"{selected_period}の日平均在院患者数"
         )
     
@@ -849,7 +930,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
             f"{metrics['bed_occupancy_rate']:.1f}%",
             delta=f"{occupancy_delta:+.1f}% (対目標{target_occupancy:.0f}%)",
             delta_color=delta_color,
-            help=f"{selected_period}の平均病床利用率"
+            help="直近30日の平均病床利用率"
         )
     
     with col3:
@@ -869,10 +950,10 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
     
     with col1:
         st.metric(
-            f"推計収益（{selected_period}）",
-            f"{metrics['estimated_revenue_30d']:,.0f}{NUMBER_FORMAT['currency_symbol']}",
+            "推計収益（直近30日）",
+            format_number_with_config(metrics['estimated_revenue_30d'], format_type="currency"),
             delta=f"単価: {st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE):,}円/日",
-            help=f"{selected_period}の推計収益"
+            help="直近30日の推計収益"
         )
     
     with col2:
@@ -880,11 +961,11 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
         achievement_days = (metrics['total_patient_days_30d'] / monthly_target) * 100 if monthly_target > 0 else 0
         
         st.metric(
-            f"延べ在院日数（{selected_period}）",
-            f"{metrics['total_patient_days_30d']:,.0f}人日",
+            "延べ在院日数（直近30日）",
+            format_number_with_config(metrics['total_patient_days_30d'], "人日"),
             delta=f"対月間目標: {achievement_days:.1f}%",
             delta_color="normal" if achievement_days >= 95 else "inverse",
-            help=f"{selected_period}の延べ在院日数"
+            help="直近30日間の延べ在院日数"
         )
     
     with col3:
@@ -894,9 +975,45 @@ def display_unified_metrics_layout_colorized(metrics, selected_period):
             delta=f"期間: {metrics['period_days']}日間",
             help=f"{selected_period}の日平均新入院患者数"
         )
+    
+    # 詳細情報セクション
+    with st.expander("📋 詳細データと設定値", expanded=False):
+        detail_col1, detail_col2, detail_col3 = st.columns(3)
+        
+        with detail_col1:
+            st.markdown("**🏥 基本設定**")
+            st.write(f"• 総病床数: {metrics['total_beds']:,}床")
+            st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE):.1%}")
+            st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE):,}円/日")
+        
+        with detail_col2:
+            st.markdown("**📅 期間情報**")
+            st.write(f"• 平均値計算: {selected_period}")
+            st.write(f"• 固定値計算: 直近30日")
+            st.write(f"• アプリバージョン: v{APP_VERSION}")
+        
+        with detail_col3:
+            st.markdown("**🎯 目標値**")
+            st.write(f"• 月間延べ在院日数: {format_number_with_config(monthly_target, '人日')}")
+            st.write(f"• 月間目標収益: {format_number_with_config(metrics['target_revenue'], format_type='currency')}")
+            st.write(f"• 月間新入院目標: {st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS):,}人")
 
 def main():
-    """メイン関数（修正版）"""
+    """メイン関数（改修版）"""
+    # 緊急対処：アプリ起動時に古い日付をクリア
+    if 'app_initialized' not in st.session_state:
+        # 初回起動時に全ての日付関連セッション状態をクリア
+        keys_to_check = list(st.session_state.keys())
+        for key in keys_to_check:
+            if 'date' in key.lower() and key in st.session_state:
+                value = st.session_state[key]
+                # 適切なTimestamp型でない場合やおかしな値の場合にクリア
+                if not isinstance(value, pd.Timestamp) or pd.isna(value):
+                    del st.session_state[key]
+                elif hasattr(value, 'year') and (value.year < 2020 or value.year > 2030):
+                    del st.session_state[key]        
+        st.session_state.app_initialized = True
+
     # セッション状態の初期化
     if 'data_processed' not in st.session_state:
         st.session_state['data_processed'] = False
@@ -904,31 +1021,21 @@ def main():
         st.session_state['df'] = None
     if 'forecast_model_results' not in st.session_state:
         st.session_state.forecast_model_results = {}
-        
-    # 緊急診断モードの追加
-    if st.sidebar.checkbox("🚨 緊急診断モード"):
-        emergency_diagnosis()
-        return
-        
+
     # 自動データ読み込み
     auto_loaded = auto_load_data()
     if auto_loaded:
         st.success("💾 保存されたデータを自動読み込みしました")
-        # マッピング初期化
-        df = st.session_state.get('df')
-        target_data = st.session_state.get('target_data')
-        if df is not None:
-            initialize_all_mappings(df, target_data)
 
     # ヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
     
-    # ★ 重要：サイドバー設定（ここで一度だけ統一フィルターを作成）
+    # サイドバー設定
     settings_valid = create_sidebar()
     if not settings_valid:
         st.stop()
     
-    # メインタブ設定
+    # メインタブ設定（順序変更：データ処理を最後に）
     if FORECAST_AVAILABLE:
         tabs = st.tabs([
             "💰 経営ダッシュボード", 
@@ -936,7 +1043,7 @@ def main():
             "📈 詳細分析",
             "📋 データテーブル",
             "📄 出力・予測",
-            "📊 データ処理"
+            "📊 データ処理"  # 最後に移動
         ])
     else:
         tabs = st.tabs([
@@ -944,10 +1051,10 @@ def main():
             "📈 詳細分析",
             "📋 データテーブル",
             "📄 出力・予測",
-            "📊 データ処理"
+            "📊 データ処理"  # 最後に移動
         ])
 
-    # データ処理済みの場合のみタブ群を有効化
+    # データ処理済みの場合のみ最初のタブ群を有効化
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         
         # 経営ダッシュボードタブ
@@ -956,154 +1063,64 @@ def main():
                 create_management_dashboard_tab()
             except Exception as e:
                 st.error(f"経営ダッシュボードでエラーが発生しました: {str(e)}")
-                if st.checkbox("🔧 エラー詳細を表示"):
-                    st.exception(e)
         
         # 予測分析タブ（利用可能な場合）
         if FORECAST_AVAILABLE:
             with tabs[1]:
                 try:
-                    # フィルター適用
-                    df = st.session_state.get('df')
-                    filtered_df, filter_config = create_main_filter_interface(df)
-                    
-                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
-                        # 一時的にフィルター済みデータをセッションに設定
-                        original_df = st.session_state.get('df')
-                        st.session_state['df'] = filtered_df
-                        
+                    deps_ok = check_forecast_dependencies()
+                    if deps_ok:
                         display_forecast_analysis_tab()
-                        
-                        # 元のデータに戻す
-                        st.session_state['df'] = original_df
                     else:
-                        st.info("💡 フィルター設定を完了してから予測分析を開始してください")
+                        st.info(MESSAGES['forecast_libs_missing'])
+                        st.markdown("""
+                        ### 🔮 予測機能について
+                        このタブでは以下の予測機能が利用できます：
+                        - **単純移動平均**: 過去の平均値を未来に延長
+                        - **Holt-Winters**: 季節性とトレンドを考慮した予測
+                        - **ARIMA**: 時系列の自己回帰モデル
+                        """)
                 except Exception as e:
                     st.error(f"予測分析でエラーが発生しました: {str(e)}")
-                    if st.checkbox("🔧 予測分析エラー詳細", key="forecast_error_detail"):
-                        st.exception(e)
             
             # 詳細分析タブ
             with tabs[2]:
                 try:
-                    # ★ 重要：他のタブでは統一フィルターを再作成せず、状態表示のみ
-                    df = st.session_state.get('df')
-                    filtered_df, filter_config = create_main_filter_interface(df)
-                    
-                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
-                        # フィルター済みデータで詳細分析を実行
-                        original_df = st.session_state.get('df')
-                        st.session_state['df'] = filtered_df
-                        
-                        create_detailed_analysis_tab()
-                        
-                        # 元のデータに戻す
-                        st.session_state['df'] = original_df
-                    else:
-                        st.info("💡 フィルター設定を完了してから詳細分析を開始してください")
-                        
+                    create_detailed_analysis_tab()
                 except Exception as e:
                     st.error(f"詳細分析でエラーが発生しました: {str(e)}")
-                    if st.checkbox("🔧 詳細分析エラー詳細", key="detail_error_detail"):
-                        st.exception(e)
             
             # データテーブルタブ
             with tabs[3]:
                 try:
-                    # フィルター適用
-                    df = st.session_state.get('df')
-                    filtered_df, filter_config = create_main_filter_interface(df)
-                    
-                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
-                        original_df = st.session_state.get('df')
-                        st.session_state['df'] = filtered_df
-                        
-                        create_data_tables_tab()
-                        
-                        st.session_state['df'] = original_df
-                    else:
-                        st.info("💡 フィルター設定を完了してからデータテーブルを表示してください")
-                        
+                    create_data_tables_tab()
                 except Exception as e:
                     st.error(f"データテーブルでエラーが発生しました: {str(e)}")
-                    if st.checkbox("🔧 データテーブルエラー詳細", key="table_error_detail"):
-                        st.exception(e)
             
             # 出力・予測タブ
             with tabs[4]:
                 try:
-                    # フィルター適用
-                    df = st.session_state.get('df')
-                    filtered_df, filter_config = create_main_filter_interface(df)
-                    
-                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
-                        original_df = st.session_state.get('df')
-                        st.session_state['df'] = filtered_df
-                        
-                        create_pdf_output_tab()
-                        
-                        st.session_state['df'] = original_df
-                    else:
-                        st.info("💡 フィルター設定を完了してから出力機能を使用してください")
-                        
+                    create_pdf_output_tab()
                 except Exception as e:
                     st.error(f"出力機能でエラーが発生しました: {str(e)}")
-                    if st.checkbox("🔧 出力エラー詳細", key="output_error_detail"):
-                        st.exception(e)
         
         else:
             # 予測機能なしの場合
             with tabs[1]:
                 try:
-                    df = st.session_state.get('df')
-                    filtered_df, filter_config = create_main_filter_interface(df)
-                    
-                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
-                        original_df = st.session_state.get('df')
-                        st.session_state['df'] = filtered_df
-                        
-                        create_detailed_analysis_tab()
-                        
-                        st.session_state['df'] = original_df
-                    else:
-                        st.info("💡 フィルター設定を完了してから詳細分析を開始してください")
-                        
+                    create_detailed_analysis_tab()
                 except Exception as e:
                     st.error(f"詳細分析でエラーが発生しました: {str(e)}")
             
             with tabs[2]:
                 try:
-                    df = st.session_state.get('df')
-                    filtered_df, filter_config = create_main_filter_interface(df)
-                    
-                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
-                        original_df = st.session_state.get('df')
-                        st.session_state['df'] = filtered_df
-                        
-                        create_data_tables_tab()
-                        
-                        st.session_state['df'] = original_df
-                    else:
-                        st.info("💡 フィルター設定を完了してからデータテーブルを表示してください")
-                        
+                    create_data_tables_tab()
                 except Exception as e:
                     st.error(f"データテーブルでエラーが発生しました: {str(e)}")
             
             with tabs[3]:
                 try:
-                    df = st.session_state.get('df')
-                    filtered_df, filter_config = create_main_filter_interface(df)
-                    
-                    if filter_config is not None and filtered_df is not None and not filtered_df.empty:
-                        original_df = st.session_state.get('df')
-                        st.session_state['df'] = filtered_df
-                        
-                        create_pdf_output_tab()
-                        
-                        st.session_state['df'] = original_df
-                    else:
-                        st.info("💡 フィルター設定を完了してから出力機能を使用してください")
-                        
+                    create_pdf_output_tab()
                 except Exception as e:
                     st.error(f"出力機能でエラーが発生しました: {str(e)}")
         
@@ -1112,13 +1129,35 @@ def main():
             try:
                 st.info("💡 新しいデータをアップロードする場合はこのタブを使用してください")
                 create_data_processing_tab()
-                        
+                
+                # データ処理後の自動保存オプション
+                if (st.session_state.get('data_processed', False) and 
+                    st.session_state.get('df') is not None and
+                    st.session_state.get('data_source') != 'auto_loaded'):
+                    
+                    st.markdown("---")
+                    st.markdown("### 💾 データ保存")
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("💾 処理したデータを保存", key="auto_save_processed", use_container_width=True):
+                            df = st.session_state['df']
+                            target_data = st.session_state.get('target_data')
+                            
+                            if save_data_to_file(df, target_data):
+                                st.success("✅ データが保存されました。次回起動時に自動読み込みされます。")
+                            else:
+                                st.error("❌ データ保存に失敗しました。")
+                    
+                    with col2:
+                        st.info("💡 保存すると次回起動時に自動読み込みされます")
+                            
             except Exception as e:
                 st.error(f"データ処理タブでエラーが発生しました: {str(e)}")
     
     else:
         # データ未処理の場合
-        for i in range(len(tabs) - 1):
+        for i in range(len(tabs) - 1):  # 最後のデータ処理タブ以外
             with tabs[i]:
                 st.info("📊 データを読み込み後に利用可能になります。")
                 data_info = get_data_info()
@@ -1133,7 +1172,36 @@ def main():
                 st.markdown("### 📊 データ処理")
                 st.info("💡 新しいデータをアップロードしてください")
                 create_data_processing_tab()
-                        
+                
+                # データ処理後の処理
+                if (st.session_state.get('data_processed', False) and 
+                    st.session_state.get('df') is not None):
+                    df = st.session_state['df']
+                    target_data = st.session_state.get('target_data')
+                    
+                    # マッピングの初期化
+                    initialize_all_mappings(df, target_data)
+                    
+                    # 最新データ日付の更新
+                    if '日付' in df.columns:
+                        latest_date = df['日付'].max()
+                        st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
+                    
+                    # 自動保存オプション
+                    st.markdown("---")
+                    st.markdown("### 💾 データ保存")
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("💾 処理したデータを保存", key="save_new_processed", use_container_width=True):
+                            if save_data_to_file(df, target_data):
+                                st.success("✅ データが保存されました。次回起動時に自動読み込みされます。")
+                            else:
+                                st.error("❌ データ保存に失敗しました。")
+                    
+                    with col2:
+                        st.info("💡 保存すると他の端末でも利用可能になります")
+                            
             except Exception as e:
                 st.error(f"データ処理タブでエラーが発生しました: {str(e)}")
     
@@ -1145,468 +1213,6 @@ def main():
         f'</div>',
         unsafe_allow_html=True
     )
-
-def emergency_diagnosis():
-    """緊急診断：フィルター問題の根本特定"""
-    
-    st.markdown("## 🚨 緊急診断モード")
-    st.markdown("以下の診断結果を確認してください")
-    
-    # 診断1: セッション状態の確認
-    st.markdown("### 1️⃣ セッション状態診断")
-    all_keys = list(st.session_state.keys())
-    filter_keys = [k for k in all_keys if 'filter' in k.lower()]
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f"**総セッション状態数**: {len(all_keys)}")
-        st.write(f"**フィルター関連キー数**: {len(filter_keys)}")
-        
-        if filter_keys:
-            st.write("**フィルターキー一覧**:")
-            for key in filter_keys:
-                value = st.session_state.get(key)
-                st.write(f"  • `{key}`: {type(value).__name__} = {value}")
-        else:
-            st.error("❌ フィルター関連セッション状態が見つかりません")
-    
-    with col2:
-        # 重要なキーの存在確認
-        critical_keys = [
-            'unified_filter_period_mode',
-            'unified_filter_start_date', 
-            'unified_filter_end_date',
-            'unified_filter_departments',
-            'unified_filter_wards',
-            'unified_filter_applied'
-        ]
-        
-        st.write("**重要キー存在確認**:")
-        for key in critical_keys:
-            exists = key in st.session_state
-            status = "✅" if exists else "❌"
-            st.write(f"  {status} `{key}`")
-    
-    # 診断2: データ状態の確認
-    st.markdown("### 2️⃣ データ状態診断")
-    df = st.session_state.get('df')
-    
-    if df is not None:
-        st.success(f"✅ データ読み込み済み: {len(df):,}行")
-        
-        # データの基本情報
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if '日付' in df.columns:
-                min_date = df['日付'].min()
-                max_date = df['日付'].max()
-                st.write(f"**日付範囲**: {min_date.date()} ～ {max_date.date()}")
-            else:
-                st.error("❌ '日付'列が見つかりません")
-        
-        with col2:
-            if '診療科名' in df.columns:
-                dept_count = df['診療科名'].nunique()
-                st.write(f"**診療科数**: {dept_count}")
-            else:
-                st.error("❌ '診療科名'列が見つかりません")
-        
-        with col3:
-            if '病棟コード' in df.columns:
-                ward_count = df['病棟コード'].nunique()
-                st.write(f"**病棟数**: {ward_count}")
-            else:
-                st.error("❌ '病棟コード'列が見つかりません")
-    else:
-        st.error("❌ データが読み込まれていません")
-    
-    # 診断3: フィルター関数の動作確認
-    st.markdown("### 3️⃣ フィルター関数診断")
-    
-    try:
-        from unified_filters import (
-            create_unified_filter_sidebar,
-            create_unified_filter_status_card,
-            apply_unified_filters,
-            get_unified_filter_summary,
-            validate_unified_filters,
-            initialize_filter_session_state
-        )
-        st.success("✅ unified_filters モジュールの基本インポート成功")
-        
-        # 各関数の存在確認
-        functions_to_check = [
-            create_unified_filter_sidebar,
-            create_unified_filter_status_card, 
-            apply_unified_filters,
-            get_unified_filter_summary,
-            validate_unified_filters
-        ]
-        
-        for func in functions_to_check:
-            st.write(f"  ✅ `{func.__name__}` 利用可能")
-            
-    except ImportError as e:
-        st.error(f"❌ unified_filters インポートエラー: {e}")
-        return
-    except Exception as e:
-        st.error(f"❌ フィルター関数チェックエラー: {e}")
-        return
-    
-    # 診断4: 実際のフィルター適用テスト
-    st.markdown("### 4️⃣ フィルター適用テスト")
-    
-    if df is not None:
-        try:
-            # 強制的にフィルター設定を作成
-            if 'unified_filter_period_mode' not in st.session_state:
-                st.session_state['unified_filter_period_mode'] = '最近90日'
-            
-            if 'unified_filter_start_date' not in st.session_state and '日付' in df.columns:
-                max_date = df['日付'].max()
-                start_date = max_date - pd.Timedelta(days=90)
-                st.session_state['unified_filter_start_date'] = start_date.date()
-                st.session_state['unified_filter_end_date'] = max_date.date()
-            
-            if 'unified_filter_departments' not in st.session_state and '診療科名' in df.columns:
-                st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
-            
-            if 'unified_filter_wards' not in st.session_state and '病棟コード' in df.columns:
-                st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
-            
-            # フィルター適用テスト
-            filtered_df = apply_unified_filters(df)
-            
-            if filtered_df is not None:
-                filter_ratio = len(filtered_df) / len(df) * 100 if len(df) > 0 else 0
-                
-                if len(filtered_df) == len(df):
-                    st.warning(f"⚠️ フィルター適用結果: {len(filtered_df):,}行 (元データと同じ - フィルターが効いていない)")
-                else:
-                    st.success(f"✅ フィルター適用結果: {len(filtered_df):,}行 ({filter_ratio:.1f}% 残存)")
-                    
-                # フィルター設定の表示
-                st.write("**現在のフィルター設定**:")
-                st.write(f"  • 期間モード: {st.session_state.get('unified_filter_period_mode', '未設定')}")
-                st.write(f"  • 開始日: {st.session_state.get('unified_filter_start_date', '未設定')}")
-                st.write(f"  • 終了日: {st.session_state.get('unified_filter_end_date', '未設定')}")
-                
-                selected_depts = st.session_state.get('unified_filter_departments', [])
-                total_depts = df['診療科名'].nunique() if '診療科名' in df.columns else 0
-                st.write(f"  • 診療科: {len(selected_depts)}/{total_depts}科選択")
-                
-                selected_wards = st.session_state.get('unified_filter_wards', [])
-                total_wards = df['病棟コード'].nunique() if '病棟コード' in df.columns else 0
-                st.write(f"  • 病棟: {len(selected_wards)}/{total_wards}病棟選択")
-                
-            else:
-                st.error("❌ フィルター適用が None を返しました")
-                
-        except Exception as e:
-            st.error(f"❌ フィルター適用テストエラー: {e}")
-            st.exception(e)
-    
-    # 診断5: 緊急修復オプション
-    st.markdown("### 5️⃣ 緊急修復オプション")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("🗑️ 全セッション状態クリア"):
-            keys_to_remove = list(st.session_state.keys())
-            for key in keys_to_remove:
-                del st.session_state[key]
-            st.success("セッション状態をクリアしました")
-            st.rerun()
-    
-    with col2:
-        if st.button("🔄 フィルター強制初期化"):
-            if df is not None:
-                # 強制的にフィルター設定を初期化
-                if '日付' in df.columns:
-                    max_date = df['日付'].max()
-                    start_date = max_date - pd.Timedelta(days=90)
-                    st.session_state['unified_filter_period_mode'] = '最近90日'
-                    st.session_state['unified_filter_start_date'] = start_date.date()
-                    st.session_state['unified_filter_end_date'] = max_date.date()
-                
-                if '診療科名' in df.columns:
-                    st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
-                
-                if '病棟コード' in df.columns:
-                    st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
-                
-                st.session_state['unified_filter_applied'] = True
-                st.success("フィルター設定を強制初期化しました")
-                st.rerun()
-    
-    with col3:
-        if st.button("🔬 詳細デバッグ"):
-            st.session_state['debug_mode'] = True
-            st.success("詳細デバッグモードを有効にしました")
-    
-    # 診断結果サマリー
-    st.markdown("### 📋 診断結果サマリー")
-    
-    # 問題スコア計算
-    issues = []
-    
-    if not filter_keys:
-        issues.append("フィルター関連セッション状態が存在しない")
-    
-    if df is None:
-        issues.append("データが読み込まれていない")
-    
-    try:
-        filtered_df = apply_unified_filters(df) if df is not None else None
-        if filtered_df is not None and len(filtered_df) == len(df):
-            issues.append("フィルターが実際にデータを絞り込んでいない")
-    except:
-        issues.append("フィルター適用関数でエラーが発生")
-    
-    if issues:
-        st.error("🚨 **発見された問題**:")
-        for issue in issues:
-            st.write(f"  • {issue}")
-        
-        st.markdown("**推奨解決策**:")
-        st.write("1. 「フィルター強制初期化」ボタンを押す")
-        st.write("2. ブラウザを完全リフレッシュ (Ctrl+F5)")
-        st.write("3. 新しいブラウザタブで開き直す")
-    else:
-        st.success("✅ **基本的な設定は正常です**")
-        st.write("問題は設定レベルではなく、実装レベルにある可能性があります")
-    
-def emergency_diagnosis():
-    """緊急診断：フィルター問題の根本特定"""
-    
-    st.markdown("## 🚨 緊急診断モード")
-    st.markdown("以下の診断結果を確認してください")
-    
-    # 診断1: セッション状態の確認
-    st.markdown("### 1️⃣ セッション状態診断")
-    all_keys = list(st.session_state.keys())
-    filter_keys = [k for k in all_keys if 'filter' in k.lower()]
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f"**総セッション状態数**: {len(all_keys)}")
-        st.write(f"**フィルター関連キー数**: {len(filter_keys)}")
-        
-        if filter_keys:
-            st.write("**フィルターキー一覧**:")
-            for key in filter_keys:
-                value = st.session_state.get(key)
-                st.write(f"  • `{key}`: {type(value).__name__} = {value}")
-        else:
-            st.error("❌ フィルター関連セッション状態が見つかりません")
-    
-    with col2:
-        # 重要なキーの存在確認
-        critical_keys = [
-            'unified_filter_period_mode',
-            'unified_filter_start_date', 
-            'unified_filter_end_date',
-            'unified_filter_departments',
-            'unified_filter_wards',
-            'unified_filter_applied'
-        ]
-        
-        st.write("**重要キー存在確認**:")
-        for key in critical_keys:
-            exists = key in st.session_state
-            status = "✅" if exists else "❌"
-            st.write(f"  {status} `{key}`")
-    
-    # 診断2: データ状態の確認
-    st.markdown("### 2️⃣ データ状態診断")
-    df = st.session_state.get('df')
-    
-    if df is not None:
-        st.success(f"✅ データ読み込み済み: {len(df):,}行")
-        
-        # データの基本情報
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if '日付' in df.columns:
-                min_date = df['日付'].min()
-                max_date = df['日付'].max()
-                st.write(f"**日付範囲**: {min_date.date()} ～ {max_date.date()}")
-            else:
-                st.error("❌ '日付'列が見つかりません")
-        
-        with col2:
-            if '診療科名' in df.columns:
-                dept_count = df['診療科名'].nunique()
-                st.write(f"**診療科数**: {dept_count}")
-            else:
-                st.error("❌ '診療科名'列が見つかりません")
-        
-        with col3:
-            if '病棟コード' in df.columns:
-                ward_count = df['病棟コード'].nunique()
-                st.write(f"**病棟数**: {ward_count}")
-            else:
-                st.error("❌ '病棟コード'列が見つかりません")
-    else:
-        st.error("❌ データが読み込まれていません")
-    
-    # 診断3: フィルター関数の動作確認
-    st.markdown("### 3️⃣ フィルター関数診断")
-    
-    try:
-        from unified_filters import (
-            create_unified_filter_sidebar,
-            create_unified_filter_status_card,
-            apply_unified_filters,
-            get_unified_filter_summary,
-            validate_unified_filters,
-            initialize_filter_session_state
-        )
-        st.success("✅ unified_filters モジュールの基本インポート成功")
-        
-        # 各関数の存在確認
-        functions_to_check = [
-            create_unified_filter_sidebar,
-            create_unified_filter_status_card, 
-            apply_unified_filters,
-            get_unified_filter_summary,
-            validate_unified_filters
-        ]
-        
-        for func in functions_to_check:
-            st.write(f"  ✅ `{func.__name__}` 利用可能")
-            
-    except ImportError as e:
-        st.error(f"❌ unified_filters インポートエラー: {e}")
-        return
-    except Exception as e:
-        st.error(f"❌ フィルター関数チェックエラー: {e}")
-        return
-    
-    # 診断4: 実際のフィルター適用テスト
-    st.markdown("### 4️⃣ フィルター適用テスト")
-    
-    if df is not None:
-        try:
-            # 強制的にフィルター設定を作成
-            if 'unified_filter_period_mode' not in st.session_state:
-                st.session_state['unified_filter_period_mode'] = '最近90日'
-            
-            if 'unified_filter_start_date' not in st.session_state and '日付' in df.columns:
-                max_date = df['日付'].max()
-                start_date = max_date - pd.Timedelta(days=90)
-                st.session_state['unified_filter_start_date'] = start_date.date()
-                st.session_state['unified_filter_end_date'] = max_date.date()
-            
-            if 'unified_filter_departments' not in st.session_state and '診療科名' in df.columns:
-                st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
-            
-            if 'unified_filter_wards' not in st.session_state and '病棟コード' in df.columns:
-                st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
-            
-            # フィルター適用テスト
-            filtered_df = apply_unified_filters(df)
-            
-            if filtered_df is not None:
-                filter_ratio = len(filtered_df) / len(df) * 100 if len(df) > 0 else 0
-                
-                if len(filtered_df) == len(df):
-                    st.warning(f"⚠️ フィルター適用結果: {len(filtered_df):,}行 (元データと同じ - フィルターが効いていない)")
-                else:
-                    st.success(f"✅ フィルター適用結果: {len(filtered_df):,}行 ({filter_ratio:.1f}% 残存)")
-                    
-                # フィルター設定の表示
-                st.write("**現在のフィルター設定**:")
-                st.write(f"  • 期間モード: {st.session_state.get('unified_filter_period_mode', '未設定')}")
-                st.write(f"  • 開始日: {st.session_state.get('unified_filter_start_date', '未設定')}")
-                st.write(f"  • 終了日: {st.session_state.get('unified_filter_end_date', '未設定')}")
-                
-                selected_depts = st.session_state.get('unified_filter_departments', [])
-                total_depts = df['診療科名'].nunique() if '診療科名' in df.columns else 0
-                st.write(f"  • 診療科: {len(selected_depts)}/{total_depts}科選択")
-                
-                selected_wards = st.session_state.get('unified_filter_wards', [])
-                total_wards = df['病棟コード'].nunique() if '病棟コード' in df.columns else 0
-                st.write(f"  • 病棟: {len(selected_wards)}/{total_wards}病棟選択")
-                
-            else:
-                st.error("❌ フィルター適用が None を返しました")
-                
-        except Exception as e:
-            st.error(f"❌ フィルター適用テストエラー: {e}")
-            st.exception(e)
-    
-    # 診断5: 緊急修復オプション
-    st.markdown("### 5️⃣ 緊急修復オプション")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("🗑️ 全セッション状態クリア"):
-            keys_to_remove = list(st.session_state.keys())
-            for key in keys_to_remove:
-                del st.session_state[key]
-            st.success("セッション状態をクリアしました")
-            st.rerun()
-    
-    with col2:
-        if st.button("🔄 フィルター強制初期化"):
-            if df is not None:
-                # 強制的にフィルター設定を初期化
-                if '日付' in df.columns:
-                    max_date = df['日付'].max()
-                    start_date = max_date - pd.Timedelta(days=90)
-                    st.session_state['unified_filter_period_mode'] = '最近90日'
-                    st.session_state['unified_filter_start_date'] = start_date.date()
-                    st.session_state['unified_filter_end_date'] = max_date.date()
-                
-                if '診療科名' in df.columns:
-                    st.session_state['unified_filter_departments'] = sorted(df['診療科名'].unique())
-                
-                if '病棟コード' in df.columns:
-                    st.session_state['unified_filter_wards'] = sorted(df['病棟コード'].unique())
-                
-                st.session_state['unified_filter_applied'] = True
-                st.success("フィルター設定を強制初期化しました")
-                st.rerun()
-    
-    with col3:
-        if st.button("🔬 詳細デバッグ"):
-            st.session_state['debug_mode'] = True
-            st.success("詳細デバッグモードを有効にしました")
-    
-    # 診断結果サマリー
-    st.markdown("### 📋 診断結果サマリー")
-    
-    # 問題スコア計算
-    issues = []
-    
-    if not filter_keys:
-        issues.append("フィルター関連セッション状態が存在しない")
-    
-    if df is None:
-        issues.append("データが読み込まれていない")
-    
-    try:
-        filtered_df = apply_unified_filters(df) if df is not None else None
-        if filtered_df is not None and len(filtered_df) == len(df):
-            issues.append("フィルターが実際にデータを絞り込んでいない")
-    except:
-        issues.append("フィルター適用関数でエラーが発生")
-    
-    if issues:
-        st.error("🚨 **発見された問題**:")
-        for issue in issues:
-            st.write(f"  • {issue}")
-        
-        st.markdown("**推奨解決策**:")
-        st.write("1. 「フィルター強制初期化」ボタンを押す")
-        st.write("2. ブラウザを完全リフレッシュ (Ctrl+F5)")
-        st.write("3. 新しいブラウザタブで開き直す")
-    else:
-        st.success("✅ **基本的な設定は正常です**")
-        st.write("問題は設定レベルではなく、実装レベルにある可能性があります")
 
 if __name__ == "__main__":
     main()
