@@ -1,4 +1,13 @@
 import streamlit as st
+
+# ===== ページ設定（最初に実行）=====
+st.set_page_config(
+    page_title="入退院分析ダッシュボード",  # 一時的にハードコード
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -19,7 +28,7 @@ from config import *
 from style import inject_global_css
 from utils import safe_date_filter, initialize_all_mappings
 
-# ===== 統一フィルター機能のインポート（完全修正版） =====
+# ===== 統一フィルター機能のインポート =====
 try:
     from unified_filters import (
         create_unified_filter_sidebar,
@@ -31,19 +40,10 @@ try:
         initialize_filter_session_state
     )
     UNIFIED_FILTERS_AVAILABLE = True
-    st.success("✅ 統一フィルターモジュール読み込み成功")
 except ImportError as e:
-    st.error(f"❌ 統一フィルターインポートエラー: {e}")
+    # インポートエラーは後で表示
     UNIFIED_FILTERS_AVAILABLE = False
-    
-    # エラー時のダミー関数定義
-    def create_unified_filter_sidebar(df): pass
-    def create_unified_filter_status_card(df): return df, {}
-    def apply_unified_filters(df): return df
-    def get_unified_filter_summary(): return "フィルター無効"
-    def get_unified_filter_config(): return {}
-    def validate_unified_filters(df): return True, "OK"
-    def initialize_filter_session_state(df): pass
+    IMPORT_ERROR = str(e)
 
 # ===== データ永続化機能のインポート =====
 try:
@@ -54,15 +54,7 @@ try:
         get_backup_info, restore_from_backup
     )
 except ImportError as e:
-    st.error(f"データ永続化インポートエラー: {e}")
-
-# ===== ページ設定 =====
-st.set_page_config(
-    page_title=APP_TITLE,
-    page_icon=APP_ICON,
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+    DATA_PERSISTENCE_ERROR = str(e)
 
 # グローバルCSS適用
 inject_global_css(FONT_SCALE)
@@ -79,9 +71,16 @@ try:
     from kpi_calculator import calculate_kpis
     FORECAST_AVAILABLE = True
 except ImportError as e:
-    st.error(f"必要なモジュールのインポートに失敗しました: {e}")
     FORECAST_AVAILABLE = False
-    st.stop()
+    FORECAST_ERROR = str(e)
+
+# ===== エラー表示（インポート完了後） =====
+if not UNIFIED_FILTERS_AVAILABLE:
+    st.error(f"統一フィルターインポートエラー: {IMPORT_ERROR}")
+
+if not FORECAST_AVAILABLE:
+    st.error(f"予測機能インポートエラー: {FORECAST_ERROR}")
+
 
 # ===== 修正版のcreate_main_filter_interface関数 =====
 def create_main_filter_interface(df):
