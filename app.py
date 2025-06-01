@@ -1210,7 +1210,7 @@ def emergency_diagnosis():
             create_unified_filter_status_card,
             apply_unified_filters,
             get_unified_filter_summary,
-            validate_unified_filters
+            validate_unified_filters,
             initialize_filter_session_state
         )
         st.success("✅ unified_filters モジュールの基本インポート成功")
@@ -1441,7 +1441,7 @@ def emergency_diagnosis():
             create_unified_filter_status_card,
             apply_unified_filters,
             get_unified_filter_summary,
-            validate_unified_filters
+            validate_unified_filters,
             initialize_filter_session_state
         )
         st.success("✅ unified_filters モジュールの基本インポート成功")
