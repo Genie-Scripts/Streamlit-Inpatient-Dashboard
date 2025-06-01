@@ -1,10 +1,15 @@
-# app.py (修正版)
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
 import traceback
+
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon=APP_ICON,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ===== 設定値とスタイルの読み込み =====
 from config import *
@@ -57,13 +62,6 @@ except ImportError as e:
     display_individual_analysis_tab = lambda df_filtered_main: st.error("個別分析機能は利用できません。")
     create_individual_analysis_section = lambda df_filtered, filter_config_from_caller: st.error("個別分析セクション機能は利用できません。")
 
-
-st.set_page_config(
-    page_title=APP_TITLE,
-    page_icon=APP_ICON,
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 inject_global_css(FONT_SCALE)
 
 
