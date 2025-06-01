@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
+
 try:
     import jpholiday
     JPHOLIDAY_AVAILABLE = True
@@ -18,26 +19,44 @@ from config import *
 from style import inject_global_css
 from utils import safe_date_filter, initialize_all_mappings
 
-# 統一フィルター機能のインポート
-from unified_filters import (
-    create_unified_filter_sidebar,
-    create_unified_filter_status_card,
-    apply_unified_filters,
-    get_unified_filter_summary,
-    get_unified_filter_config,
-    validate_unified_filters,
-    initialize_filter_session_state  # この行を追加
-)
+# ===== 統一フィルター機能のインポート（完全修正版） =====
+try:
+    from unified_filters import (
+        create_unified_filter_sidebar,
+        create_unified_filter_status_card,
+        apply_unified_filters,
+        get_unified_filter_summary,
+        get_unified_filter_config,
+        validate_unified_filters,
+        initialize_filter_session_state
+    )
+    UNIFIED_FILTERS_AVAILABLE = True
+    st.success("✅ 統一フィルターモジュール読み込み成功")
+except ImportError as e:
+    st.error(f"❌ 統一フィルターインポートエラー: {e}")
+    UNIFIED_FILTERS_AVAILABLE = False
+    
+    # エラー時のダミー関数定義
+    def create_unified_filter_sidebar(df): pass
+    def create_unified_filter_status_card(df): return df, {}
+    def apply_unified_filters(df): return df
+    def get_unified_filter_summary(): return "フィルター無効"
+    def get_unified_filter_config(): return {}
+    def validate_unified_filters(df): return True, "OK"
+    def initialize_filter_session_state(df): pass
 
-# データ永続化機能のインポート
-from data_persistence import (
-    auto_load_data, save_data_to_file, load_data_from_file, 
-    get_data_info, delete_saved_data, get_file_sizes,
-    save_settings_to_file, load_settings_from_file,
-    get_backup_info, restore_from_backup
-)
+# ===== データ永続化機能のインポート =====
+try:
+    from data_persistence import (
+        auto_load_data, save_data_to_file, load_data_from_file, 
+        get_data_info, delete_saved_data, get_file_sizes,
+        save_settings_to_file, load_settings_from_file,
+        get_backup_info, restore_from_backup
+    )
+except ImportError as e:
+    st.error(f"データ永続化インポートエラー: {e}")
 
-# ページ設定
+# ===== ページ設定 =====
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon=APP_ICON,
@@ -48,7 +67,7 @@ st.set_page_config(
 # グローバルCSS適用
 inject_global_css(FONT_SCALE)
 
-# カスタムモジュールのインポート
+# ===== カスタムモジュールのインポート =====
 try:
     from integrated_preprocessing import integrated_preprocess_data
     from loader import load_files
@@ -64,18 +83,23 @@ except ImportError as e:
     FORECAST_AVAILABLE = False
     st.stop()
 
+# ===== 修正版のcreate_main_filter_interface関数 =====
 def create_main_filter_interface(df):
-    """メイン画面上部のフィルターインターフェース（修正版）"""
+    """メイン画面上部のフィルターインターフェース（エラー対応版）"""
     if df is None or df.empty:
         st.warning("📊 データが読み込まれていません - データ処理タブでデータをアップロードしてください")
         return None, None
     
-    # セッション状態の初期化
-    initialize_filter_session_state(df)
-    
-    st.markdown("### 🔍 分析フィルター状態")
+    if not UNIFIED_FILTERS_AVAILABLE:
+        st.error("❌ 統一フィルター機能が利用できません")
+        return df, {}
     
     try:
+        # セッション状態の初期化
+        initialize_filter_session_state(df)
+        
+        st.markdown("### 🔍 分析フィルター状態")
+        
         # 統一フィルターの適用と状態表示
         filtered_df, filter_config = create_unified_filter_status_card(df)
         
@@ -87,14 +111,12 @@ def create_main_filter_interface(df):
         is_valid, validation_message = validate_unified_filters(df)
         if not is_valid:
             st.error(f"❌ フィルター設定エラー: {validation_message}")
-            # エラー時でも元データを返す
             return df, filter_config
         
         # フィルター適用結果の確認
         if filtered_df is None or filtered_df.empty:
             st.warning("⚠️ 選択されたフィルター条件にマッチするデータがありません")
             
-            # 解決案の提示
             with st.expander("💡 解決方法", expanded=True):
                 col1, col2 = st.columns(2)
                 with col1:
@@ -115,7 +137,6 @@ def create_main_filter_interface(df):
         
     except Exception as e:
         st.error(f"フィルター処理エラー: {e}")
-        # エラー時は元データを返す
         return df, None
 
 def calculate_preset_period_dates(df, preset_period):
@@ -495,7 +516,7 @@ def create_sidebar_data_settings():
                     st.write(f"  • {name}: {size}")
 
 def create_sidebar():
-    """サイドバーの設定UI（修正版）"""
+    """サイドバーの設定UI（エラー対応版）"""
     
     # データ設定セクション
     create_sidebar_data_settings()
@@ -506,18 +527,17 @@ def create_sidebar():
     if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         df = st.session_state.get('df')
         
-        try:
-            # ★ 修正：initialize_unified_filters を削除
-            # initialize_filter_session_state(df)  # 必要に応じて
-            
-            # サイドバーでフィルターUIを作成
-            create_unified_filter_sidebar(df)
-            
-        except Exception as e:
-            st.sidebar.error(f"フィルター設定エラー: {e}")
-            # デバッグ情報を表示
-            if st.sidebar.checkbox("🔧 エラー詳細を表示"):
-                st.sidebar.exception(e)
+        if UNIFIED_FILTERS_AVAILABLE:
+            try:
+                # サイドバーでフィルターUIを作成
+                create_unified_filter_sidebar(df)
+                
+            except Exception as e:
+                st.sidebar.error(f"フィルター設定エラー: {e}")
+                if st.sidebar.checkbox("🔧 エラー詳細を表示"):
+                    st.sidebar.exception(e)
+        else:
+            st.sidebar.error("❌ フィルター機能が利用できません")
     else:
         st.sidebar.info("📊 データ読み込み後にフィルター設定が利用できます")
     
