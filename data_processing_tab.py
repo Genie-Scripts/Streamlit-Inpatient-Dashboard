@@ -92,13 +92,16 @@ def get_app_data_dir():
     return app_data_dir
 
 def get_base_file_info(app_data_dir):
-    # ... (既存のコード)
     if app_data_dir is None: return None
     info_path = os.path.join(app_data_dir, "base_file_info.json")
     if os.path.exists(info_path):
-        try: import json;
-            with open(info_path, 'r', encoding='utf-8') as f: return json.load(f) # encoding指定
-        except Exception as e: logger.error(f"ベースファイル情報の読み込みエラー: {e}", exc_info=True); return None
+        try: # このtryブロックに対応するexceptを追加
+            import json; # jsonモジュールはこのスコープでインポート
+            with open(info_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e: # ★★★ exceptブロックを追加 ★★★
+            logger.error(f"ベースファイル情報の読み込みエラー: {e}", exc_info=True)
+            return None
     return None
 
 def save_base_file_info(app_data_dir, file_name, file_size, file_hash):
