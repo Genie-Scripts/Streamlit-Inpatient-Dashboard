@@ -11,6 +11,7 @@ import tempfile
 import gc
 import psutil # メモリ使用量取得のため
 import logging # logging を追加
+logger = logging.getLogger(__name__) 
 
 # integrated_preprocessing と loader から必要な関数をインポート
 from integrated_preprocessing import (
@@ -20,7 +21,6 @@ from loader import load_files # loader.py の load_files を使用 (read_excel_c
 from forecast import generate_filtered_summaries
 from utils import initialize_all_mappings, create_dept_mapping_table
 
-logger = logging.getLogger(__name__) # logger を設定
 
 # --- 定数 ---
 # EXCEL_USE_COLUMNS は、loader.py の read_excel_cached に渡す際の「期待する標準列名」
@@ -105,14 +105,15 @@ def get_base_file_info(app_data_dir):
     return None
 
 def save_base_file_info(app_data_dir, file_name, file_size, file_hash):
-    # ... (既存のコード)
     if app_data_dir is None: return
     info_path = os.path.join(app_data_dir, "base_file_info.json")
     info = {"file_name": file_name, "file_size": file_size, "file_hash": file_hash}
-    try: import json;
-        with open(info_path, 'w', encoding='utf-8') as f: json.dump(info, f, ensure_ascii=False, indent=2) # encoding指定
-    except Exception as e: logger.error(f"ベースファイル情報の保存エラー: {e}", exc_info=True)
-
+    try: # このtryブロックに対応するexceptを追加
+        import json; # jsonモジュールはこのスコープでインポート
+        with open(info_path, 'w', encoding='utf-8') as f: # encoding指定
+            json.dump(info, f, ensure_ascii=False, indent=2)
+    except Exception as e: # ★★★ exceptブロックを追加 ★★★
+        logger.error(f"ベースファイル情報の保存エラー: {e}", exc_info=True)
 
 def debug_target_file_processing(target_data, search_keywords=['全体', '病院全体', '病院']):
     # ... (既存のコード、変更なし)
