@@ -614,27 +614,163 @@ def create_sidebar():
     return True
 
 def create_management_dashboard_tab():
-    st.header(f"{APP_ICON} 経営ダッシュボード")
+    st.header("📊 主要指標")
+    
     if not st.session_state.get('data_processed', False) or st.session_state.get('df') is None:
-        st.warning(MESSAGES['data_not_loaded'])
+        st.warning("データを読み込み後に利用可能になります。")
         return
+    
     df_original = st.session_state.get('df')
     start_date_ts, end_date_ts, period_description = get_analysis_period()
+    
     if start_date_ts is None or end_date_ts is None:
         st.error("分析期間が設定されていません。サイドバーの「分析フィルター」で期間を設定してください。")
         return
+    
     st.info(f"📊 分析期間: {period_description} ({start_date_ts.strftime('%Y/%m/%d')} ～ {end_date_ts.strftime('%Y/%m/%d')})")
     st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
+    
     df_for_dashboard = filter_data_by_analysis_period(df_original)
+    
     if df_for_dashboard.empty:
         st.warning("選択されたフィルター条件に合致するデータがありません。")
         return
-    total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
-    target_occupancy_rate_percent = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE) * 100
-    if display_kpi_cards_only:
-        display_kpi_cards_only(df_for_dashboard, start_date_ts, end_date_ts, total_beds, target_occupancy_rate_percent)
-    else:
-        st.error("KPIカード表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
+    
+    # 基本設定値を取得
+    total_beds = st.session_state.get('total_beds', 500)  # デフォルト500床
+    target_occupancy_rate = st.session_state.get('bed_occupancy_rate', 0.85)  # デフォルト85%
+    
+    # 主要指標の計算
+    try:
+        # 1. 病床稼働率の計算
+        if '在院患者数' in df_for_dashboard.columns:
+            avg_inpatients = df_for_dashboard['在院患者数'].mean()
+            occupancy_rate = (avg_inpatients / total_beds) * 100 if total_beds > 0 else 0
+        else:
+            avg_inpatients = 0
+            occupancy_rate = 0
+        
+        # 2. 平均在院日数の計算
+        if '在院患者数' in df_for_dashboard.columns and '入院患者数' in df_for_dashboard.columns:
+            total_patient_days = df_for_dashboard['在院患者数'].sum()
+            total_admissions = df_for_dashboard['入院患者数'].sum()
+            avg_length_of_stay = total_patient_days / total_admissions if total_admissions > 0 else 0
+        else:
+            avg_length_of_stay = 0
+        
+        # 3. 新入院患者数（期間合計）
+        if '入院患者数' in df_for_dashboard.columns:
+            total_new_admissions = df_for_dashboard['入院患者数'].sum()
+        else:
+            total_new_admissions = 0
+        
+        # 4. 日平均新入院患者数
+        period_days = (end_date_ts - start_date_ts).days + 1
+        daily_avg_admissions = total_new_admissions / period_days if period_days > 0 else 0
+        
+        # 主要指標を横一列で表示
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            # 病床稼働率
+            occupancy_delta = occupancy_rate - (target_occupancy_rate * 100)
+            occupancy_color = "normal" if abs(occupancy_delta) < 5 else ("inverse" if occupancy_delta < 0 else "normal")
+            
+            st.metric(
+                label="🏥 病床稼働率",
+                value=f"{occupancy_rate:.1f}%",
+                delta=f"{occupancy_delta:+.1f}% (目標比)",
+                delta_color=occupancy_color
+            )
+            st.caption(f"平均在院患者数: {avg_inpatients:.1f}人")
+            st.caption(f"総病床数: {total_beds}床")
+        
+        with col2:
+            # 平均在院日数
+            target_alos = st.session_state.get('avg_length_of_stay', 14.0)  # デフォルト14日
+            alos_delta = avg_length_of_stay - target_alos
+            alos_color = "inverse" if alos_delta > 0 else "normal"  # 短い方が良い
+            
+            st.metric(
+                label="📅 平均在院日数",
+                value=f"{avg_length_of_stay:.1f}日",
+                delta=f"{alos_delta:+.1f}日 (目標比)",
+                delta_color=alos_color
+            )
+            st.caption(f"目標: {target_alos}日")
+            st.caption(f"総入院患者数: {total_new_admissions:,.0f}人")
+        
+        with col3:
+            # 新入院患者数（期間合計）
+            target_admissions_monthly = st.session_state.get('monthly_target_admissions', 400)  # デフォルト月400人
+            # 期間に応じた目標値を計算
+            target_admissions_period = (target_admissions_monthly / 30) * period_days
+            admissions_delta = total_new_admissions - target_admissions_period
+            admissions_color = "normal" if admissions_delta >= 0 else "inverse"
+            
+            st.metric(
+                label="🚪 新入院患者数",
+                value=f"{total_new_admissions:,.0f}人",
+                delta=f"{admissions_delta:+.0f}人 (目標比)",
+                delta_color=admissions_color
+            )
+            st.caption(f"分析期間: {period_days}日間")
+            st.caption(f"目標: {target_admissions_period:.0f}人")
+        
+        with col4:
+            # 日平均新入院患者数
+            target_daily_admissions = target_admissions_monthly / 30  # 月目標を日割り
+            daily_delta = daily_avg_admissions - target_daily_admissions
+            daily_color = "normal" if daily_delta >= 0 else "inverse"
+            
+            st.metric(
+                label="📈 日平均新入院患者数",
+                value=f"{daily_avg_admissions:.1f}人/日",
+                delta=f"{daily_delta:+.1f}人/日 (目標比)",
+                delta_color=daily_color
+            )
+            st.caption(f"目標: {target_daily_admissions:.1f}人/日")
+            st.caption(f"月換算: {daily_avg_admissions * 30:.0f}人/月")
+    
+    except Exception as e:
+        st.error(f"主要指標の計算中にエラーが発生しました: {str(e)}")
+        st.error("データの形式を確認してください。")
+    
+    # 補足情報
+    st.markdown("---")
+    with st.expander("📋 指標の説明", expanded=False):
+        st.markdown("""
+        **🏥 病床稼働率**: 平均在院患者数 ÷ 総病床数 × 100
+        - 病院の効率性を示す重要指標
+        - 一般的に80-90%が適正範囲
+        
+        **📅 平均在院日数**: 延べ在院日数 ÷ 新入院患者数
+        - 患者の回転効率を示す指標
+        - 短いほど効率的だが、医療の質も考慮が必要
+        
+        **🚪 新入院患者数**: 分析期間中の入院患者の総数
+        - 病院の活動量を示す基本指標
+        - 月次・年次での推移確認が重要
+        
+        **📈 日平均新入院患者数**: 新入院患者数 ÷ 分析期間日数
+        - 日々の入院受け入れペースを示す指標
+        - 稼働計画や人員配置の参考値
+        """)
+    
+    # 設定値の確認・変更
+    with st.expander("⚙️ 目標値設定", expanded=False):
+        st.markdown("**現在の設定値:**")
+        col_set1, col_set2 = st.columns(2)
+        
+        with col_set1:
+            st.write(f"• 総病床数: {total_beds}床")
+            st.write(f"• 目標病床稼働率: {target_occupancy_rate*100:.1f}%")
+        
+        with col_set2:
+            st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', 14.0)}日")
+            st.write(f"• 月間新入院患者数目標: {st.session_state.get('monthly_target_admissions', 400)}人")
+        
+        st.info("💡 これらの設定値はサイドバーの「グローバル設定」で変更できます。")
 
 def main():
     # セッション状態の初期化
@@ -675,7 +811,7 @@ def main():
     create_sidebar()
 
     # タブの作成と処理
-    tab_titles = ["💰 経営ダッシュボード", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
+    tab_titles = ["📊 主要指標", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
     if FORECAST_AVAILABLE:
         tab_titles.append("🔮 予測分析")
     tab_titles.extend(["📤 データ出力", "📥 データ入力"])
@@ -700,11 +836,11 @@ def main():
         df_filtered_unified = filter_data_by_analysis_period(df_original_main)
         current_filter_config = get_unified_filter_config()
 
-        with tabs[tab_titles.index("💰 経営ダッシュボード")]:
+        with tabs[tab_titles.index("📊 主要指標")]:
             try: 
                 create_management_dashboard_tab()
             except Exception as e: 
-                st.error(f"経営ダッシュボードでエラー: {str(e)}\n{traceback.format_exc()}")
+                st.error(f"主要指標でエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[tab_titles.index("🗓️ 平均在院日数分析")]:
             try:
@@ -837,6 +973,6 @@ def main():
         f'</div>',
         unsafe_allow_html=True
     )
-
+    
 if __name__ == "__main__":
     main()
