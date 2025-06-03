@@ -636,6 +636,7 @@ def create_management_dashboard_tab():
     else:
         st.error("KPIカード表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
 
+
 def main():
     # セッション状態の初期化
     if 'app_initialized' not in st.session_state:
@@ -675,7 +676,7 @@ def main():
     create_sidebar()
 
     # タブの作成と処理
-    tab_titles = ["💰 経営ダッシュボード", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
+    tab_titles = ["📊 主要指標", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
     if FORECAST_AVAILABLE:
         tab_titles.append("🔮 予測分析")
     tab_titles.extend(["📤 データ出力", "📥 データ入力"])
@@ -700,11 +701,11 @@ def main():
         df_filtered_unified = filter_data_by_analysis_period(df_original_main)
         current_filter_config = get_unified_filter_config()
 
-        with tabs[tab_titles.index("💰 経営ダッシュボード")]:
+        with tabs[tab_titles.index("📊 主要指標")]:
             try: 
                 create_management_dashboard_tab()
             except Exception as e: 
-                st.error(f"経営ダッシュボードでエラー: {str(e)}\n{traceback.format_exc()}")
+                st.error(f"主要指標でエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[tab_titles.index("🗓️ 平均在院日数分析")]:
             try:
