@@ -513,8 +513,10 @@ def create_sidebar_target_file_status():
                             st.sidebar.write(f"「{keyword}」: 該当なし")
 
 # --- メインのサイドバー作成関数 ---
+# app.py の create_sidebar() 関数内の設定値初期化部分を修正
+
 def create_sidebar():
-    """サイドバーの設定UI（並び順変更版）"""
+    """サイドバーの設定UI（設定値初期化強化版）"""
 
     # 1. 分析フィルター (データロード後に表示)
     st.sidebar.header("🔍 分析フィルター")
@@ -531,64 +533,108 @@ def create_sidebar():
         st.sidebar.info("「データ入力」タブでデータを読み込むと、ここに分析フィルターが表示されます。")
     st.sidebar.markdown("---")
 
-    # 2. グローバル設定
+    # 2. グローバル設定（設定値初期化を強化）
     st.sidebar.header("⚙️ グローバル設定")
-    with st.sidebar.expander("🏥 基本病院設定", expanded=False):
-        if 'settings_loaded' not in st.session_state:
-            saved_settings = load_settings_from_file()
-            if saved_settings:
-                for key, value in saved_settings.items():
+    
+    # 設定値の初期化（config.pyからの読み込み強化）
+    if 'settings_initialized' not in st.session_state:
+        # config.pyからのデフォルト値で初期化
+        st.session_state.total_beds = DEFAULT_TOTAL_BEDS
+        st.session_state.bed_occupancy_rate = DEFAULT_OCCUPANCY_RATE
+        st.session_state.bed_occupancy_rate_percent = int(DEFAULT_OCCUPANCY_RATE * 100)
+        st.session_state.avg_length_of_stay = DEFAULT_AVG_LENGTH_OF_STAY
+        st.session_state.avg_admission_fee = DEFAULT_ADMISSION_FEE
+        st.session_state.monthly_target_patient_days = DEFAULT_TARGET_PATIENT_DAYS
+        st.session_state.monthly_target_admissions = DEFAULT_TARGET_ADMISSIONS
+        
+        # 保存された設定があれば上書き
+        saved_settings = load_settings_from_file()
+        if saved_settings:
+            for key, value in saved_settings.items():
+                if key in st.session_state:  # 既存のキーのみ更新
                     st.session_state[key] = value
-            st.session_state.settings_loaded = True
+        
+        st.session_state.settings_initialized = True
+    
+    with st.sidebar.expander("🏥 基本病院設定", expanded=False):
         def get_safe_value(key, default, value_type=int):
             value = st.session_state.get(key, default)
-            if isinstance(value, list): value = value[0] if value else default
-            elif not isinstance(value, (int, float)): value = default
+            if isinstance(value, list): 
+                value = value[0] if value else default
+            elif not isinstance(value, (int, float)): 
+                value = default
             return value_type(value)
 
         total_beds = st.number_input(
-            "総病床数", min_value=HOSPITAL_SETTINGS['min_beds'], max_value=HOSPITAL_SETTINGS['max_beds'],
-            value=get_safe_value('total_beds', DEFAULT_TOTAL_BEDS), step=1, help="病院の総病床数",
-            key="sidebar_total_beds_global_v3"
+            "総病床数", 
+            min_value=HOSPITAL_SETTINGS['min_beds'], 
+            max_value=HOSPITAL_SETTINGS['max_beds'],
+            value=get_safe_value('total_beds', DEFAULT_TOTAL_BEDS), 
+            step=1, 
+            help="病院の総病床数",
+            key="sidebar_total_beds_global_v4"
         )
         st.session_state.total_beds = total_beds
+        
         current_occupancy_percent = st.session_state.get('bed_occupancy_rate_percent', int(DEFAULT_OCCUPANCY_RATE * 100))
         bed_occupancy_rate = st.slider(
-            "目標病床稼働率 (%)", min_value=int(HOSPITAL_SETTINGS['min_occupancy_rate'] * 100),
+            "目標病床稼働率 (%)", 
+            min_value=int(HOSPITAL_SETTINGS['min_occupancy_rate'] * 100),
             max_value=int(HOSPITAL_SETTINGS['max_occupancy_rate'] * 100),
-            value=current_occupancy_percent, step=1, help="目標とする病床稼働率",
-            key="sidebar_bed_occupancy_rate_slider_global_v3"
+            value=current_occupancy_percent, 
+            step=1, 
+            help="目標とする病床稼働率",
+            key="sidebar_bed_occupancy_rate_slider_global_v4"
         ) / 100
         st.session_state.bed_occupancy_rate = bed_occupancy_rate
         st.session_state.bed_occupancy_rate_percent = int(bed_occupancy_rate * 100)
+        
         avg_length_of_stay = st.number_input(
-            "平均在院日数目標", min_value=HOSPITAL_SETTINGS['min_avg_stay'], max_value=HOSPITAL_SETTINGS['max_avg_stay'],
-            value=get_safe_value('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY, float), step=0.1, help="目標とする平均在院日数",
-            key="sidebar_avg_length_of_stay_global_v3"
+            "平均在院日数目標", 
+            min_value=HOSPITAL_SETTINGS['min_avg_stay'], 
+            max_value=HOSPITAL_SETTINGS['max_avg_stay'],
+            value=get_safe_value('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY, float), 
+            step=0.1, 
+            help="目標とする平均在院日数",
+            key="sidebar_avg_length_of_stay_global_v4"
         )
         st.session_state.avg_length_of_stay = avg_length_of_stay
+        
         avg_admission_fee = st.number_input(
-            "平均入院料（円/日）", min_value=1000, max_value=100000,
-            value=get_safe_value('avg_admission_fee', DEFAULT_ADMISSION_FEE), step=1000, help="1日あたりの平均入院料",
-            key="sidebar_avg_admission_fee_global_v3"
+            "平均入院料（円/日）", 
+            min_value=1000, 
+            max_value=100000,
+            value=get_safe_value('avg_admission_fee', DEFAULT_ADMISSION_FEE), 
+            step=1000, 
+            help="1日あたりの平均入院料",
+            key="sidebar_avg_admission_fee_global_v4"
         )
         st.session_state.avg_admission_fee = avg_admission_fee
 
     with st.sidebar.expander("🎯 KPI目標値設定", expanded=False):
         monthly_target_patient_days = st.number_input(
-            "月間延べ在院日数目標（人日）", min_value=100, max_value=50000,
-            value=get_safe_value('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), step=100, help="月間の延べ在院日数目標",
-            key="sidebar_monthly_target_pd_global_v3"
+            "月間延べ在院日数目標（人日）", 
+            min_value=100, 
+            max_value=50000,
+            value=get_safe_value('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), 
+            step=100, 
+            help="月間の延べ在院日数目標",
+            key="sidebar_monthly_target_pd_global_v4"
         )
         st.session_state.monthly_target_patient_days = monthly_target_patient_days
+        
         monthly_target_admissions = st.number_input(
-            "月間新入院患者数目標（人）", min_value=10, max_value=5000,
-            value=get_safe_value('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS), step=10, help="月間の新入院患者数目標",
-            key="sidebar_monthly_target_adm_global_v3"
+            "月間新入院患者数目標（人）", 
+            min_value=10, 
+            max_value=5000,
+            value=get_safe_value('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS), 
+            step=10, 
+            help="月間の新入院患者数目標",
+            key="sidebar_monthly_target_adm_global_v4"
         )
         st.session_state.monthly_target_admissions = monthly_target_admissions
 
-    if st.sidebar.button("💾 グローバル設定とKPI目標値を保存", key="save_all_global_settings_sidebar_v4", use_container_width=True): # キー変更
+    if st.sidebar.button("💾 グローバル設定とKPI目標値を保存", key="save_all_global_settings_sidebar_v5", use_container_width=True):
         settings_to_save = {
             'total_beds': st.session_state.total_beds,
             'bed_occupancy_rate': st.session_state.bed_occupancy_rate,
@@ -602,13 +648,33 @@ def create_sidebar():
             st.sidebar.success("設定保存完了!")
         else:
             st.sidebar.error("設定保存失敗")
+    
+    # 現在の設定値確認
+    with st.sidebar.expander("📋 現在の設定値確認", expanded=False):
+        st.markdown("**🏥 基本設定**")
+        st.write(f"• 総病床数: {st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)}床")
+        st.write(f"• 目標病床稼働率: {st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE)*100:.1f}%")
+        st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY):.1f}日")
+        st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE):,}円/日")
+        
+        st.markdown("**🎯 KPI目標値**")
+        st.write(f"• 月間延べ在院日数目標: {st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS):,}人日")
+        st.write(f"• 月間新入院患者数目標: {st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS):,}人")
+        
+        # 計算値も表示
+        st.markdown("**📊 計算値**")
+        target_daily_census = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS) * st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE)
+        target_daily_admissions = st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS) / 30
+        st.write(f"• 目標日平均在院患者数: {target_daily_census:.1f}人")
+        st.write(f"• 目標日平均新入院患者数: {target_daily_admissions:.1f}人/日")
+    
     st.sidebar.markdown("---")
 
-    # 3. データ設定
+    # 3. データ設定（既存のcreate_sidebar_data_settings関数を呼び出し）
     create_sidebar_data_settings()
     st.sidebar.markdown("---")
 
-    # 4. 目標値ファイル状況
+    # 4. 目標値ファイル状況（既存関数を呼び出し）
     create_sidebar_target_file_status()
 
     return True
@@ -658,6 +724,17 @@ def main():
     if 'mappings_initialized_after_processing' not in st.session_state: 
         st.session_state.mappings_initialized_after_processing = False
 
+    # 設定値の初期化（config.pyから）
+    if 'global_settings_initialized' not in st.session_state:
+        st.session_state.total_beds = DEFAULT_TOTAL_BEDS
+        st.session_state.bed_occupancy_rate = DEFAULT_OCCUPANCY_RATE
+        st.session_state.bed_occupancy_rate_percent = int(DEFAULT_OCCUPANCY_RATE * 100)
+        st.session_state.avg_length_of_stay = DEFAULT_AVG_LENGTH_OF_STAY
+        st.session_state.avg_admission_fee = DEFAULT_ADMISSION_FEE
+        st.session_state.monthly_target_patient_days = DEFAULT_TARGET_PATIENT_DAYS
+        st.session_state.monthly_target_admissions = DEFAULT_TARGET_ADMISSIONS
+        st.session_state.global_settings_initialized = True
+
     # 自動読み込み実行（シンプル版）
     try:
         auto_loaded = auto_load_data()
@@ -684,7 +761,7 @@ def main():
     create_sidebar()
 
     # タブの作成と処理
-    tab_titles = ["💰 経営ダッシュボード", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
+    tab_titles = ["📊 主要指標", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
     if FORECAST_AVAILABLE:
         tab_titles.append("🔮 予測分析")
     tab_titles.extend(["📤 データ出力", "📥 データ入力"])
@@ -709,11 +786,11 @@ def main():
         df_filtered_unified = filter_data_by_analysis_period(df_original_main)
         current_filter_config = get_unified_filter_config()
 
-        with tabs[tab_titles.index("💰 経営ダッシュボード")]:
+        with tabs[tab_titles.index("📊 主要指標")]:
             try: 
                 create_management_dashboard_tab()
             except Exception as e: 
-                st.error(f"経営ダッシュボードでエラー: {str(e)}\n{traceback.format_exc()}")
+                st.error(f"主要指標でエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[tab_titles.index("🗓️ 平均在院日数分析")]:
             try:

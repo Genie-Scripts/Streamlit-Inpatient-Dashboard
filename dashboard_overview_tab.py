@@ -64,6 +64,13 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
         st.warning("表示するメトリクスデータがありません。")
         return
 
+    # 設定値の取得（デフォルト値でフォールバック）
+    total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
+    target_occupancy_rate = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE)
+    avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
+    target_admissions_monthly = st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS)
+    avg_admission_fee_val = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
+
     st.info(f"📊 分析期間: {selected_period_info}")
     st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
 
@@ -74,8 +81,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
     with col1:
         # 日平均在院患者数
         avg_daily_census_val = metrics.get('avg_daily_census', 0)
-        total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
-        target_occupancy_rate = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE)
         target_census = total_beds * target_occupancy_rate
         census_delta = avg_daily_census_val - target_census
         census_color = "normal" if census_delta >= 0 else "inverse"
@@ -93,7 +98,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
     with col2:
         # 病床利用率
         bed_occupancy_rate_val = metrics.get('bed_occupancy_rate', 0)
-        target_occupancy = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE) * 100
+        target_occupancy = target_occupancy_rate * 100
         occupancy_delta = bed_occupancy_rate_val - target_occupancy if bed_occupancy_rate_val is not None else 0
         delta_color = "normal" if abs(occupancy_delta) <= 5 else ("inverse" if occupancy_delta < -5 else "normal")
         
@@ -110,7 +115,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
     with col3:
         # 平均在院日数
         avg_los_val = metrics.get('avg_los', 0)
-        avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
         alos_delta = avg_los_val - avg_length_of_stay_target
         alos_color = "inverse" if alos_delta > 0 else "normal"  # 短い方が良い
         
@@ -122,7 +126,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             help=f"{selected_period_info}の平均在院日数"
         )
         st.caption(f"目標: {avg_length_of_stay_target:.1f}日")
-        # 総入院患者数も表示したい場合
         total_admissions = metrics.get('total_admissions', 0)
         if total_admissions > 0:
             st.caption(f"総入院: {total_admissions:,.0f}人")
@@ -130,7 +133,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
     with col4:
         # 日平均新入院患者数
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
-        target_admissions_monthly = st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS)
         target_daily_admissions = target_admissions_monthly / 30  # 月目標を日割り
         daily_delta = avg_daily_admissions_val - target_daily_admissions
         daily_color = "normal" if daily_delta >= 0 else "inverse"
@@ -157,7 +159,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
         
         with col_rev1:
             estimated_revenue_val = metrics.get('estimated_revenue', 0)
-            avg_admission_fee_val = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
             st.metric(
                 f"推計収益",
                 format_number_with_config(estimated_revenue_val, format_type="currency"),
@@ -217,10 +218,10 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
         detail_col1, detail_col2, detail_col3 = st.columns(3)
         with detail_col1:
             st.markdown("**🏥 基本設定**")
-            st.write(f"• 総病床数: {metrics.get('total_beds', st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)):,}床")
-            st.write(f"• 目標病床利用率: {st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE):.1%}")
-            st.write(f"• 平均入院料: {st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE):,}円/日")
-            st.write(f"• 目標平均在院日数: {st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY):.1f}日")
+            st.write(f"• 総病床数: {total_beds:,}床")
+            st.write(f"• 目標病床利用率: {target_occupancy_rate:.1%}")
+            st.write(f"• 平均入院料: {avg_admission_fee_val:,}円/日")
+            st.write(f"• 目標平均在院日数: {avg_length_of_stay_target:.1f}日")
         with detail_col2:
             st.markdown("**📅 期間情報**")
             st.write(f"• 計算対象期間: {selected_period_info}")
@@ -228,10 +229,11 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             st.write(f"• アプリバージョン: v{APP_VERSION}")
         with detail_col3:
             st.markdown("**🎯 月間目標値**")
-            st.write(f"• 延べ在院日数: {format_number_with_config(st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS), '人日')}")
-            target_rev = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
+            monthly_target_days = st.session_state.get('monthly_target_patient_days', DEFAULT_TARGET_PATIENT_DAYS)
+            st.write(f"• 延べ在院日数: {format_number_with_config(monthly_target_days, '人日')}")
+            target_rev = monthly_target_days * avg_admission_fee_val
             st.write(f"• 推定収益: {format_number_with_config(target_rev, format_type='currency')}")
-            st.write(f"• 新入院患者数: {st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS):,}人")
+            st.write(f"• 新入院患者数: {target_admissions_monthly:,}人")
 
 
 def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
