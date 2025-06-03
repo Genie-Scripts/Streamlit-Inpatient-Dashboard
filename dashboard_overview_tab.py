@@ -1,8 +1,11 @@
-# dashboard_overview_tab.py
+# dashboard_overview_tab.py (昨年度同期間比較版)
 
 import streamlit as st
 import pandas as pd
-from datetime import timedelta # pd.Timedelta のために必要
+from datetime import timedelta
+import logging
+
+logger = logging.getLogger(__name__)
 
 # dashboard_charts.py からのインポートは維持
 try:
@@ -26,6 +29,14 @@ except ImportError:
     analyze_kpi_insights = None
     get_kpi_status = None
 
+# unified_filters.py からのインポート
+try:
+    from unified_filters import apply_unified_filters, get_unified_filter_config
+except ImportError:
+    st.error("unified_filters.py が見つからないか、必要な関数が定義されていません。")
+    apply_unified_filters = None
+    get_unified_filter_config = None
+
 # config.py から定数をインポート
 from config import (
     DEFAULT_OCCUPANCY_RATE,
@@ -35,11 +46,9 @@ from config import (
     NUMBER_FORMAT,
     DEFAULT_TOTAL_BEDS,
     DEFAULT_AVG_LENGTH_OF_STAY,
-    DEFAULT_TARGET_ADMISSIONS  # ★★★ この行が重要 ★★★
+    DEFAULT_TARGET_ADMISSIONS
 )
 
-
-# ===== 新しく配置する関数 =====
 def format_number_with_config(value, unit="", format_type="default"):
     if pd.isna(value) or value is None:
         return f"0{unit}" if unit else "0"
@@ -58,8 +67,92 @@ def format_number_with_config(value, unit="", format_type="default"):
     else:
         return f"{value:,.1f}{unit}" if isinstance(value, float) else f"{value:,.0f}{unit}"
 
+def calculate_previous_year_same_period(df_original, current_end_date, current_filter_config):
+    """
+    昨年度同期間のデータを計算（統一フィルター適用）
+    
+    Args:
+        df_original (pd.DataFrame): 元のデータフレーム
+        current_end_date (pd.Timestamp): 現在の直近データ日付
+        current_filter_config (dict): 現在のフィルター設定
+        
+    Returns:
+        tuple: (昨年度同期間データ, 開始日, 終了日, 期間説明文)
+    """
+    try:
+        if df_original is None or df_original.empty:
+            return pd.DataFrame(), None, None, "データなし"
+        
+        # 現在の年度を判定
+        if current_end_date.month >= 4:
+            current_fiscal_year = current_end_date.year
+        else:
+            current_fiscal_year = current_end_date.year - 1
+        
+        # 昨年度の開始日（昨年度4月1日）
+        prev_fiscal_start = pd.Timestamp(year=current_fiscal_year - 1, month=4, day=1)
+        
+        # 昨年度の終了日（昨年度の同月日）
+        try:
+            prev_fiscal_end = pd.Timestamp(
+                year=current_end_date.year - 1, 
+                month=current_end_date.month, 
+                day=current_end_date.day
+            )
+        except ValueError:
+            # 2月29日などの特殊ケース対応
+            prev_fiscal_end = pd.Timestamp(
+                year=current_end_date.year - 1, 
+                month=current_end_date.month, 
+                day=28
+            )
+        
+        # 昨年度同期間のデータをフィルタリング
+        if '日付' in df_original.columns:
+            df_original['日付'] = pd.to_datetime(df_original['日付'])
+            prev_year_data = df_original[
+                (df_original['日付'] >= prev_fiscal_start) & 
+                (df_original['日付'] <= prev_fiscal_end)
+            ].copy()
+        else:
+            prev_year_data = pd.DataFrame()
+        
+        # 統一フィルターの診療科・病棟設定を昨年度データに適用
+        if apply_unified_filters and current_filter_config and not prev_year_data.empty:
+            # 期間フィルターを昨年度期間に変更して適用
+            temp_filter_config = current_filter_config.copy()
+            temp_filter_config['start_date'] = prev_fiscal_start
+            temp_filter_config['end_date'] = prev_fiscal_end
+            
+            # 診療科フィルター適用
+            if (temp_filter_config.get('dept_filter_mode') == "特定診療科" and 
+                temp_filter_config.get('selected_depts') and 
+                '診療科名' in prev_year_data.columns):
+                prev_year_data = prev_year_data[
+                    prev_year_data['診療科名'].isin(temp_filter_config['selected_depts'])
+                ]
+            
+            # 病棟フィルター適用
+            if (temp_filter_config.get('ward_filter_mode') == "特定病棟" and 
+                temp_filter_config.get('selected_wards') and 
+                '病棟コード' in prev_year_data.columns):
+                prev_year_data = prev_year_data[
+                    prev_year_data['病棟コード'].isin(temp_filter_config['selected_wards'])
+                ]
+        
+        # 期間説明文
+        period_days = (prev_fiscal_end - prev_fiscal_start).days + 1
+        period_description = f"{prev_fiscal_start.strftime('%Y年%m月%d日')} ～ {prev_fiscal_end.strftime('%Y年%m月%d日')} ({period_days}日間)"
+        
+        logger.info(f"昨年度同期間データ抽出完了: {len(prev_year_data)}行, 期間: {period_description}")
+        
+        return prev_year_data, prev_fiscal_start, prev_fiscal_end, period_description
+        
+    except Exception as e:
+        logger.error(f"昨年度同期間データ計算エラー: {e}", exc_info=True)
+        return pd.DataFrame(), None, None, "計算エラー"
 
-def display_unified_metrics_layout_colorized(metrics, selected_period_info):
+def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev_year_metrics=None, prev_year_period_info=None):
     if not metrics:
         st.warning("表示するメトリクスデータがありません。")
         return
@@ -150,7 +243,74 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             total_period_admissions = avg_daily_admissions_val * period_days_val
             st.caption(f"期間計: {total_period_admissions:.0f}人")
 
-    # 追加の詳細情報（収益関連は別セクション）
+    # 昨年度同期間との比較指標
+    if prev_year_metrics and prev_year_period_info:
+        st.markdown("---")
+        st.markdown("### 📊 昨年度同期間比較")
+        st.info(f"📊 昨年度同期間: {prev_year_period_info}")
+        st.caption("※診療科・病棟フィルターが適用された昨年度同期間データとの比較")
+        
+        prev_col1, prev_col2, prev_col3, prev_col4 = st.columns(4)
+        
+        with prev_col1:
+            # 昨年度日平均在院患者数
+            prev_avg_daily_census = prev_year_metrics.get('avg_daily_census', 0)
+            yoy_census_change = avg_daily_census_val - prev_avg_daily_census
+            yoy_census_pct = (yoy_census_change / prev_avg_daily_census * 100) if prev_avg_daily_census > 0 else 0
+            yoy_census_color = "normal" if yoy_census_change >= 0 else "inverse"
+            
+            st.metric(
+                "👥 日平均在院患者数",
+                f"{prev_avg_daily_census:.1f}人",
+                delta=f"{yoy_census_change:+.1f}人 ({yoy_census_pct:+.1f}%)",
+                delta_color=yoy_census_color,
+                help=f"昨年度同期間の日平均在院患者数との比較"
+            )
+            
+        with prev_col2:
+            # 昨年度病床利用率
+            prev_bed_occupancy = prev_year_metrics.get('bed_occupancy_rate', 0)
+            yoy_occupancy_change = bed_occupancy_rate_val - prev_bed_occupancy
+            yoy_occupancy_color = "normal" if yoy_occupancy_change >= 0 else "inverse"
+            
+            st.metric(
+                "🏥 病床利用率",
+                f"{prev_bed_occupancy:.1f}%",
+                delta=f"{yoy_occupancy_change:+.1f}%",
+                delta_color=yoy_occupancy_color,
+                help="昨年度同期間の病床利用率との比較"
+            )
+            
+        with prev_col3:
+            # 昨年度平均在院日数
+            prev_avg_los = prev_year_metrics.get('avg_los', 0)
+            yoy_los_change = avg_los_val - prev_avg_los
+            yoy_los_color = "inverse" if yoy_los_change > 0 else "normal"  # 短縮が良い
+            
+            st.metric(
+                "📅 平均在院日数",
+                f"{prev_avg_los:.1f}日",
+                delta=f"{yoy_los_change:+.1f}日",
+                delta_color=yoy_los_color,
+                help="昨年度同期間の平均在院日数との比較"
+            )
+            
+        with prev_col4:
+            # 昨年度日平均新入院患者数
+            prev_avg_daily_admissions = prev_year_metrics.get('avg_daily_admissions', 0)
+            yoy_admissions_change = avg_daily_admissions_val - prev_avg_daily_admissions
+            yoy_admissions_pct = (yoy_admissions_change / prev_avg_daily_admissions * 100) if prev_avg_daily_admissions > 0 else 0
+            yoy_admissions_color = "normal" if yoy_admissions_change >= 0 else "inverse"
+            
+            st.metric(
+                "📈 日平均新入院患者数",
+                f"{prev_avg_daily_admissions:.1f}人/日",
+                delta=f"{yoy_admissions_change:+.1f}人/日 ({yoy_admissions_pct:+.1f}%)",
+                delta_color=yoy_admissions_color,
+                help="昨年度同期間の日平均新入院患者数との比較"
+            )
+
+    # 追加の詳細情報
     st.markdown("---")
     
     # 収益関連指標（必要に応じて表示）
@@ -211,6 +371,11 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
         - 日々の入院受け入れペースを示す指標
         - 稼働計画や人員配置の参考値
         - 病院の活動量を表す重要指標
+        
+        **昨年度同期間比較**: フィルター適用された昨年度同期間（昨年度4月1日～昨年度の同月日）との比較
+        - 季節性を考慮した前年比較が可能
+        - 診療科・病棟フィルターが昨年度データにも適用される
+        - 年度の成長・改善状況を把握
         """)
 
     # 詳細データと設定値
@@ -226,6 +391,8 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             st.markdown("**📅 期間情報**")
             st.write(f"• 計算対象期間: {selected_period_info}")
             st.write(f"• 期間日数: {metrics.get('period_days', 0)}日")
+            if prev_year_period_info:
+                st.write(f"• 昨年度同期間: {prev_year_period_info}")
             st.write(f"• アプリバージョン: v{APP_VERSION}")
         with detail_col3:
             st.markdown("**🎯 月間目標値**")
@@ -235,7 +402,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info):
             st.write(f"• 推定収益: {format_number_with_config(target_rev, format_type='currency')}")
             st.write(f"• 新入院患者数: {target_admissions_monthly:,}人")
 
-
 def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     if df is None or df.empty:
         st.warning("データが読み込まれていません。")
@@ -244,17 +410,11 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         st.error("KPI計算関数が利用できません。")
         return
     
+    # 現在期間のKPI計算
     kpis_selected_period = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
     if kpis_selected_period is None or kpis_selected_period.get("error"):
         st.warning(f"選択された期間のKPI計算に失敗しました。理由: {kpis_selected_period.get('error', '不明') if kpis_selected_period else '不明'}")
         return
-    
-    # 30日間の比較データ（参考用）
-    latest_date_in_df = df['日付'].max()
-    start_30d = latest_date_in_df - pd.Timedelta(days=29)
-    end_30d = latest_date_in_df
-    df_30d = df[(df['日付'] >= start_30d) & (df['日付'] <= end_30d)]
-    kpis_30d = calculate_kpis(df_30d, start_30d, end_30d, total_beds=total_beds_setting) if not df_30d.empty else {}
     
     # 追加のメトリクス計算
     period_df = df[(df['日付'] >= start_date) & (df['日付'] <= end_date)]
@@ -264,7 +424,6 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     
     metrics_for_display = {
         'avg_daily_census': kpis_selected_period.get('avg_daily_census'),
-        'avg_daily_census_30d': kpis_30d.get('avg_daily_census'),
         'bed_occupancy_rate': kpis_selected_period.get('bed_occupancy_rate'),
         'avg_los': kpis_selected_period.get('alos'),
         'estimated_revenue': kpis_selected_period.get('total_patient_days', 0) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE),
@@ -272,12 +431,55 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         'avg_daily_admissions': kpis_selected_period.get('avg_daily_admissions'),
         'period_days': kpis_selected_period.get('days_count'),
         'total_beds': total_beds_setting,
-        'total_admissions': total_admissions,  # 追加
+        'total_admissions': total_admissions,
     }
     
-    period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
-    display_unified_metrics_layout_colorized(metrics_for_display, period_description)
+    # 昨年度同期間データの計算
+    df_original = st.session_state.get('df')  # 元のフィルタリング前データ
+    current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
     
+    prev_year_metrics = None
+    prev_year_period_info = None
+    
+    if df_original is not None and not df_original.empty:
+        try:
+            latest_date_in_current = end_date
+            prev_year_data, prev_start, prev_end, prev_period_desc = calculate_previous_year_same_period(
+                df_original, latest_date_in_current, current_filter_config
+            )
+            
+            if not prev_year_data.empty and prev_start and prev_end:
+                prev_year_kpis = calculate_kpis(prev_year_data, prev_start, prev_end, total_beds=total_beds_setting)
+                if prev_year_kpis and not prev_year_kpis.get("error"):
+                    # 昨年度の追加メトリクス計算
+                    prev_total_admissions = 0
+                    if '入院患者数' in prev_year_data.columns:
+                        prev_total_admissions = prev_year_data['入院患者数'].sum()
+                    
+                    prev_year_metrics = {
+                        'avg_daily_census': prev_year_kpis.get('avg_daily_census'),
+                        'bed_occupancy_rate': prev_year_kpis.get('bed_occupancy_rate'),
+                        'avg_los': prev_year_kpis.get('alos'),
+                        'avg_daily_admissions': prev_year_kpis.get('avg_daily_admissions'),
+                        'total_admissions': prev_total_admissions,
+                    }
+                    prev_year_period_info = prev_period_desc
+                    logger.info(f"昨年度同期間KPI計算完了: {prev_year_period_info}")
+                else:
+                    logger.warning("昨年度同期間のKPI計算に失敗しました。")
+            else:
+                logger.info("昨年度同期間のデータが見つかりませんでした。")
+        except Exception as e:
+            logger.error(f"昨年度同期間データ処理エラー: {e}", exc_info=True)
+    
+    period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
+    display_unified_metrics_layout_colorized(
+        metrics_for_display, 
+        period_description, 
+        prev_year_metrics, 
+        prev_year_period_info
+    )
+
 def display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     if df is None or df.empty:
         st.warning("データが読み込まれていません。")
