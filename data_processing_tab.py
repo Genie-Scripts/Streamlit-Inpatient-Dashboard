@@ -1,4 +1,4 @@
-# data_processing_tab.py (UI表示ロジック確認・修正案)
+# data_processing_tab.py (修正版 - 構文エラー解決)
 
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -11,6 +11,8 @@ import tempfile
 import gc
 import psutil
 import logging
+import traceback  # トレースバック用のインポートを追加
+
 logger = logging.getLogger(__name__)
 
 from integrated_preprocessing import (
@@ -34,8 +36,10 @@ def log_memory_usage():
         process = psutil.Process()
         mem_info = process.memory_info()
         return {
-            'process_mb': mem_info.rss / (1024 * 1024), 'process_percent': process.memory_percent(),
-            'system_percent': psutil.virtual_memory().percent, 'available_mb': psutil.virtual_memory().available / (1024 * 1024)
+            'process_mb': mem_info.rss / (1024 * 1024), 
+            'process_percent': process.memory_percent(),
+            'system_percent': psutil.virtual_memory().percent, 
+            'available_mb': psutil.virtual_memory().available / (1024 * 1024)
         }
     except Exception as e:
         logger.error(f"メモリ情報取得エラー: {e}", exc_info=True)
@@ -53,101 +57,165 @@ def perform_cleanup(deep=False):
         import glob, shutil
         for temp_file_path in glob.glob(app_temp_files_pattern):
             try:
-                if os.path.isfile(temp_file_path): os.unlink(temp_file_path)
-                elif os.path.isdir(temp_file_path): shutil.rmtree(temp_file_path, ignore_errors=True)
-            except Exception as e_file_del: logger.warning(f"一時ファイルの削除中にエラー: {e_file_del}")
-    except Exception as e_temp_clean: logger.warning(f"一時ファイルクリーンアップ処理中にエラー: {e_temp_clean}")
-    gc.collect(); time.sleep(0.1); gc.collect()
+                if os.path.isfile(temp_file_path): 
+                    os.unlink(temp_file_path)
+                elif os.path.isdir(temp_file_path): 
+                    shutil.rmtree(temp_file_path, ignore_errors=True)
+            except Exception as e_file_del: 
+                logger.warning(f"一時ファイルの削除中にエラー: {e_file_del}")
+    except Exception as e_temp_clean: 
+        logger.warning(f"一時ファイルクリーンアップ処理中にエラー: {e_temp_clean}")
+    gc.collect()
+    time.sleep(0.1)
+    gc.collect()
 
 def get_app_data_dir():
     base_temp_dir = tempfile.gettempdir()
     app_data_dir = os.path.join(base_temp_dir, "integrated_dashboard_data")
     if not os.path.exists(app_data_dir):
-        try: os.makedirs(app_data_dir, exist_ok=True)
-        except OSError as e: st.error(f"データ保存ディレクトリの作成に失敗: {app_data_dir}\n{e}"); return None
+        try: 
+            os.makedirs(app_data_dir, exist_ok=True)
+        except OSError as e: 
+            st.error(f"データ保存ディレクトリの作成に失敗: {app_data_dir}\n{e}")
+            return None
     return app_data_dir
 
 def get_base_file_info(app_data_dir):
-    if app_data_dir is None: return None
+    if app_data_dir is None: 
+        return None
     info_path = os.path.join(app_data_dir, "base_file_info.json")
     if os.path.exists(info_path):
         try:
-            import json;
-            with open(info_path, 'r', encoding='utf-8') as f: return json.load(f)
-        except Exception as e: logger.error(f"ベースファイル情報の読み込みエラー: {e}", exc_info=True); return None
+            import json
+            with open(info_path, 'r', encoding='utf-8') as f: 
+                return json.load(f)
+        except Exception as e: 
+            logger.error(f"ベースファイル情報の読み込みエラー: {e}", exc_info=True)
+            return None
     return None
 
 def save_base_file_info(app_data_dir, file_name, file_size, file_hash):
-    if app_data_dir is None: return
+    if app_data_dir is None: 
+        return
     info_path = os.path.join(app_data_dir, "base_file_info.json")
     info = {"file_name": file_name, "file_size": file_size, "file_hash": file_hash}
     try:
-        import json;
-        with open(info_path, 'w', encoding='utf-8') as f: json.dump(info, f, ensure_ascii=False, indent=2)
-    except Exception as e: logger.error(f"ベースファイル情報の保存エラー: {e}", exc_info=True)
+        import json
+        with open(info_path, 'w', encoding='utf-8') as f: 
+            json.dump(info, f, ensure_ascii=False, indent=2)
+    except Exception as e: 
+        logger.error(f"ベースファイル情報の保存エラー: {e}", exc_info=True)
 
 def debug_target_file_processing(target_data, search_keywords=['全体', '病院全体', '病院']):
-    debug_info = {'file_loaded': target_data is not None, 'columns': [], 'shape': (0,0), 'search_results': {}, 'sample_data': None}
-    if target_data is not None and not target_data.empty: # emptyチェック追加
-        debug_info['columns'] = list(target_data.columns); debug_info['shape'] = target_data.shape
+    debug_info = {
+        'file_loaded': target_data is not None, 
+        'columns': [], 
+        'shape': (0,0), 
+        'search_results': {}, 
+        'sample_data': None
+    }
+    if target_data is not None and not target_data.empty:
+        debug_info['columns'] = list(target_data.columns)
+        debug_info['shape'] = target_data.shape
         debug_info['sample_data'] = target_data.head(3).to_dict('records') if len(target_data) > 0 else []
+        
         for keyword in search_keywords:
             results = []
             for col in target_data.columns:
-                if target_data[col].dtype == 'object': # 文字列型に限定した方が安全
+                if target_data[col].dtype == 'object':
                     try:
                         matches = target_data[target_data[col].astype(str).str.contains(keyword, na=False, case=False)]
                         if len(matches) > 0:
-                            results.append({'column': col, 'matches': len(matches), 'sample_values': matches[col].unique()[:3].tolist()})
-                    except Exception as e_search: logger.debug(f"目標値ファイルデバッグ検索中エラー ({col}, {keyword}): {e_search}")
+                            results.append({
+                                'column': col, 
+                                'matches': len(matches), 
+                                'sample_values': matches[col].unique()[:3].tolist()
+                            })
+                    except Exception as e_search: 
+                        logger.debug(f"目標値ファイルデバッグ検索中エラー ({col}, {keyword}): {e_search}")
             debug_info['search_results'][keyword] = results
     return debug_info
 
 def extract_targets_from_file(target_data):
-    if target_data is None or target_data.empty: return None, None
+    if target_data is None or target_data.empty: 
+        return None, None
+    
     debug_info = debug_target_file_processing(target_data)
-    search_patterns = [('部門コード', ['全体', '病院', '総合']), ('部門名', ['病院全体', '全体', '病院', '総合']),
-                       ('診療科名', ['病院全体', '全体', '病院', '総合']), ('科名', ['病院全体', '全体', '病院', '総合'])]
-    target_row = None; used_pattern = None
+    search_patterns = [
+        ('部門コード', ['全体', '病院', '総合']), 
+        ('部門名', ['病院全体', '全体', '病院', '総合']),
+        ('診療科名', ['病院全体', '全体', '病院', '総合']), 
+        ('科名', ['病院全体', '全体', '病院', '総合'])
+    ]
+    
+    target_row = None
+    used_pattern = None
+    
     for col_name, keywords in search_patterns:
         if col_name in target_data.columns:
             for keyword in keywords:
                 try:
                     mask = target_data[col_name].astype(str).str.contains(keyword, na=False, case=False)
                     matches = target_data[mask]
-                    if len(matches) > 0: target_row = matches.iloc[0]; used_pattern = f"{col_name}='{keyword}'"; logger.info(f"目標値データ検索成功: {used_pattern}"); break
-                except Exception as e_pat: logger.debug(f"目標値検索パターンエラー ({col_name}, {keyword}): {e_pat}")
-            if target_row is not None: break
+                    if len(matches) > 0: 
+                        target_row = matches.iloc[0]
+                        used_pattern = f"{col_name}='{keyword}'"
+                        logger.info(f"目標値データ検索成功: {used_pattern}")
+                        break
+                except Exception as e_pat: 
+                    logger.debug(f"目標値検索パターンエラー ({col_name}, {keyword}): {e_pat}")
+            if target_row is not None: 
+                break
+    
     if target_row is None:
         logger.warning("目標値データで「全体」に相当する行が見つかりませんでした。")
         return None, debug_info
 
-    target_days = None; target_admissions = None
-    days_columns = ['延べ在院日数目標', '在院日数目標', '目標在院日数', '延べ在院日数', '在院日数'];
+    target_days = None
+    target_admissions = None
+    days_columns = ['延べ在院日数目標', '在院日数目標', '目標在院日数', '延べ在院日数', '在院日数']
     admission_columns = ['新入院患者数目標', '入院患者数目標', '目標入院患者数', '新入院患者数', '入院患者数']
+    
     for col in days_columns:
         if col in target_data.columns:
             try:
                 value = target_row[col]
                 if pd.notna(value) and str(value).strip() != '':
                     target_days = float(str(value).replace(',', '').replace('人日', '').strip())
-                    logger.info(f"延べ在院日数目標を取得: {target_days} (列: {col})"); break
-            except (ValueError, TypeError) as e: logger.warning(f"延べ在院日数目標の変換エラー (列: {col}): {e}")
+                    logger.info(f"延べ在院日数目標を取得: {target_days} (列: {col})")
+                    break
+            except (ValueError, TypeError) as e: 
+                logger.warning(f"延べ在院日数目標の変換エラー (列: {col}): {e}")
+    
     for col in admission_columns:
         if col in target_data.columns:
             try:
                 value = target_row[col]
                 if pd.notna(value) and str(value).strip() != '':
                     target_admissions = float(str(value).replace(',', '').replace('人', '').strip())
-                    logger.info(f"新入院患者数目標を取得: {target_admissions} (列: {col})"); break
-            except (ValueError, TypeError) as e: logger.warning(f"新入院患者数目標の変換エラー (列: {col}): {e}")
+                    logger.info(f"新入院患者数目標を取得: {target_admissions} (列: {col})")
+                    break
+            except (ValueError, TypeError) as e: 
+                logger.warning(f"新入院患者数目標の変換エラー (列: {col}): {e}")
+    
     if (target_days is None or target_admissions is None) and '目標値' in target_data.columns:
         try:
             general_target = float(str(target_row['目標値']).replace(',', '').strip())
-            if target_days is None: target_days = general_target; logger.info(f"一般目標値から延べ在院日数目標を設定: {target_days}")
-            if target_admissions is None: target_admissions = general_target; logger.info(f"一般目標値から新入院患者数目標を設定: {target_admissions}")
-        except (ValueError, TypeError) as e: logger.warning(f"一般目標値の変換エラー: {e}")
-    return {'target_days': target_days, 'target_admissions': target_admissions, 'used_pattern': used_pattern, 'source_row': target_row.to_dict() if target_row is not None else None}, debug_info
+            if target_days is None: 
+                target_days = general_target
+                logger.info(f"一般目標値から延べ在院日数目標を設定: {target_days}")
+            if target_admissions is None: 
+                target_admissions = general_target
+                logger.info(f"一般目標値から新入院患者数目標を設定: {target_admissions}")
+        except (ValueError, TypeError) as e: 
+            logger.warning(f"一般目標値の変換エラー: {e}")
+    
+    return {
+        'target_days': target_days, 
+        'target_admissions': target_admissions, 
+        'used_pattern': used_pattern, 
+        'source_row': target_row.to_dict() if target_row is not None else None
+    }, debug_info
 
 def process_data_with_progress(base_file_uploader_obj, new_files_uploader_list, target_file_uploader_obj, progress_bar):
     try:
@@ -176,11 +244,11 @@ def process_data_with_progress(base_file_uploader_obj, new_files_uploader_list, 
                 else:
                     failed_files.append(f"{info['name']} ({info['message']})")
             if successful_reads > 0:
-                st.success(f"{successful_reads} 件のファイルが正常に読み込まれました。") # このメッセージはUIに表示される
+                st.success(f"{successful_reads} 件のファイルが正常に読み込まれました。")
             if failed_files:
-                st.warning(f"{len(failed_files)} 件のファイルの読み込みに失敗またはスキップされました:") # このメッセージはUIに表示される
+                st.warning(f"{len(failed_files)} 件のファイルの読み込みに失敗またはスキップされました:")
                 for f_info in failed_files:
-                    st.caption(f"- {f_info}") # このメッセージはUIに表示される
+                    st.caption(f"- {f_info}")
         elif df_raw.empty:
             st.error("読み込むデータがありません。固定ファイルまたは追加ファイルをアップロードしてください。")
             progress_bar.progress(100, text="データ読み込み失敗。")
@@ -249,22 +317,23 @@ def process_data_with_progress(base_file_uploader_obj, new_files_uploader_list, 
             progress_bar.progress(100, text="データ前処理に失敗しました。")
             st.error("データ前処理の結果、有効なデータが残りませんでした。")
             if validation_results and validation_results.get('errors'):
-                for err_msg in validation_results.get('errors', []): st.error(err_msg)
+                for err_msg in validation_results.get('errors', []): 
+                    st.error(err_msg)
             return False, None, None, None, validation_results
 
         progress_bar.progress(50, text="4. データの検証中...")
         st.session_state.validation_results = validation_results
         if validation_results:
-            # 警告は expander の中に表示（エラーがある場合はそちらを優先して表示）
             if validation_results.get("errors"):
                 st.error("データ検証で以下のエラーが検出されました。処理を継続できません。")
-                for err_msg in validation_results["errors"]: st.error(err_msg)
-                # is_valid フラグに基づいて処理中断
+                for err_msg in validation_results["errors"]: 
+                    st.error(err_msg)
                 if not validation_results.get("is_valid", True):
                      return False, None, None, None, validation_results
             if validation_results.get("warnings"):
-                with st.expander("データ検証の警告", expanded=False): # expanded=False に変更
-                    for warn_msg in validation_results["warnings"]: st.warning(warn_msg)
+                with st.expander("データ検証の警告", expanded=False):
+                    for warn_msg in validation_results["warnings"]: 
+                        st.warning(warn_msg)
 
         progress_bar.progress(85, text="5. 全体データの集計中...")
         all_results = None
@@ -278,8 +347,12 @@ def process_data_with_progress(base_file_uploader_obj, new_files_uploader_list, 
             default_latest_date = df_final["日付"].max() if not df_final.empty and "日付" in df_final.columns else pd.Timestamp.now().normalize()
             all_results = {
                 "latest_date": default_latest_date,
-                "summary": pd.DataFrame(), "weekday": pd.DataFrame(), "holiday": pd.DataFrame(),
-                "monthly_all": pd.DataFrame(), "monthly_weekday": pd.DataFrame(), "monthly_holiday": pd.DataFrame(),
+                "summary": pd.DataFrame(), 
+                "weekday": pd.DataFrame(), 
+                "holiday": pd.DataFrame(),
+                "monthly_all": pd.DataFrame(), 
+                "monthly_weekday": pd.DataFrame(), 
+                "monthly_holiday": pd.DataFrame(),
             }
             if df_final is not None and not df_final.empty :
                  st.warning("全体結果の集計に一部失敗したため、限定的な結果になります。")
@@ -294,9 +367,12 @@ def process_data_with_progress(base_file_uploader_obj, new_files_uploader_list, 
         total_time_taken = time.time() - start_time_total
         logger.info(f"データ処理全体完了。処理時間: {total_time_taken:.1f}秒, レコード数: {len(df_final) if df_final is not None else 0}")
 
-        if 'performance_logs' not in st.session_state: st.session_state.performance_logs = []
+        if 'performance_logs' not in st.session_state: 
+            st.session_state.performance_logs = []
         st.session_state.performance_logs.append({
-            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"), 'operation': 'データ処理全体', 'duration': total_time_taken,
+            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"), 
+            'operation': 'データ処理全体', 
+            'duration': total_time_taken,
             'details': {
                 'rows': len(df_final) if df_final is not None else 0,
                 'columns': len(df_final.columns) if df_final is not None and hasattr(df_final, 'columns') else 0,
@@ -310,7 +386,8 @@ def process_data_with_progress(base_file_uploader_obj, new_files_uploader_list, 
         logger.error(f"データ処理のメインプロセスでエラーが発生しました: {e_main}", exc_info=True)
         progress_bar.progress(100, text=f"エラーが発生しました: {str(e_main)}")
         st.error(f"データ処理中に予期せぬエラーが発生しました: {str(e_main)}")
-        st.error(import traceback; traceback.format_exc()) # ここでインポートしてもOK
+        # 修正：tracebackを適切に使用
+        st.error(traceback.format_exc())
         return False, None, None, None, None
 
 
@@ -340,12 +417,13 @@ def create_data_processing_tab():
         st.session_state.target_file_debug_info = None
         st.session_state.extracted_targets = None
         if 'performance_metrics' not in st.session_state:
-            st.session_state.performance_metrics = {'data_load_time': 0, 'data_conversion_time': 0, 'processing_time': 0}
+            st.session_state.performance_metrics = {
+                'data_load_time': 0, 
+                'data_conversion_time': 0, 
+                'processing_time': 0
+            }
 
     st.subheader("📁 ファイルアップロード")
-    # --- ファイルアップローダーのキーをユニークにする ---
-    # create_data_processing_tab 関数が複数回呼び出されることは通常ないが、
-    # 万が一の衝突を避けるため、または将来的なコンポーネント化を考慮してプレフィックスをつけるのも良い
     base_file_key = "dp_base_file_uploader"
     new_files_key = "dp_new_files_uploader"
     target_file_key = "dp_target_file_uploader"
@@ -368,96 +446,103 @@ def create_data_processing_tab():
         )
 
     app_data_dir_val_dp = get_app_data_dir()
-    # Parquetキャッシュのパスは None の可能性も考慮
     parquet_base_path_val_dp = os.path.join(app_data_dir_val_dp, "processed_base_data.parquet") if app_data_dir_val_dp else None
     can_process_now_dp = False
-    base_file_info_dp = get_base_file_info(app_data_dir_val_dp) # get_base_file_info を呼び出し
+    base_file_info_dp = get_base_file_info(app_data_dir_val_dp)
 
-    # ボタン表示条件の修正
-    if base_file_uploader_widget_dp is not None: # 新しいファイルがアップロードされたら常に処理可能
+    if base_file_uploader_widget_dp is not None:
         can_process_now_dp = True
     elif parquet_base_path_val_dp and os.path.exists(parquet_base_path_val_dp) and base_file_info_dp:
-        # キャッシュがあり、かつアップロードファイルがない場合のみキャッシュ利用メッセージを表示
         if base_file_uploader_widget_dp is None:
              st.info(f"以前処理したベースデータ「{base_file_info_dp.get('file_name', '不明')}」のキャッシュを利用できます。")
         can_process_now_dp = True
-    elif new_files_uploader_widget_dp: # 追加ファイルのみでも処理可能
+    elif new_files_uploader_widget_dp:
         can_process_now_dp = True
-
 
     if can_process_now_dp:
         if not st.session_state.get('data_processed', False):
-            process_button_key_dp_run = "process_data_button_dp_tab_run" # キー変更
+            process_button_key_dp_run = "process_data_button_dp_tab_run"
             if st.button("データ処理を実行", key=process_button_key_dp_run, use_container_width=True):
                 base_file_to_process_dp = base_file_uploader_widget_dp
                 new_files_to_process_dp = new_files_uploader_widget_dp if new_files_uploader_widget_dp else []
                 target_file_to_process_dp = target_file_uploader_widget_dp
 
                 progress_bar_ui_main_dp = st.progress(0, text="データ処理を開始します...")
-                # process_data_with_progress の戻り値の validation_results を受け取るようにする
                 success_flag_dp, df_result_main_dp, target_data_result_main_dp, all_results_main_dp, last_val_or_validation_res = process_data_with_progress(
                     base_file_to_process_dp, new_files_to_process_dp, target_file_to_process_dp, progress_bar_ui_main_dp
                 )
+                
                 if success_flag_dp and df_result_main_dp is not None and not df_result_main_dp.empty:
                     st.session_state.df = df_result_main_dp
                     st.session_state.target_data = target_data_result_main_dp
                     st.session_state.all_results = all_results_main_dp
                     st.session_state.data_processed = True
-                    # latest_date_obj_main_dp は validation_results かもしれないので型チェック
+                    
                     if isinstance(last_val_or_validation_res, pd.Timestamp):
                         st.session_state.latest_data_date_str = last_val_or_validation_res.strftime("%Y年%m月%d日")
-                    else: # validation_results の場合
+                    else:
                         st.session_state.latest_data_date_str = "データ処理完了 (日付不明)"
-                        # validation_results のエラーは process_data_with_progress 内で表示される
                         if isinstance(last_val_or_validation_res, dict):
-                            st.session_state.validation_results = last_val_or_validation_res # 保存しておく
+                            st.session_state.validation_results = last_val_or_validation_res
 
                     st.success(f"データの処理が完了しました。最新データ日付: {st.session_state.latest_data_date_str}")
                     st.session_state.mappings_initialized_after_processing = True
                     perform_cleanup(deep=True)
                     st.rerun()
                 else:
-                    # エラーメッセージは process_data_with_progress 内、またはここでも表示
-                    if not success_flag_dp : # 処理自体が失敗した場合
+                    if not success_flag_dp:
                          st.error("データ処理中にエラーが発生しました。詳細はログを確認してください。")
                     if isinstance(last_val_or_validation_res, dict) and last_val_or_validation_res.get('errors'):
                         st.error("データ検証でエラーが検出されました。")
-                        for err_msg_dp in last_val_or_validation_res.get('errors', []): st.error(err_msg_dp)
-        else: # データ処理済みの場合の表示
+                        for err_msg_dp in last_val_or_validation_res.get('errors', []): 
+                            st.error(err_msg_dp)
+        else:
             st.success(f"データ処理済み（最新データ日付: {st.session_state.latest_data_date_str}）")
-            if st.session_state.get('target_data') is not None: st.success("目標値データも読み込み済みです。")
-            else: st.info("目標値データは読み込まれていません。")
+            if st.session_state.get('target_data') is not None: 
+                st.success("目標値データも読み込み済みです。")
+            else: 
+                st.info("目標値データは読み込まれていません。")
 
             if st.session_state.get('df') is not None:
-                df_display_main_dp_after = st.session_state.df # 変数名変更
+                df_display_main_dp_after = st.session_state.df
                 with st.expander("データ概要", expanded=True):
-                    col1_sum_dp_after, col2_sum_dp_after, col3_sum_dp_after = st.columns(3) # 変数名変更
+                    col1_sum_dp_after, col2_sum_dp_after, col3_sum_dp_after = st.columns(3)
                     with col1_sum_dp_after:
                         if not df_display_main_dp_after.empty and '日付' in df_display_main_dp_after.columns:
-                            min_dt_dp_after = df_display_main_dp_after['日付'].min() # 変数名変更
-                            max_dt_dp_after = df_display_main_dp_after['日付'].max() # 変数名変更
+                            min_dt_dp_after = df_display_main_dp_after['日付'].min()
+                            max_dt_dp_after = df_display_main_dp_after['日付'].max()
                             if pd.notna(min_dt_dp_after) and pd.notna(max_dt_dp_after):
                                 st.metric("データ期間", f"{min_dt_dp_after.strftime('%Y/%m/%d')} - {max_dt_dp_after.strftime('%Y/%m/%d')}")
-                            else: st.metric("データ期間", "N/A (無効な日付)")
-                        else: st.metric("データ期間", "N/A")
-                    with col2_sum_dp_after: st.metric("総レコード数", f"{len(df_display_main_dp_after):,}")
-                    with col3_sum_dp_after: st.metric("病棟数", f"{df_display_main_dp_after['病棟コード'].nunique() if '病棟コード' in df_display_main_dp_after.columns else 'N/A'}")
+                            else: 
+                                st.metric("データ期間", "N/A (無効な日付)")
+                        else: 
+                            st.metric("データ期間", "N/A")
+                    with col2_sum_dp_after: 
+                        st.metric("総レコード数", f"{len(df_display_main_dp_after):,}")
+                    with col3_sum_dp_after: 
+                        st.metric("病棟数", f"{df_display_main_dp_after['病棟コード'].nunique() if '病棟コード' in df_display_main_dp_after.columns else 'N/A'}")
 
-                    col1_sum2_dp_after, col2_sum2_dp_after, col3_sum2_dp_after = st.columns(3) # 変数名変更
-                    with col1_sum2_dp_after: st.metric("診療科数", f"{df_display_main_dp_after['診療科名'].nunique() if '診療科名' in df_display_main_dp_after.columns else 'N/A'}")
-                    with col2_sum2_dp_after: st.metric("平日数", f"{(df_display_main_dp_after['平日判定'] == '平日').sum()}" if "平日判定" in df_display_main_dp_after.columns else "N/A")
-                    with col3_sum2_dp_after: st.metric("休日数", f"{(df_display_main_dp_after['平日判定'] == '休日').sum()}" if "平日判定" in df_display_main_dp_after.columns else "N/A")
+                    col1_sum2_dp_after, col2_sum2_dp_after, col3_sum2_dp_after = st.columns(3)
+                    with col1_sum2_dp_after: 
+                        st.metric("診療科数", f"{df_display_main_dp_after['診療科名'].nunique() if '診療科名' in df_display_main_dp_after.columns else 'N/A'}")
+                    with col2_sum2_dp_after: 
+                        st.metric("平日数", f"{(df_display_main_dp_after['平日判定'] == '平日').sum()}" if "平日判定" in df_display_main_dp_after.columns else "N/A")
+                    with col3_sum2_dp_after: 
+                        st.metric("休日数", f"{(df_display_main_dp_after['平日判定'] == '休日').sum()}" if "平日判定" in df_display_main_dp_after.columns else "N/A")
 
-                    perf_metrics_disp_dp_after = st.session_state.get('performance_metrics', {}) # 変数名変更
+                    perf_metrics_disp_dp_after = st.session_state.get('performance_metrics', {})
                     if perf_metrics_disp_dp_after:
                         st.subheader("処理パフォーマンス")
-                        pcol1_dp_after, pcol2_dp_after, pcol3_dp_after, pcol4_dp_after = st.columns(4) # 変数名変更
-                        with pcol1_dp_after: st.metric("データ読込時間", f"{perf_metrics_disp_dp_after.get('data_load_time', 0):.1f}秒")
-                        with pcol2_dp_after: pass
-                        with pcol3_dp_after: st.metric("データ処理時間", f"{perf_metrics_disp_dp_after.get('processing_time', 0):.1f}秒")
+                        pcol1_dp_after, pcol2_dp_after, pcol3_dp_after, pcol4_dp_after = st.columns(4)
+                        with pcol1_dp_after: 
+                            st.metric("データ読込時間", f"{perf_metrics_disp_dp_after.get('data_load_time', 0):.1f}秒")
+                        with pcol2_dp_after: 
+                            pass
+                        with pcol3_dp_after: 
+                            st.metric("データ処理時間", f"{perf_metrics_disp_dp_after.get('processing_time', 0):.1f}秒")
                         with pcol4_dp_after:
                             try:
-                                mem_info_disp_dp_after = log_memory_usage(); # 変数名変更
+                                mem_info_disp_dp_after = log_memory_usage()
                                 if mem_info_disp_dp_after:
                                     st.metric("現在のメモリ使用", f"{mem_info_disp_dp_after.get('process_mb', 0):.1f} MB ({mem_info_disp_dp_after.get('process_percent', 0):.1f}%)")
                                 else:
@@ -465,38 +550,52 @@ def create_data_processing_tab():
                             except Exception:
                                 st.metric("メモリ情報", "取得エラー")
 
-
-                validation_res_main_dp_after = st.session_state.get('validation_results') # 変数名変更
-                if validation_res_main_dp_after: # 検証結果が存在する場合のみ表示
+                validation_res_main_dp_after = st.session_state.get('validation_results')
+                if validation_res_main_dp_after:
                     if validation_res_main_dp_after.get("warnings") or validation_res_main_dp_after.get("info") or validation_res_main_dp_after.get("errors"):
-                        with st.expander("データ検証結果", expanded=False): # デフォルトで閉じる
-                            for err_msg_disp_dp_after in validation_res_main_dp_after.get("errors", []): st.error(err_msg_disp_dp_after) # 変数名変更
-                            for info_msg_disp_dp_after in validation_res_main_dp_after.get("info", []): st.info(info_msg_disp_dp_after) # 変数名変更
-                            for warn_msg_disp_main_dp_after in validation_res_main_dp_after.get("warnings", []): st.warning(warn_msg_disp_main_dp_after) # 変数名変更
+                        with st.expander("データ検証結果", expanded=False):
+                            for err_msg_disp_dp_after in validation_res_main_dp_after.get("errors", []): 
+                                st.error(err_msg_disp_dp_after)
+                            for info_msg_disp_dp_after in validation_res_main_dp_after.get("info", []): 
+                                st.info(info_msg_disp_dp_after)
+                            for warn_msg_disp_main_dp_after in validation_res_main_dp_after.get("warnings", []): 
+                                st.warning(warn_msg_disp_main_dp_after)
 
-            if st.button("データをリセット (キャッシュも削除)", key="reset_data_button_dp_tab_v3_final", use_container_width=True): # キー変更
+            if st.button("データをリセット (キャッシュも削除)", key="reset_data_button_dp_tab_v3_final", use_container_width=True):
                 st.session_state.data_processed = False
-                # ... (セッションステートのクリア処理は既存の通り) ...
-                st.session_state.df = None; st.session_state.all_results = None; st.session_state.target_data = None
-                st.session_state.validation_results = None; st.session_state.latest_data_date_str = "データ読込前"
-                st.session_state.target_file_debug_info = None; st.session_state.extracted_targets = None
-                st.session_state.performance_metrics = {'data_load_time': 0, 'data_conversion_time': 0, 'processing_time': 0}
-                st.session_state.dept_mapping = {}; st.session_state.dept_mapping_initialized = False
-                st.session_state.ward_mapping = {}; st.session_state.ward_mapping_initialized = False
+                st.session_state.df = None
+                st.session_state.all_results = None
+                st.session_state.target_data = None
+                st.session_state.validation_results = None
+                st.session_state.latest_data_date_str = "データ読込前"
+                st.session_state.target_file_debug_info = None
+                st.session_state.extracted_targets = None
+                st.session_state.performance_metrics = {
+                    'data_load_time': 0, 
+                    'data_conversion_time': 0, 
+                    'processing_time': 0
+                }
+                st.session_state.dept_mapping = {}
+                st.session_state.dept_mapping_initialized = False
+                st.session_state.ward_mapping = {}
+                st.session_state.ward_mapping_initialized = False
                 st.session_state.mappings_initialized_after_processing = False
 
                 if app_data_dir_val_dp:
-                    parquet_to_delete_main_dp_after = os.path.join(app_data_dir_val_dp, "processed_base_data.parquet") # 変数名変更
-                    info_to_delete_main_dp_after = os.path.join(app_data_dir_val_dp, "base_file_info.json") # 変数名変更
+                    parquet_to_delete_main_dp_after = os.path.join(app_data_dir_val_dp, "processed_base_data.parquet")
+                    info_to_delete_main_dp_after = os.path.join(app_data_dir_val_dp, "base_file_info.json")
                     if os.path.exists(parquet_to_delete_main_dp_after):
-                        try: os.remove(parquet_to_delete_main_dp_after); st.info("キャッシュされたベースデータを削除しました。")
-                        except Exception as e_del_pq_dp_after: logger.warning(f"Parquet削除エラー: {e_del_pq_dp_after}") # 変数名変更
+                        try: 
+                            os.remove(parquet_to_delete_main_dp_after)
+                            st.info("キャッシュされたベースデータを削除しました。")
+                        except Exception as e_del_pq_dp_after: 
+                            logger.warning(f"Parquet削除エラー: {e_del_pq_dp_after}")
                     if os.path.exists(info_to_delete_main_dp_after):
-                        try: os.remove(info_to_delete_main_dp_after)
-                        except Exception as e_del_info_dp_after: logger.warning(f"Infoファイル削除エラー: {e_del_info_dp_after}") # 変数名変更
+                        try: 
+                            os.remove(info_to_delete_main_dp_after)
+                        except Exception as e_del_info_dp_after: 
+                            logger.warning(f"Infoファイル削除エラー: {e_del_info_dp_after}")
                 perform_cleanup(deep=True)
                 st.rerun()
-    else: # can_process_now_dp が False の場合
+    else:
         st.info("「固定ファイル」をアップロードするか、以前処理したベースデータキャッシュを利用できる状態にしてください。または「追加ファイル」のみでも処理を開始できます。")
-
-# show_excel_column_info は削除（またはローカル関数として必要なら再定義）
