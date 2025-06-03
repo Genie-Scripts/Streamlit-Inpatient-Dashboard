@@ -109,8 +109,10 @@ def check_forecast_dependencies():
 
 # --- サイドバーセクション作成関数の定義 (create_sidebar より前に定義) ---
 def create_sidebar_data_settings():
-    """サイドバーのデータ設定セクション"""
+    """サイドバーのデータ設定セクション（既存コードベース強化版）"""
     st.sidebar.header("💾 データ設定")
+    
+    # 現在のデータ状況表示（強化版）
     with st.sidebar.expander("📊 現在のデータ状況", expanded=True):
         if st.session_state.get('data_processed', False):
             df = st.session_state.get('df')
@@ -120,8 +122,26 @@ def create_sidebar_data_settings():
                 st.success("✅ データ読み込み済み")
                 st.write(f"📅 最新日付: {latest_date_str}")
                 st.write(f"📊 レコード数: {len(df):,}件")
-                source_text = {'auto_loaded': '自動読み込み', 'manual_loaded': '手動読み込み', 'sidebar_upload': 'サイドバー', 'unknown': '不明'}.get(data_source, '不明')
+                
+                # データソース表示（強化）
+                source_text = {
+                    'auto_loaded': '自動読み込み', 
+                    'manual_loaded': '手動読み込み', 
+                    'sidebar_upload': 'サイドバー',
+                    'data_processing_tab': 'データ入力タブ',
+                    'incremental_add': '追加読み込み',
+                    'unknown': '不明'
+                }.get(data_source, '不明')
                 st.write(f"🔄 読み込み元: {source_text}")
+                
+                # データ期間情報（新規追加）
+                if '日付' in df.columns and not df['日付'].empty:
+                    min_date = df['日付'].min()
+                    max_date = df['日付'].max()
+                    period_days = (max_date - min_date).days + 1
+                    st.write(f"📅 データ期間: {period_days}日間")
+                    st.caption(f"{min_date.strftime('%Y/%m/%d')} ～ {max_date.strftime('%Y/%m/%d')}")
+                
                 data_info = get_data_info()
                 if data_info:
                     last_saved = data_info.get('last_saved', '不明')
@@ -130,8 +150,10 @@ def create_sidebar_data_settings():
                             saved_date = datetime.datetime.fromisoformat(last_saved.replace('Z', '+00:00'))
                             formatted_date = saved_date.strftime('%Y/%m/%d %H:%M')
                             st.write(f"💾 最終保存: {formatted_date}")
-                        except: # pylint: disable=bare-except
+                        except:
                             st.write(f"💾 最終保存: {last_saved}")
+                else:
+                    st.warning("⚠️ 未保存データ")
             else:
                 st.warning("⚠️ データ処理エラー")
         else:
@@ -139,7 +161,22 @@ def create_sidebar_data_settings():
             data_info = get_data_info()
             if data_info:
                 st.write("💾 保存済みデータあり")
-                if st.button("🔄 保存データを読み込む", key="load_saved_data_sidebar_app_v4"): # キー変更
+                # 保存データの詳細情報（新規追加）
+                try:
+                    st.caption(f"📊 {data_info.get('data_rows', 0):,}件")
+                    if data_info.get('file_size_mb'):
+                        st.caption(f"📁 {data_info['file_size_mb']} MB")
+                    
+                    # 日付範囲情報
+                    date_range = data_info.get('date_range', {})
+                    if date_range.get('min_date') and date_range.get('max_date'):
+                        min_dt = datetime.datetime.fromisoformat(date_range['min_date'])
+                        max_dt = datetime.datetime.fromisoformat(date_range['max_date'])
+                        st.caption(f"📅 {min_dt.strftime('%Y/%m/%d')} ～ {max_dt.strftime('%Y/%m/%d')}")
+                except Exception:
+                    pass
+                
+                if st.button("🔄 保存データを読み込む", key="load_saved_data_sidebar_enhanced_v2", use_container_width=True):
                     df_loaded, target_data_loaded, metadata_loaded = load_data_from_file()
                     if df_loaded is not None:
                         st.session_state['df'] = df_loaded
@@ -151,107 +188,291 @@ def create_sidebar_data_settings():
                             latest_date = df_loaded['日付'].max()
                             st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
                         else:
-                             st.session_state.latest_data_date_str = "日付不明"
+                            st.session_state.latest_data_date_str = "日付不明"
                         initialize_all_mappings(st.session_state.df, st.session_state.target_data)
                         st.rerun()
 
+    # データ操作（強化版）
     with st.sidebar.expander("🔧 データ操作", expanded=False):
-        col1_ds_v4, col2_ds_v4 = st.columns(2) # 変数名変更
-        with col1_ds_v4:
-            if st.button("💾 データ保存", key="save_current_data_sidebar_app_v4", use_container_width=True):
+        # 基本操作（保存・読込）
+        st.markdown("**📁 基本操作**")
+        col1_ds, col2_ds = st.columns(2)
+        
+        with col1_ds:
+            if st.button("💾 保存", key="save_current_data_sidebar_enhanced_v2", use_container_width=True):
                 if st.session_state.get('data_processed', False):
                     df_to_save = st.session_state.get('df')
                     target_data_to_save = st.session_state.get('target_data')
-                    if save_data_to_file(df_to_save, target_data_to_save):
-                        st.success("保存完了!")
+                    
+                    # 保存時にメタデータを追加
+                    enhanced_metadata = {
+                        'save_timestamp': datetime.datetime.now().isoformat(),
+                        'data_source': st.session_state.get('data_source', 'unknown'),
+                        'processing_info': st.session_state.get('performance_metrics', {}),
+                        'filter_state': st.session_state.get('current_unified_filter_config', {}),
+                    }
+                    
+                    if save_data_to_file(df_to_save, target_data_to_save, enhanced_metadata):
+                        st.success("✅ 保存完了!")
                         st.rerun()
                     else:
-                        st.error("保存失敗")
+                        st.error("❌ 保存失敗")
                 else:
                     st.warning("保存するデータがありません")
-        with col2_ds_v4:
-            if st.button("🗑️ データ削除", key="delete_saved_data_sidebar_app_v4", use_container_width=True):
-                success, result = delete_saved_data()
-                if success:
-                    st.success(f"削除完了: {result}")
-                    keys_to_clear = ['df', 'target_data', 'data_processed', 'data_source', 'data_metadata',
-                                     'latest_data_date_str', 'all_results', 'current_unified_filter_config',
-                                     'mappings_initialized_after_processing', 'unified_filter_initialized',
-                                     'unified_filter_start_date', 'unified_filter_end_date',
-                                     'unified_filter_period_mode', 'unified_filter_preset',
-                                     'unified_filter_dept_mode', 'unified_filter_selected_depts_display',
-                                     'unified_filter_ward_mode', 'unified_filter_selected_wards_display'
-                                     ]
-                    for key in keys_to_clear:
-                        if key in st.session_state:
-                            del st.session_state[key]
+        
+        with col2_ds:
+            if st.button("📥 読込", key="load_saved_data_manual_v2", use_container_width=True):
+                df_loaded, target_data_loaded, metadata_loaded = load_data_from_file()
+                if df_loaded is not None:
+                    st.session_state['df'] = df_loaded
+                    st.session_state['target_data'] = target_data_loaded
+                    st.session_state['data_processed'] = True
+                    st.session_state['data_source'] = 'manual_loaded'
+                    st.session_state['data_metadata'] = metadata_loaded
+                    
+                    if '日付' in df_loaded.columns and not df_loaded['日付'].empty:
+                        latest_date = df_loaded['日付'].max()
+                        st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
+                    else:
+                        st.session_state.latest_data_date_str = "日付不明"
+                    
+                    initialize_all_mappings(st.session_state.df, st.session_state.target_data)
+                    if st.session_state.df is not None and not st.session_state.df.empty:
+                        initialize_unified_filters(st.session_state.df)
+                    
+                    st.success("✅ 読込完了!")
                     st.rerun()
                 else:
-                    st.error(f"削除失敗: {result}")
+                    st.error("❌ 読込失敗")
+
+        # 追加データ読み込み機能（新規）
+        if st.session_state.get('data_processed', False):
+            st.markdown("---")
+            st.markdown("**➕ 追加データ読み込み**")
+            st.caption("現在のデータに新しいデータを追加")
+            
+            additional_file = st.file_uploader(
+                "追加ファイル", 
+                type=["xlsx", "xls", "csv"], 
+                key="additional_data_upload_sidebar_v2",
+                help="現在のデータに追加するファイル"
+            )
+            
+            if additional_file is not None:
+                col_mode, col_exec = st.columns(2)
+                
+                with col_mode:
+                    merge_mode = st.selectbox(
+                        "結合方式",
+                        ["追加", "更新"],
+                        key="merge_mode_sidebar_v2",
+                        help="追加: 単純結合、更新: 既存データ更新"
+                    )
+                
+                with col_exec:
+                    if st.button("🔄 実行", key="execute_additional_load_sidebar_v2", use_container_width=True):
+                        try:
+                            # 追加ファイルの読み込み
+                            if additional_file.name.endswith('.csv'):
+                                df_additional = pd.read_csv(additional_file, encoding='utf-8')
+                            else:
+                                df_additional = pd.read_excel(additional_file)
+                            
+                            # 日付列の正規化
+                            if '日付' in df_additional.columns:
+                                df_additional['日付'] = pd.to_datetime(df_additional['日付'], errors='coerce').dt.normalize()
+                                df_additional.dropna(subset=['日付'], inplace=True)
+                            
+                            current_df = st.session_state.get('df')
+                            
+                            if merge_mode == "追加":
+                                combined_df = pd.concat([current_df, df_additional], ignore_index=True)
+                                combined_df.drop_duplicates(inplace=True)
+                                
+                            else:  # 更新
+                                if all(col in df_additional.columns for col in ['日付', '病棟コード', '診療科名']):
+                                    merge_keys = ['日付', '病棟コード', '診療科名']
+                                    df_additional_keys = df_additional[merge_keys].drop_duplicates()
+                                    
+                                    mask = current_df.set_index(merge_keys).index.isin(
+                                        df_additional_keys.set_index(merge_keys).index
+                                    )
+                                    df_remaining = current_df[~mask].reset_index(drop=True)
+                                    combined_df = pd.concat([df_remaining, df_additional], ignore_index=True)
+                                else:
+                                    st.error("更新モードには日付、病棟コード、診療科名の列が必要です")
+                                    continue
+                            
+                            # セッション状態の更新
+                            st.session_state['df'] = combined_df
+                            st.session_state['data_source'] = 'incremental_add'
+                            
+                            if '日付' in combined_df.columns and not combined_df['日付'].empty:
+                                latest_date = combined_df['日付'].max()
+                                st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
+                            
+                            # マッピングとフィルターの再初期化
+                            initialize_all_mappings(st.session_state.df, st.session_state.target_data)
+                            initialize_unified_filters(st.session_state.df)
+                            
+                            st.success(f"✅ {merge_mode}完了! レコード数: {len(combined_df):,}件")
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ 追加読み込みエラー: {str(e)}")
+
+        # リセット機能（強化版）
+        st.markdown("---")
+        st.markdown("**🔄 データリセット**")
+        
+        col_reset1, col_reset2 = st.columns(2)
+        
+        with col_reset1:
+            if st.button("🔄 セッション\nクリア", key="reset_session_sidebar_v2", use_container_width=True):
+                keys_to_clear = [
+                    'df', 'target_data', 'data_processed', 'data_source', 'data_metadata',
+                    'latest_data_date_str', 'all_results', 'current_unified_filter_config',
+                    'mappings_initialized_after_processing', 'unified_filter_initialized',
+                    'validation_results', 'performance_metrics'
+                ]
+                for key in keys_to_clear:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
+                st.success("✅ セッションクリア完了")
+                st.info("💾 保存データは維持されています")
+                st.rerun()
+        
+        with col_reset2:
+            if st.button("🗑️ 完全\n削除", key="delete_all_data_sidebar_v2", use_container_width=True):
+                if st.session_state.get('confirm_delete_ready', False):
+                    success, result = delete_saved_data()
+                    if success:
+                        st.success("✅ 完全削除完了")
+                        keys_to_clear = [
+                            'df', 'target_data', 'data_processed', 'data_source', 'data_metadata',
+                            'latest_data_date_str', 'all_results', 'current_unified_filter_config',
+                            'mappings_initialized_after_processing', 'unified_filter_initialized',
+                            'validation_results', 'performance_metrics', 'confirm_delete_ready'
+                        ]
+                        for key in keys_to_clear:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        st.rerun()
+                    else:
+                        st.error(f"❌ 削除失敗: {result}")
+                else:
+                    st.session_state['confirm_delete_ready'] = True
+                    st.warning("⚠️ もう一度クリックで完全削除")
+
+        # ファイルサイズ情報
         file_sizes = get_file_sizes()
         if any(size != "未保存" for size in file_sizes.values()):
-            st.write("📁 **ファイルサイズ:**")
+            st.markdown("---")
+            st.markdown("**📁 ファイルサイズ:**")
             for name, size in file_sizes.items():
                 if size != "未保存":
-                    st.write(f"  • {name}: {size}")
+                    st.caption(f"• {name}: {size}")
 
+    # バックアップ管理（既存コードベース + 強化）
     with st.sidebar.expander("🗂️ バックアップ管理", expanded=False):
         backup_info = get_backup_info()
         if backup_info:
             st.write("📋 **利用可能なバックアップ:**")
             for backup in backup_info:
-                col1_bk_v4, col2_bk_v4 = st.columns([3, 1])
-                with col1_bk_v4:
+                col1_bk, col2_bk = st.columns([3, 1])
+                with col1_bk:
                     st.write(f"📄 {backup['timestamp']}")
                     st.caption(f"サイズ: {backup['size']}")
-                with col2_bk_v4:
-                    if st.button("復元", key=f"restore_{backup['filename']}_sidebar_app_v4", use_container_width=True):
+                    # 経過日数表示（新規追加）
+                    if backup.get('age_days', 0) == 0:
+                        st.caption("📅 今日作成")
+                    else:
+                        st.caption(f"📅 {backup['age_days']}日前")
+                with col2_bk:
+                    if st.button("復元", key=f"restore_{backup['filename']}_sidebar_enhanced_v2", use_container_width=True):
                         success, message = restore_from_backup(backup['filename'])
                         if success:
                             st.success(message)
+                            st.info("🔄 ページを再読み込みして復元データを確認してください")
                             st.rerun()
                         else:
                             st.error(message)
         else:
             st.info("バックアップファイルはありません")
+            st.caption("データを保存すると自動的にバックアップが作成されます")
+        
+        # 手動バックアップ作成（新規追加）
+        st.markdown("---")
+        if st.button("📦 手動バックアップ作成", key="create_manual_backup_sidebar_v2", use_container_width=True):
+            if st.session_state.get('data_processed', False):
+                from data_persistence import create_backup
+                if create_backup(force_create=True):
+                    st.success("✅ バックアップ作成完了")
+                    st.rerun()
+                else:
+                    st.error("❌ バックアップ作成失敗")
+            else:
+                st.warning("バックアップするデータがありません")
 
+    # 簡易データアップロード（既存機能を強化）
     with st.sidebar.expander("📤 簡易データアップロード", expanded=False):
         st.write("**簡易的なファイル読み込み**")
         st.caption("詳細な処理は「データ入力」タブを使用")
-        uploaded_file_sidebar_v4 = st.file_uploader(
-            "ファイルを選択", type=SUPPORTED_FILE_TYPES, key="sidebar_file_upload_widget_app_v4",
+        uploaded_file_sidebar = st.file_uploader(
+            "ファイルを選択", type=SUPPORTED_FILE_TYPES, key="sidebar_file_upload_widget_enhanced_v2",
             help="Excel/CSVファイルをアップロード"
         )
-        if uploaded_file_sidebar_v4 is not None:
-            if st.button("⚡ 簡易処理で読み込む", key="quick_process_sidebar_app_v4", use_container_width=True):
-                try:
-                    df_uploaded_v4 = None
-                    if uploaded_file_sidebar_v4.name.endswith('.csv'):
-                        df_uploaded_v4 = pd.read_csv(uploaded_file_sidebar_v4, encoding='utf-8')
-                    else:
-                        df_uploaded_v4 = pd.read_excel(uploaded_file_sidebar_v4)
+        if uploaded_file_sidebar is not None:
+            col_simple1, col_simple2 = st.columns(2)
+            
+            with col_simple1:
+                replace_mode = st.radio(
+                    "読み込み方式",
+                    ["新規", "追加"],
+                    key="simple_upload_mode_sidebar_v2",
+                    help="新規: 既存データ置換、追加: 既存データに追加"
+                )
+            
+            with col_simple2:
+                if st.button("⚡ 実行", key="quick_process_sidebar_enhanced_v2", use_container_width=True):
+                    try:
+                        if uploaded_file_sidebar.name.endswith('.csv'):
+                            df_uploaded = pd.read_csv(uploaded_file_sidebar, encoding='utf-8')
+                        else:
+                            df_uploaded = pd.read_excel(uploaded_file_sidebar)
 
-                    if '日付' in df_uploaded_v4.columns:
-                        df_uploaded_v4['日付'] = pd.to_datetime(df_uploaded_v4['日付'], errors='coerce').dt.normalize()
-                        df_uploaded_v4.dropna(subset=['日付'], inplace=True)
+                        if '日付' in df_uploaded.columns:
+                            df_uploaded['日付'] = pd.to_datetime(df_uploaded['日付'], errors='coerce').dt.normalize()
+                            df_uploaded.dropna(subset=['日付'], inplace=True)
 
-                    st.session_state['df'] = df_uploaded_v4
-                    st.session_state['data_processed'] = True
-                    st.session_state['data_source'] = 'sidebar_upload'
-                    st.session_state['target_data'] = None
-                    if '日付' in df_uploaded_v4.columns and not df_uploaded_v4['日付'].empty:
-                        latest_date = df_uploaded_v4['日付'].max()
-                        st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
-                    else:
-                        st.session_state.latest_data_date_str = "日付不明"
-                    initialize_all_mappings(st.session_state.df, None)
-                    st.session_state.mappings_initialized_after_processing = True
-                    if 'df' in st.session_state and st.session_state.df is not None:
+                        if replace_mode == "新規" or not st.session_state.get('data_processed', False):
+                            st.session_state['df'] = df_uploaded
+                            st.session_state['data_source'] = 'sidebar_upload'
+                        else:
+                            current_df = st.session_state.get('df')
+                            combined_df = pd.concat([current_df, df_uploaded], ignore_index=True)
+                            combined_df.drop_duplicates(inplace=True)
+                            st.session_state['df'] = combined_df
+                            st.session_state['data_source'] = 'incremental_add'
+
+                        st.session_state['data_processed'] = True
+                        st.session_state['target_data'] = None
+                        
+                        if '日付' in st.session_state['df'].columns and not st.session_state['df']['日付'].empty:
+                            latest_date = st.session_state['df']['日付'].max()
+                            st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
+                        else:
+                            st.session_state.latest_data_date_str = "日付不明"
+                        
+                        initialize_all_mappings(st.session_state.df, None)
                         initialize_unified_filters(st.session_state.df)
-                    st.success("簡易読み込み完了!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"読み込みエラー: {e}")
+                        st.session_state.mappings_initialized_after_processing = True
+                        
+                        st.success(f"✅ {replace_mode}読み込み完了!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 読み込みエラー: {e}")
 
 def create_sidebar_target_file_status():
     """目標値ファイル状況をサイドバーに表示するヘルパー関数"""
