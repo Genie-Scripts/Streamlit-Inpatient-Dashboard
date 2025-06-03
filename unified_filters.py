@@ -15,7 +15,7 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 class UnifiedFilterManager:
-    """統一フィルター管理クラス"""
+    """統一フィルター管理クラス（排他選択版）"""
 
     def __init__(self):
         self.session_prefix = "unified_filter_"
@@ -47,9 +47,7 @@ class UnifiedFilterManager:
                 st.session_state[f"{self.session_prefix}end_date"] = max_date
                 st.session_state[f"{self.session_prefix}period_mode"] = "プリセット期間" # デフォルトモード
                 st.session_state[f"{self.session_prefix}preset"] = default_preset # デフォルトプリセット
-                st.session_state[f"{self.session_prefix}dept_mode"] = "全診療科"
-                st.session_state[f"{self.session_prefix}ward_mode"] = "全病棟"
-                # selected_depts や selected_wards は初回は空で良い、またはここで空リストを設定
+                st.session_state[f"{self.session_prefix}filter_mode"] = "全体" # 新しい統合フィルターモード
                 st.session_state[f"{self.session_prefix}selected_depts_display"] = [] # 表示名用
                 st.session_state[f"{self.session_prefix}selected_wards_display"] = [] # 表示名用
 
@@ -59,7 +57,7 @@ class UnifiedFilterManager:
             logger.error(f"initialize_default_filters でエラー: {e}", exc_info=True)
 
     def create_unified_sidebar(self, df):
-        """統一フィルターサイドバーの作成"""
+        """統一フィルターサイドバーの作成（排他選択版）"""
         if df is None or df.empty:
             return None
 
@@ -162,24 +160,31 @@ class UnifiedFilterManager:
                 if start_date > end_date:
                     st.error("⚠️ 開始日は終了日より前に設定してください")
 
-        # 診療科選択セクション
-        with st.sidebar.expander("🏥 診療科フィルター", expanded=False):
-            dept_mode_options = ["全診療科", "特定診療科"]
-            current_dept_mode = st.session_state.get(f"{self.session_prefix}dept_mode", "全診療科")
-            try: dept_mode_index = dept_mode_options.index(current_dept_mode)
-            except ValueError: dept_mode_index = 0
+        # 統合部門フィルターセクション（排他選択）
+        with st.sidebar.expander("🏥 部門フィルター", expanded=False):
+            filter_mode_options = ["全体", "特定診療科", "特定病棟"]
+            current_filter_mode = st.session_state.get(f"{self.session_prefix}filter_mode", "全体")
+            try: 
+                filter_mode_index = filter_mode_options.index(current_filter_mode)
+            except ValueError: 
+                filter_mode_index = 0
 
-            dept_mode_widget_key = f"{self.session_prefix}dept_mode_widget"
-            dept_filter_mode = st.radio(
-                "診療科選択", dept_mode_options, index=dept_mode_index,
-                key=dept_mode_widget_key,
+            filter_mode_widget_key = f"{self.session_prefix}filter_mode_widget"
+            filter_mode = st.radio(
+                "フィルター対象",
+                filter_mode_options,
+                index=filter_mode_index,
+                key=filter_mode_widget_key,
+                help="診療科と病棟は同時選択できません。どちらか一方のみ選択可能です。",
                 on_change=self.update_session_from_widget,
-                args=(f"{self.session_prefix}dept_mode", dept_mode_widget_key)
+                args=(f"{self.session_prefix}filter_mode", filter_mode_widget_key)
             )
-            st.session_state[f"{self.session_prefix}dept_mode"] = dept_filter_mode
-            selected_depts_codes = [] # 実際のコードを格納
+            st.session_state[f"{self.session_prefix}filter_mode"] = filter_mode
 
-            if dept_filter_mode == "特定診療科":
+            selected_depts_codes = []  # 実際のコードを格納
+            selected_wards_codes = []  # 実際のコードを格納
+
+            if filter_mode == "特定診療科":
                 if '診療科名' in df.columns:
                     available_depts_actual = sorted(df['診療科名'].astype(str).unique())
                     dept_mapping_session = st.session_state.get('dept_mapping', {})
@@ -202,29 +207,14 @@ class UnifiedFilterManager:
                     st.session_state[f"{self.session_prefix}selected_depts_display"] = selected_dept_displays_widget
                     selected_depts_codes = [dept_display_to_code_map[d] for d in selected_dept_displays_widget if d in dept_display_to_code_map]
 
-                    if selected_dept_displays_widget: st.success(f"✅ {len(selected_depts_codes)}件の診療科を選択")
-                    else: st.warning("⚠️ 診療科が選択されていません")
+                    if selected_dept_displays_widget: 
+                        st.success(f"✅ {len(selected_depts_codes)}件の診療科を選択")
+                    else: 
+                        st.warning("⚠️ 診療科が選択されていません")
                 else:
                     st.warning("📋 診療科名列が見つかりません")
 
-        # 病棟選択セクション (診療科と同様の修正)
-        with st.sidebar.expander("🏨 病棟フィルター", expanded=False):
-            ward_mode_options = ["全病棟", "特定病棟"]
-            current_ward_mode = st.session_state.get(f"{self.session_prefix}ward_mode", "全病棟")
-            try: ward_mode_index = ward_mode_options.index(current_ward_mode)
-            except ValueError: ward_mode_index = 0
-
-            ward_mode_widget_key = f"{self.session_prefix}ward_mode_widget"
-            ward_filter_mode = st.radio(
-                "病棟選択", ward_mode_options, index=ward_mode_index,
-                key=ward_mode_widget_key,
-                on_change=self.update_session_from_widget,
-                args=(f"{self.session_prefix}ward_mode", ward_mode_widget_key)
-            )
-            st.session_state[f"{self.session_prefix}ward_mode"] = ward_filter_mode
-            selected_wards_codes = []
-
-            if ward_filter_mode == "特定病棟":
+            elif filter_mode == "特定病棟":
                 if '病棟コード' in df.columns:
                     available_wards_actual = sorted(df['病棟コード'].astype(str).unique())
                     ward_mapping_session = st.session_state.get('ward_mapping', {})
@@ -245,8 +235,10 @@ class UnifiedFilterManager:
                     st.session_state[f"{self.session_prefix}selected_wards_display"] = selected_ward_displays_widget
                     selected_wards_codes = [ward_display_to_code_map[w] for w in selected_ward_displays_widget if w in ward_display_to_code_map]
 
-                    if selected_ward_displays_widget: st.success(f"✅ {len(selected_wards_codes)}件の病棟を選択")
-                    else: st.warning("⚠️ 病棟が選択されていません")
+                    if selected_ward_displays_widget: 
+                        st.success(f"✅ {len(selected_wards_codes)}件の病棟を選択")
+                    else: 
+                        st.warning("⚠️ 病棟が選択されていません")
                 else:
                     st.warning("📋 病棟コード列が見つかりません")
 
@@ -254,10 +246,9 @@ class UnifiedFilterManager:
         filter_config_data = {
             'start_date': start_date if start_date else st.session_state.get(f"{self.session_prefix}start_date"),
             'end_date': end_date if end_date else st.session_state.get(f"{self.session_prefix}end_date"),
+            'filter_mode': filter_mode,
             'selected_depts': selected_depts_codes,
             'selected_wards': selected_wards_codes,
-            'dept_filter_mode': dept_filter_mode,
-            'ward_filter_mode': ward_filter_mode,
             'period_mode': period_mode,
             'preset': preset if period_mode == "プリセット期間" else None
         }
@@ -371,7 +362,7 @@ class UnifiedFilterManager:
             logger.error(f"フィルターリセット中にエラー: {e}", exc_info=True)
 
     def apply_filters(self, df_original):
-        """フィルターをデータフレームに適用"""
+        """フィルターをデータフレームに適用（排他選択版）"""
         config = st.session_state.get(self.config_key)
         if not config:
             logger.warning("フィルター設定が見つかりません。元のデータフレームを返します。")
@@ -390,13 +381,14 @@ class UnifiedFilterManager:
 
             filtered_df = safe_date_filter(df_original, start_date_ts, end_date_ts)
 
-            # 診療科フィルター
-            if config['dept_filter_mode'] == "特定診療科" and config['selected_depts']:
+            # 統合部門フィルター（排他選択）
+            filter_mode = config.get('filter_mode', '全体')
+            
+            if filter_mode == "特定診療科" and config.get('selected_depts'):
                 if '診療科名' in filtered_df.columns:
                     filtered_df = filtered_df[filtered_df['診療科名'].isin(config['selected_depts'])]
 
-            # 病棟フィルター
-            if config['ward_filter_mode'] == "特定病棟" and config['selected_wards']:
+            elif filter_mode == "特定病棟" and config.get('selected_wards'):
                 if '病棟コード' in filtered_df.columns:
                     filtered_df = filtered_df[filtered_df['病棟コード'].isin(config['selected_wards'])]
 
@@ -409,7 +401,7 @@ class UnifiedFilterManager:
             return df_original
 
     def get_filter_summary(self):
-        """フィルター設定のサマリー文字列を取得"""
+        """フィルター設定のサマリー文字列を取得（排他選択版）"""
         config = st.session_state.get(self.config_key)
         if not config:
             return "📋 フィルター未設定"
@@ -429,17 +421,15 @@ class UnifiedFilterManager:
             else:
                 summary.append("📅 期間: 未設定")
 
-            if config['dept_filter_mode'] == "特定診療科":
-                dept_count = len(config['selected_depts'])
+            filter_mode = config.get('filter_mode', '全体')
+            if filter_mode == "特定診療科":
+                dept_count = len(config.get('selected_depts', []))
                 summary.append(f"🏥 診療科: {dept_count}件選択" if dept_count > 0 else "🏥 診療科: 選択なし")
-            else:
-                summary.append("🏥 診療科: 全て")
-            
-            if config['ward_filter_mode'] == "特定病棟":
-                ward_count = len(config['selected_wards'])
+            elif filter_mode == "特定病棟":
+                ward_count = len(config.get('selected_wards', []))
                 summary.append(f"🏨 病棟: {ward_count}件選択" if ward_count > 0 else "🏨 病棟: 選択なし")
             else:
-                summary.append("🏨 病棟: 全て")
+                summary.append("🏥 対象: 全体")
             
             return " | ".join(summary)
         except Exception as e:
@@ -451,7 +441,7 @@ class UnifiedFilterManager:
         return st.session_state.get(self.config_key)
 
     def validate_filters(self, df_for_validation):
-        """フィルター設定の妥当性を検証"""
+        """フィルター設定の妥当性を検証（排他選択版）"""
         config = st.session_state.get(self.config_key)
         if not config: 
             return False, "フィルター設定が見つかりません"
@@ -463,10 +453,13 @@ class UnifiedFilterManager:
             return False, "開始日または終了日が設定されていません"
         if start_date_ts > end_date_ts: 
             return False, "開始日が終了日より後になっています"
-        if config['dept_filter_mode'] == "特定診療科" and not config['selected_depts']: 
+        
+        filter_mode = config.get('filter_mode', '全体')
+        if filter_mode == "特定診療科" and not config.get('selected_depts'): 
             return False, "特定診療科が選択されていますが、診療科が選択されていません"
-        if config['ward_filter_mode'] == "特定病棟" and not config['selected_wards']: 
+        if filter_mode == "特定病棟" and not config.get('selected_wards'): 
             return False, "特定病棟が選択されていますが、病棟が選択されていません"
+        
         return True, "フィルター設定は有効です"
 
 # グローバルインスタンス
