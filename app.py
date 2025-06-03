@@ -284,12 +284,13 @@ def create_sidebar_data_settings():
                                 df_additional.dropna(subset=['日付'], inplace=True)
                             
                             current_df = st.session_state.get('df')
+                            combined_df = None  # 初期化
                             
                             if merge_mode == "追加":
                                 combined_df = pd.concat([current_df, df_additional], ignore_index=True)
                                 combined_df.drop_duplicates(inplace=True)
                                 
-                            else:  # 更新
+                            elif merge_mode == "更新":
                                 if all(col in df_additional.columns for col in ['日付', '病棟コード', '診療科名']):
                                     merge_keys = ['日付', '病棟コード', '診療科名']
                                     df_additional_keys = df_additional[merge_keys].drop_duplicates()
@@ -301,22 +302,24 @@ def create_sidebar_data_settings():
                                     combined_df = pd.concat([df_remaining, df_additional], ignore_index=True)
                                 else:
                                     st.error("更新モードには日付、病棟コード、診療科名の列が必要です")
-                                    continue
+                                    combined_df = None
                             
-                            # セッション状態の更新
-                            st.session_state['df'] = combined_df
-                            st.session_state['data_source'] = 'incremental_add'
-                            
-                            if '日付' in combined_df.columns and not combined_df['日付'].empty:
-                                latest_date = combined_df['日付'].max()
-                                st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
-                            
-                            # マッピングとフィルターの再初期化
-                            initialize_all_mappings(st.session_state.df, st.session_state.target_data)
-                            initialize_unified_filters(st.session_state.df)
-                            
-                            st.success(f"✅ {merge_mode}完了! レコード数: {len(combined_df):,}件")
-                            st.rerun()
+                            # 正常に結合できた場合のみセッション状態を更新
+                            if combined_df is not None:
+                                # セッション状態の更新
+                                st.session_state['df'] = combined_df
+                                st.session_state['data_source'] = 'incremental_add'
+                                
+                                if '日付' in combined_df.columns and not combined_df['日付'].empty:
+                                    latest_date = combined_df['日付'].max()
+                                    st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
+                                
+                                # マッピングとフィルターの再初期化
+                                initialize_all_mappings(st.session_state.df, st.session_state.target_data)
+                                initialize_unified_filters(st.session_state.df)
+                                
+                                st.success(f"✅ {merge_mode}完了! レコード数: {len(combined_df):,}件")
+                                st.rerun()
                             
                         except Exception as e:
                             st.error(f"❌ 追加読み込みエラー: {str(e)}")
