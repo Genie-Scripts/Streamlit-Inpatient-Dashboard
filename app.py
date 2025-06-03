@@ -614,28 +614,36 @@ def create_sidebar():
     return True
 
 def create_management_dashboard_tab():
-    st.header(f"{APP_ICON} 経営ダッシュボード")
+    st.header("📊 主要指標")
+    
     if not st.session_state.get('data_processed', False) or st.session_state.get('df') is None:
-        st.warning(MESSAGES['data_not_loaded'])
+        st.warning("データを読み込み後に利用可能になります。")
         return
+    
     df_original = st.session_state.get('df')
     start_date_ts, end_date_ts, period_description = get_analysis_period()
+    
     if start_date_ts is None or end_date_ts is None:
         st.error("分析期間が設定されていません。サイドバーの「分析フィルター」で期間を設定してください。")
         return
+    
     st.info(f"📊 分析期間: {period_description} ({start_date_ts.strftime('%Y/%m/%d')} ～ {end_date_ts.strftime('%Y/%m/%d')})")
     st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
+    
     df_for_dashboard = filter_data_by_analysis_period(df_original)
+    
     if df_for_dashboard.empty:
         st.warning("選択されたフィルター条件に合致するデータがありません。")
         return
-    total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
-    target_occupancy_rate_percent = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE) * 100
+    
+    total_beds = st.session_state.get('total_beds', 500)
+    target_occupancy_rate_percent = st.session_state.get('bed_occupancy_rate', 0.85) * 100
+    
+    # dashboard_overview_tab.py の関数を呼び出し
     if display_kpi_cards_only:
         display_kpi_cards_only(df_for_dashboard, start_date_ts, end_date_ts, total_beds, target_occupancy_rate_percent)
     else:
         st.error("KPIカード表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
-
 
 def main():
     # セッション状態の初期化
@@ -676,7 +684,7 @@ def main():
     create_sidebar()
 
     # タブの作成と処理
-    tab_titles = ["📊 主要指標", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
+    tab_titles = ["💰 経営ダッシュボード", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
     if FORECAST_AVAILABLE:
         tab_titles.append("🔮 予測分析")
     tab_titles.extend(["📤 データ出力", "📥 データ入力"])
@@ -701,11 +709,11 @@ def main():
         df_filtered_unified = filter_data_by_analysis_period(df_original_main)
         current_filter_config = get_unified_filter_config()
 
-        with tabs[tab_titles.index("📊 主要指標")]:
+        with tabs[tab_titles.index("💰 経営ダッシュボード")]:
             try: 
                 create_management_dashboard_tab()
             except Exception as e: 
-                st.error(f"主要指標でエラー: {str(e)}\n{traceback.format_exc()}")
+                st.error(f"経営ダッシュボードでエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[tab_titles.index("🗓️ 平均在院日数分析")]:
             try:
