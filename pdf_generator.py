@@ -1,5 +1,5 @@
 import pandas as pd
-import streamlit as st
+import streamlit as st # Only for type hints or if st.session_state is used in main process
 from io import BytesIO
 import os
 import re
@@ -77,8 +77,6 @@ def optimize_matplotlib_for_pdf():
 optimize_pdf_settings()
 optimize_matplotlib_for_pdf()
 
-# 🚀 register_fonts 関数の最後に以下を追加（既存の register_fonts() 呼び出しの前）
-
 def register_fonts():
     global MATPLOTLIB_FONT_NAME
     font_registered_rl = False
@@ -104,10 +102,15 @@ def register_fonts():
             font_registered_mpl = True
         except Exception as e:
             print(f"Failed to prepare Matplotlib font '{FONT_PATH}' for pdf_generator: {e}")
-            MATPLOTLIB_FONT_NAME = None
+            MATPLOTLIB_FONT_NAME = None # フォールバック設定は後段に任せる
     else:
         print(f"Font file not found at '{FONT_PATH}'. Using fallback fonts for Matplotlib.")
+        # MATPLOTLIB_FONT_NAME はこの時点では設定せず、後段でフォールバックさせる
+    
+    if not MATPLOTLIB_FONT_NAME: # Matplotlibフォントが設定されなかった場合
         MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK
+        print(f"Using fallback Matplotlib font: {MATPLOTLIB_FONT_NAME}")
+
 
     if not font_registered_rl:
         print(f"ReportLab will use its default font or Helvetica if '{REPORTLAB_FONT_NAME}' was intended as NotoSansJP.")
@@ -119,9 +122,18 @@ register_fonts() # モジュールインポート時にフォント登録
 
 # --- キャッシュ設定 (メインプロセスでのみ使用される想定) ---
 def get_chart_cache():
-    if 'pdf_chart_cache' not in st.session_state:
-        st.session_state.pdf_chart_cache = {}
-    return st.session_state.pdf_chart_cache
+    # Streamlitのst.session_stateにアクセスする可能性のあるコードは、
+    # メインプロセス以外 (multiprocessingのワーカーなど) から呼び出されるとエラーになるため注意が必要
+    # この関数はbatch_processor.pyのメインプロセス側でのみ使用されることを想定
+    if 'st' in globals() and hasattr(st, 'session_state'):
+        if 'pdf_chart_cache' not in st.session_state:
+            st.session_state.pdf_chart_cache = {}
+        return st.session_state.pdf_chart_cache
+    else:
+        # Streamlit環境外（例: ワーカープロセス）で呼び出された場合のフォールバック
+        # print("Warning: get_chart_cache called outside Streamlit session_state context. Returning a dummy cache.")
+        return {}
+
 
 def compute_data_hash(data):
     if data is None or data.empty: return "empty_data_hash"
@@ -161,10 +173,11 @@ def create_alos_chart_for_pdf(
             return None
         required_columns = ["日付", "入院患者数（在院）", "総入院患者数", "総退院患者数"]
         if any(col not in chart_data.columns for col in required_columns): 
+            print(f"ALOS Chart Error: Missing one or more required columns in data for {title_prefix}. Required: {required_columns}")
             return None
 
         # 🚀 最適化: データコピーを最小化
-        data_copy = chart_data.copy()
+        data_copy = chart_data.copy() # 変更が加わるためコピーは維持
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
@@ -180,14 +193,19 @@ def create_alos_chart_for_pdf(
         
         # 🚀 最適化: ベクトル化された計算
         daily_metrics = []
+        # 期間内のデータを事前にフィルタリング
+        relevant_data = data_copy[(data_copy['日付'] >= date_range_for_plot.min() - pd.Timedelta(days=moving_avg_window -1)) & (data_copy['日付'] <= date_range_for_plot.max())]
+        
         for display_date in date_range_for_plot:
             window_start = display_date - pd.Timedelta(days=moving_avg_window - 1)
-            window_data = chart_data[(chart_data['日付'] >= window_start) & (chart_data['日付'] <= display_date)]
+            window_data = relevant_data[(relevant_data['日付'] >= window_start) & (relevant_data['日付'] <= display_date)]
+            
             if not window_data.empty:
                 total_patient_days = window_data['入院患者数（在院）'].sum()
                 total_admissions = window_data['総入院患者数'].sum()
                 total_discharges = window_data['総退院患者数'].sum()
-                num_days_in_window = window_data['日付'].nunique()
+                num_days_in_window = window_data['日付'].nunique() # 実際のデータが存在する日数
+                
                 denominator = (total_admissions + total_discharges) / 2
                 alos = total_patient_days / denominator if denominator > 0 else np.nan
                 daily_census = total_patient_days / num_days_in_window if num_days_in_window > 0 else np.nan
@@ -213,8 +231,9 @@ def create_alos_chart_for_pdf(
         ax2.plot(daily_df['日付'], daily_df['平均在院患者数'], color='#e74c3c', linewidth=2, linestyle='--', label='平均在院患者数')
         ax2.set_ylabel('平均在院患者数', fontproperties=font_prop, fontsize=10, color='#e74c3c')
         ax2.tick_params(axis='y', labelcolor='#e74c3c', labelsize=8)
-        for label in ax2.get_xticklabels(): 
-            label.set_fontproperties(font_prop)
+        # ax2のX軸ラベルはax1と共通なので、フォント設定は不要（重複）
+        # for label in ax2.get_xticklabels(): 
+        #     label.set_fontproperties(font_prop)
 
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
@@ -256,9 +275,10 @@ def create_patient_chart_with_target_wrapper(
         if not isinstance(data, pd.DataFrame) or data.empty: 
             return None
         if "日付" not in data.columns or "入院患者数（在院）" not in data.columns: 
+            print(f"Patient Chart Error: Missing '日付' or '入院患者数（在院）' in data for {title}.")
             return None
 
-        data_copy = data.copy()
+        data_copy = data.copy() # 変更が加わるためコピーは維持
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
@@ -335,9 +355,10 @@ def create_dual_axis_chart_for_pdf(
             return None
         required_cols = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "総退院患者数"]
         if any(col not in data.columns for col in required_cols): 
+            print(f"Dual Axis Chart Error: Missing one or more required columns in data for {title}. Required: {required_cols}")
             return None
 
-        data_copy = data.copy()
+        data_copy = data.copy() # 変更が加わるためコピーは維持
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
@@ -356,7 +377,7 @@ def create_dual_axis_chart_for_pdf(
             if col in grouped.columns: 
                 grouped[f'{col}_7日MA'] = grouped[col].rolling(window=7, min_periods=1).mean()
             else: 
-                grouped[f'{col}_7日MA'] = 0
+                grouped[f'{col}_7日MA'] = 0 # 念のためカラムが存在しない場合もMAカラムは作成
 
         if "入院患者数（在院）_7日MA" in grouped.columns:
             ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日MA"], color='#3498db', linewidth=2, label="在院患者数(7日MA)")
@@ -416,30 +437,32 @@ def validate_and_deduplicate_chart_buffers(chart_buffers_dict, chart_type_name, 
     
     # 許可された日数のチェック
     if allowed_days:
-        allowed_days_set = set(str(d) for d in allowed_days)
+        allowed_days_set = set(str(d) for d in allowed_days) # 文字列に変換して比較
     else:
-        allowed_days_set = None
+        # allowed_days が None や空の場合は、すべてのバッファを許可（フィルタリングしない）
+        # ただし、実際には呼び出し元でデフォルト値が設定される想定
+        allowed_days_set = None 
     
-    for days_str, buffer_data in chart_buffers_dict.items():
-        days_str = str(days_str)
+    for days_str_key, buffer_data in chart_buffers_dict.items():
+        days_str = str(days_str_key) # キーを文字列として確実に扱う
         
-        # 重複チェック
+        # 重複チェック (同じ日数のキーが複数回処理されるのを防ぐ)
         if days_str in processed_days:
-            print(f"⚠️ {chart_type_name}: 重複する日数をスキップ - {days_str}日")
+            print(f"⚠️ {chart_type_name}: 重複する日数のキー '{days_str}' をスキップ")
             continue
         
         # 許可された日数のチェック
         if allowed_days_set and days_str not in allowed_days_set:
-            print(f"⚠️ {chart_type_name}: 許可されていない日数をスキップ - {days_str}日")
+            print(f"⚠️ {chart_type_name}: 許可されていない日数 '{days_str}' をスキップ (許可リスト: {allowed_days_set})")
             continue
         
         # バッファの有効性チェック
         if buffer_data and (isinstance(buffer_data, bytes) or hasattr(buffer_data, 'getvalue')):
-            validated_buffers[days_str] = buffer_data
+            validated_buffers[days_str] = buffer_data # 有効なバッファを文字列キーで保存
             processed_days.add(days_str)
-            print(f"✅ {chart_type_name}: 有効なバッファを追加 - {days_str}日")
+            # print(f"✅ {chart_type_name}: 有効なバッファを追加 - {days_str}日") # ログが多いのでコメントアウトも検討
         else:
-            print(f"❌ {chart_type_name}: 無効なバッファをスキップ - {days_str}日")
+            print(f"❌ {chart_type_name}: 無効なバッファをスキップ - {days_str}日 (データ型: {type(buffer_data)})")
     
     return validated_buffers
 
@@ -447,11 +470,11 @@ def validate_and_deduplicate_chart_buffers(chart_buffers_dict, chart_type_name, 
 def create_pdf(
     forecast_df, df_weekday, df_holiday, df_all_avg=None,
     chart_data=None, title_prefix="全体", latest_date=None,
-    target_data=None, filter_code="全体", graph_days=None,
+    target_data=None, filter_code="全体", graph_days=None, # graph_days は古い引数名、allowed_graph_days を優先
     alos_chart_buffers=None,
     patient_chart_buffers=None,
     dual_axis_chart_buffers=None,
-    allowed_graph_days=None  # 🔧 新パラメータ追加
+    allowed_graph_days=None  # 🔧 このパラメータを正しく使用する
 ):
     pdf_start_time = time.time()
     elements = []
@@ -481,147 +504,70 @@ def create_pdf(
     elements.append(Spacer(1, 5*mm))
     page_width = A4[0] - doc.leftMargin - doc.rightMargin
     graphs_on_current_page = 0
-    max_graphs_per_page = 2
+    max_graphs_per_page = 2 # 1ページあたりの最大グラフ数
 
-    # 🔧 許可された日数の設定（デフォルトは90日のみ）
-    if allowed_graph_days is None:
-        allowed_graph_days = ["90"]  # デフォルトでFast Mode相当
-    allowed_graph_days = [str(d) for d in allowed_graph_days]
+    # 🔧 許可された日数の設定を修正
+    if not allowed_graph_days: # None または空のリストの場合
+        current_allowed_graph_days = ["90"]  # デフォルトでFast Mode相当
+        print(f"⚠️ PDF生成 ({title_prefix}): allowed_graph_days が指定されなかったか空のため、デフォルトの ['90'] 日を使用します。")
+    else:
+        current_allowed_graph_days = [str(d) for d in allowed_graph_days] # 文字列に変換
     
-    print(f"🔧 PDF生成開始 - {title_prefix}")
-    print(f"🔧 許可されたグラフ日数: {allowed_graph_days}")
+    print(f"🔧 PDF生成 ({title_prefix}): create_pdf 関数が使用するグラフ日数: {current_allowed_graph_days}")
     
-    # 🔧 グラフバッファの検証と重複除去
+    # 🔧 グラフバッファの検証と重複除去 (修正された current_allowed_graph_days を使用)
     validated_alos_buffers = validate_and_deduplicate_chart_buffers(
-        alos_chart_buffers, "ALOSグラフ", allowed_graph_days
+        alos_chart_buffers, "ALOSグラフ", current_allowed_graph_days
     ) if alos_chart_buffers else {}
     
     validated_patient_buffers = {}
     if patient_chart_buffers:
         for chart_type, buffers in patient_chart_buffers.items():
             validated_patient_buffers[chart_type] = validate_and_deduplicate_chart_buffers(
-                buffers, f"患者数推移グラフ({chart_type})", allowed_graph_days
+                buffers, f"患者数推移グラフ({chart_type})", current_allowed_graph_days
             )
     
     validated_dual_axis_buffers = validate_and_deduplicate_chart_buffers(
-        dual_axis_chart_buffers, "二軸グラフ", allowed_graph_days
+        dual_axis_chart_buffers, "二軸グラフ", current_allowed_graph_days
     ) if dual_axis_chart_buffers else {}
 
-    # 🔧 検証済みバッファの内容確認
-    print(f"🔧 検証済みALOSバッファ: {list(validated_alos_buffers.keys())}")
-    for chart_type, buffers in validated_patient_buffers.items():
-        if buffers:
-            print(f"🔧 検証済み患者数推移バッファ({chart_type}): {list(buffers.keys())}")
-    print(f"🔧 検証済み二軸バッファ: {list(validated_dual_axis_buffers.keys())}")
+    # 🔧 検証済みバッファの内容確認 (デバッグ用)
+    # print(f"🔧 検証済みALOSバッファ ({title_prefix}): {list(validated_alos_buffers.keys())}")
+    # for chart_type, buffers in validated_patient_buffers.items():
+    #     if buffers: print(f"🔧 検証済み患者数推移バッファ({chart_type}, {title_prefix}): {list(buffers.keys())}")
+    # print(f"🔧 検証済み二軸バッファ ({title_prefix}): {list(validated_dual_axis_buffers.keys())}")
 
-    # 🔧 ALOSグラフ (検証済みバッファから) - 重複チェック付き
+    # グラフ追加処理 (ALOS, 患者数推移, 二軸)
+    # グラフの種類ごとに追加し、ページ区切りを適切に管理
+    
+    all_graph_types_to_process = []
     if validated_alos_buffers:
-        # 🔧 ソートして一意性を確保
-        sorted_alos_items = sorted(validated_alos_buffers.items(), key=lambda item: int(item[0]))
-        added_alos_graphs = set()  # 追加済みのグラフを追跡
-        
-        for days_val_str, chart_buffer_bytes in sorted_alos_items:
-            if days_val_str in added_alos_graphs:
-                print(f"⚠️ 重複するALOSグラフをスキップ: {days_val_str}日")
-                continue
-                
-            if graphs_on_current_page >= max_graphs_per_page:
-                elements.append(PageBreak())
-                elements.append(Paragraph(report_title_text, ja_style))
-                elements.append(Spacer(1, 5*mm))
-                graphs_on_current_page = 0
-                
-            if chart_buffer_bytes:
-                try:
-                    if isinstance(chart_buffer_bytes, bytes):
-                        img_buf = BytesIO(chart_buffer_bytes)
-                    else:
-                        img_buf = chart_buffer_bytes
-                    img_buf.seek(0)
-                    elements.append(Paragraph(f"平均在院日数と平均在院患者数の推移（直近{days_val_str}日間）", ja_heading2))
-                    elements.append(Spacer(1, 1.5*mm))
-                    elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
-                    elements.append(Spacer(1, 3*mm))
-                    graphs_on_current_page += 1
-                    added_alos_graphs.add(days_val_str)
-                    print(f"✅ ALOSグラフ追加: {days_val_str}日")
-                except Exception as e:
-                    print(f"❌ ALOSグラフ追加エラー ({days_val_str}日): {e}")
-        
-        if graphs_on_current_page > 0 and (validated_patient_buffers or validated_dual_axis_buffers):
-             elements.append(PageBreak())
-             elements.append(Paragraph(report_title_text, ja_style))
-             elements.append(Spacer(1, 5*mm))
-             graphs_on_current_page = 0
-
-    # 🔧 患者数推移グラフ (検証済みバッファから) - 重複チェック付き
+        all_graph_types_to_process.append(
+            ("ALOS", validated_alos_buffers, f"平均在院日数と平均在院患者数の推移（直近%s日間）")
+        )
     if validated_patient_buffers:
         type_name_map = {"all": "全日", "weekday": "平日", "holiday": "休日"}
-        added_patient_graphs = set()  # 追加済みのグラフを追跡
-        
-        for chart_type_key in ["all", "weekday", "holiday"]:
+        for chart_type_key in ["all", "weekday", "holiday"]: # 表示順を固定
             day_buffers_dict = validated_patient_buffers.get(chart_type_key, {})
-            if not day_buffers_dict:
-                continue
-                
-            display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
-            # 🔧 ソートして一意性を確保
-            sorted_patient_items = sorted(day_buffers_dict.items(), key=lambda item: int(item[0]))
-            
-            for days_val_str, chart_buffer_bytes in sorted_patient_items:
-                graph_key = f"{chart_type_key}_{days_val_str}"
-                if graph_key in added_patient_graphs:
-                    print(f"⚠️ 重複する患者数推移グラフをスキップ: {chart_type_key} - {days_val_str}日")
-                    continue
-                    
-                if graphs_on_current_page >= max_graphs_per_page:
-                    elements.append(PageBreak())
-                    elements.append(Paragraph(report_title_text, ja_style))
-                    elements.append(Spacer(1, 5*mm))
-                    graphs_on_current_page = 0
-                    
-                if chart_buffer_bytes:
-                    try:
-                        if isinstance(chart_buffer_bytes, bytes):
-                            img_buf = BytesIO(chart_buffer_bytes)
-                        else:
-                            img_buf = chart_buffer_bytes
-                        img_buf.seek(0)
-                        elements.append(Paragraph(f"{display_name} 入院患者数推移（直近{days_val_str}日間）", ja_heading2))
-                        elements.append(Spacer(1, 1.5*mm))
-                        elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
-                        elements.append(Spacer(1, 3*mm))
-                        graphs_on_current_page += 1
-                        added_patient_graphs.add(graph_key)
-                        print(f"✅ 患者数推移グラフ追加: {chart_type_key} - {days_val_str}日")
-                    except Exception as e:
-                        print(f"❌ 患者数推移グラフ追加エラー ({chart_type_key} - {days_val_str}日): {e}")
-                    
-            if graphs_on_current_page > 0 and validated_dual_axis_buffers:
-                elements.append(PageBreak())
-                elements.append(Paragraph(report_title_text, ja_style))
-                elements.append(Spacer(1, 5*mm))
-                graphs_on_current_page = 0
-            elif graphs_on_current_page > 0 and not validated_dual_axis_buffers:
-                elements.append(PageBreak())
-                elements.append(Paragraph(report_title_text, ja_style))
-                elements.append(Spacer(1, 5*mm))
-                graphs_on_current_page = 0
-
-    # 🔧 二軸グラフ (検証済みバッファから) - 重複チェック付き
+            if day_buffers_dict:
+                display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
+                all_graph_types_to_process.append(
+                    (f"患者数推移_{chart_type_key}", day_buffers_dict, f"{display_name} 入院患者数推移（直近%s日間）")
+                )
     if validated_dual_axis_buffers:
-        # 🔧 ソートして一意性を確保
-        sorted_dual_items = sorted(validated_dual_axis_buffers.items(), key=lambda item: int(item[0]))
-        added_dual_graphs = set()  # 追加済みのグラフを追跡
+        all_graph_types_to_process.append(
+            ("二軸", validated_dual_axis_buffers, f"患者移動と在院数の推移（直近%s日間）")
+        )
+
+    # グラフ描画ループ
+    for graph_name, buffers_dict, title_template in all_graph_types_to_process:
+        # 日数でソートして描画順を固定 (例: 90日 -> 180日)
+        sorted_buffer_items = sorted(buffers_dict.items(), key=lambda item: int(item[0]))
         
-        for days_val_str, chart_buffer_bytes in sorted_dual_items:
-            if days_val_str in added_dual_graphs:
-                print(f"⚠️ 重複する二軸グラフをスキップ: {days_val_str}日")
-                continue
-                
+        for days_val_str, chart_buffer_bytes in sorted_buffer_items:
             if graphs_on_current_page >= max_graphs_per_page:
                 elements.append(PageBreak())
-                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Paragraph(report_title_text, ja_style)) # 新しいページにもタイトル
                 elements.append(Spacer(1, 5*mm))
                 graphs_on_current_page = 0
                 
@@ -629,26 +575,42 @@ def create_pdf(
                 try:
                     if isinstance(chart_buffer_bytes, bytes):
                         img_buf = BytesIO(chart_buffer_bytes)
-                    else:
+                    elif hasattr(chart_buffer_bytes, 'getvalue'): # BytesIOオブジェクトの場合
                         img_buf = chart_buffer_bytes
+                    else:
+                        print(f"❌ {graph_name}グラフ ({days_val_str}日) のバッファタイプが不正: {type(chart_buffer_bytes)}")
+                        continue
+                    
                     img_buf.seek(0)
-                    elements.append(Paragraph(f"患者移動と在院数の推移（直近{days_val_str}日間）", ja_heading2))
+                    elements.append(Paragraph(title_template % days_val_str, ja_heading2))
                     elements.append(Spacer(1, 1.5*mm))
-                    elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
+                    elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)) # 高さを調整
                     elements.append(Spacer(1, 3*mm))
                     graphs_on_current_page += 1
-                    added_dual_graphs.add(days_val_str)
-                    print(f"✅ 二軸グラフ追加: {days_val_str}日")
+                    # print(f"✅ {graph_name}グラフ追加 ({title_prefix}): {days_val_str}日")
                 except Exception as e:
-                    print(f"❌ 二軸グラフ追加エラー ({days_val_str}日): {e}")
+                    print(f"❌ {graph_name}グラフ追加エラー ({title_prefix}, {days_val_str}日): {e}")
+            else:
+                print(f"ℹ️ {graph_name}グラフのバッファが空です ({title_prefix}, {days_val_str}日)")
         
-        if graphs_on_current_page > 0:
-            elements.append(PageBreak())
-            elements.append(Paragraph(report_title_text, ja_style))
-            elements.append(Spacer(1, 5*mm))
-            graphs_on_current_page = 0
+        # 最後のグラフセットの後で、次の要素がテーブルならページブレークを入れる判断を改善
+        if graphs_on_current_page > 0 and graph_name != all_graph_types_to_process[-1][0] : # 最後のグラフタイプでなければ
+             if graphs_on_current_page >= max_graphs_per_page : # ページが埋まっていたら改ページ
+                 pass # ループの先頭で改ページされる
+             elif graphs_on_current_page > 0 : # ページにグラフが残っていて、次のグラフタイプに移るなら
+                 elements.append(PageBreak())
+                 elements.append(Paragraph(report_title_text, ja_style))
+                 elements.append(Spacer(1, 5*mm))
+                 graphs_on_current_page = 0
 
-    # ... (以降のテーブル生成ロジックは変更なし) ...
+
+    # テーブル生成ロジックの前に、グラフでページが途中なら改ページ
+    if graphs_on_current_page > 0:
+        elements.append(PageBreak())
+        elements.append(Paragraph(report_title_text, ja_style)) # 新しいページにもタイトル
+        elements.append(Spacer(1, 5*mm))
+        # graphs_on_current_page = 0 # テーブルは別カウント
+
     common_table_style_cmds = [
         ('FONTNAME', (0,0), (-1,-1), REPORTLAB_FONT_NAME), ('GRID', (0,0), (-1,-1), 0.5, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('ALIGN', (0,0), (-1,0), 'CENTER'), 
@@ -676,7 +638,12 @@ def create_pdf(
         elements.append(Table(table_data, colWidths=col_widths_fc, style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.blue)])))
         elements.append(Spacer(1, 4*mm))
     
-    elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm))
+    # 平日・休日テーブルの前に改ページ
+    if (df_weekday is not None and not df_weekday.empty) or \
+       (df_holiday is not None and not df_holiday.empty):
+        elements.append(PageBreak())
+        elements.append(Paragraph(report_title_text, ja_style))
+        elements.append(Spacer(1, 5*mm))
 
     if df_weekday is not None and not df_weekday.empty:
         elements.append(Paragraph("平日平均値", ja_heading2))
@@ -703,6 +670,8 @@ def create_pdf(
             ('FONTSIZE', (0,0), (-1,0), 8), ('FONTSIZE', (0,1), (-1,-1), 7), ('TEXTCOLOR', (0,0), (-1,0), colors.black),
         ]
         is_ward_pdf = "病棟別" in title_prefix; is_dept_pdf = "診療科別" in title_prefix
+        
+        # 病棟別テーブル
         if (is_ward_pdf and not is_dept_pdf) or (not is_ward_pdf and not is_dept_pdf) :
             if generated_ward_table_data and len(generated_ward_table_data) > 1:
                 elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm))
@@ -713,9 +682,14 @@ def create_pdf(
                 if num_cols != len(col_widths_ward) and num_cols > 0: col_widths_ward = [page_width/num_cols] * num_cols
                 elements.append(Table(generated_ward_table_data, colWidths=col_widths_ward, style=TableStyle(dept_ward_common_style + [('BACKGROUND', (0,0), (-1,0), colors.lightgrey)])))
                 elements.append(Spacer(1, 4*mm))
+        
+        # 診療科別テーブル
         if (is_dept_pdf and not is_ward_pdf) or (not is_ward_pdf and not is_dept_pdf) :
             if generated_dept_table_data and len(generated_dept_table_data) > 1:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm))
+                # 病棟別テーブルが出力されていなければ改ページ
+                if not ((is_ward_pdf and not is_dept_pdf) or (not is_ward_pdf and not is_dept_pdf and generated_ward_table_data and len(generated_ward_table_data) > 1)):
+                    elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm))
                 elements.append(Paragraph("診療科別 入院患者数（在院）平均", ja_heading2))
                 num_cols = len(generated_dept_table_data[0])
                 period_count = len(period_labels_dept_ward) if period_labels_dept_ward else 0
@@ -726,11 +700,21 @@ def create_pdf(
 
     elements.append(Spacer(1, 8*mm))
     elements.append(Paragraph(f"作成日時: {today_str}", normal_ja))
-    doc.build(elements)
+    
+    try:
+        doc.build(elements)
+    except Exception as e:
+        print(f"❌ PDF構築エラー ({title_prefix}): {e}")
+        import traceback
+        print(traceback.format_exc())
+        # エラー発生時もバッファを返すか、Noneを返すか検討
+        buffer.seek(0) # 空のバッファや部分的なバッファを返す可能性
+        return buffer # または return None
+        
     buffer.seek(0)
     gc.collect()
     
-    print(f"🔧 PDF生成完了 - {title_prefix} (所要時間: {time.time() - pdf_start_time:.2f}秒)")
+    # print(f"🔧 PDF生成完了 - {title_prefix} (所要時間: {time.time() - pdf_start_time:.2f}秒)")
     return buffer
 
 # create_landscape_pdf も同様に修正
@@ -741,7 +725,7 @@ def create_landscape_pdf(
     alos_chart_buffers=None,
     patient_chart_buffers=None,
     dual_axis_chart_buffers=None,
-    allowed_graph_days=None  # 🔧 新パラメータ追加
+    allowed_graph_days=None  # 🔧 このパラメータを正しく使用する
 ):
     pdf_start_time = time.time()
     elements = []
@@ -769,103 +753,103 @@ def create_landscape_pdf(
     report_title_text = f"入院患者数予測 - {title_prefix}（データ基準日: {data_date_str}）"
     elements.append(Paragraph(report_title_text, ja_style_land))
     elements.append(Spacer(1, 3*mm))
-    page_width_land, _ = landscape(A4)
+    page_width_land, page_height_land = landscape(A4)
     content_width_land = page_width_land - doc.leftMargin - doc.rightMargin
+    content_height_land = page_height_land - doc.topMargin - doc.bottomMargin
     graphs_on_current_page = 0
-    max_graphs_per_page_land = 2
+    max_graphs_per_page_land = 2 # 横向きの場合も1ページ2グラフ想定
 
-    # 🔧 許可された日数の設定（デフォルトは90日のみ）
-    if allowed_graph_days is None:
-        allowed_graph_days = ["90"]  # デフォルトでFast Mode相当
-    allowed_graph_days = [str(d) for d in allowed_graph_days]
+    # 🔧 許可された日数の設定を修正
+    if not allowed_graph_days: # None または空のリストの場合
+        current_allowed_graph_days = ["90"]  # デフォルトでFast Mode相当
+        print(f"⚠️ 横向きPDF生成 ({title_prefix}): allowed_graph_days が指定されなかったか空のため、デフォルトの ['90'] 日を使用します。")
+    else:
+        current_allowed_graph_days = [str(d) for d in allowed_graph_days]
     
-    print(f"🔧 横向きPDF生成開始 - {title_prefix}")
-    print(f"🔧 許可されたグラフ日数: {allowed_graph_days}")
+    print(f"🔧 横向きPDF生成 ({title_prefix}): create_landscape_pdf 関数が使用するグラフ日数: {current_allowed_graph_days}")
     
     # 🔧 グラフバッファの検証と重複除去
     validated_alos_buffers = validate_and_deduplicate_chart_buffers(
-        alos_chart_buffers, "ALOSグラフ(横向き)", allowed_graph_days
+        alos_chart_buffers, "ALOSグラフ(横向き)", current_allowed_graph_days
     ) if alos_chart_buffers else {}
     
     validated_patient_buffers = {}
     if patient_chart_buffers:
         for chart_type, buffers in patient_chart_buffers.items():
             validated_patient_buffers[chart_type] = validate_and_deduplicate_chart_buffers(
-                buffers, f"患者数推移グラフ(横向き)({chart_type})", allowed_graph_days
+                buffers, f"患者数推移グラフ(横向き)({chart_type})", current_allowed_graph_days
             )
     
     validated_dual_axis_buffers = validate_and_deduplicate_chart_buffers(
-        dual_axis_chart_buffers, "二軸グラフ(横向き)", allowed_graph_days
+        dual_axis_chart_buffers, "二軸グラフ(横向き)", current_allowed_graph_days
     ) if dual_axis_chart_buffers else {}
-
-    # ALOSグラフ (検証済みバッファから)
+    
+    # グラフ追加処理 (create_pdfと同様のロジックで)
+    all_graph_types_to_process_land = []
     if validated_alos_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(validated_alos_buffers.items(), key=lambda item: int(item[0])):
-            if graphs_on_current_page >= max_graphs_per_page_land:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
-            if chart_buffer_bytes:
-                try:
-                    if isinstance(chart_buffer_bytes, bytes):
-                        img_buf = BytesIO(chart_buffer_bytes)
-                    else:
-                        img_buf = chart_buffer_bytes
-                    img_buf.seek(0)
-                    elements.append(Paragraph(f"平均在院日数と平均在院患者数の推移（直近{days_val_str}日間）", ja_heading2_land))
-                    elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
-                    print(f"✅ 横向きALOSグラフ追加: {days_val_str}日")
-                except Exception as e:
-                    print(f"❌ 横向きALOSグラフ追加エラー ({days_val_str}日): {e}")
-        if graphs_on_current_page > 0 and (validated_patient_buffers or validated_dual_axis_buffers):
-            elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
-
-    # 患者数推移グラフ (検証済みバッファから)
+        all_graph_types_to_process_land.append(
+            ("ALOS", validated_alos_buffers, f"平均在院日数と平均在院患者数の推移（直近%s日間）")
+        )
     if validated_patient_buffers:
         type_name_map = {"all": "全日", "weekday": "平日", "holiday": "休日"}
-        for chart_type_key in ["all", "weekday", "holiday"]:
+        for chart_type_key in ["all", "weekday", "holiday"]: # 表示順を固定
             day_buffers_dict = validated_patient_buffers.get(chart_type_key, {})
-            if not day_buffers_dict: continue
-            display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
-            for days_val_str, chart_buffer_bytes in sorted(day_buffers_dict.items(), key=lambda item: int(item[0])):
-                if graphs_on_current_page >= max_graphs_per_page_land:
-                    elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
-                if chart_buffer_bytes:
-                    try:
-                        if isinstance(chart_buffer_bytes, bytes):
-                            img_buf = BytesIO(chart_buffer_bytes)
-                        else:
-                            img_buf = chart_buffer_bytes
-                        img_buf.seek(0)
-                        elements.append(Paragraph(f"{display_name} 入院患者数推移（直近{days_val_str}日間）", ja_heading2_land))
-                        elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
-                        print(f"✅ 横向き患者数推移グラフ追加: {chart_type_key} - {days_val_str}日")
-                    except Exception as e:
-                        print(f"❌ 横向き患者数推移グラフ追加エラー ({chart_type_key} - {days_val_str}日): {e}")
-            if graphs_on_current_page > 0 and validated_dual_axis_buffers:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
-            elif graphs_on_current_page > 0 and not validated_dual_axis_buffers:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
-
-    # 二軸グラフ (検証済みバッファから)
+            if day_buffers_dict:
+                display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
+                all_graph_types_to_process_land.append(
+                    (f"患者数推移_{chart_type_key}", day_buffers_dict, f"{display_name} 入院患者数推移（直近%s日間）")
+                )
     if validated_dual_axis_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(validated_dual_axis_buffers.items(), key=lambda item: int(item[0])):
+        all_graph_types_to_process_land.append(
+            ("二軸", validated_dual_axis_buffers, f"患者移動と在院数の推移（直近%s日間）")
+        )
+
+    for graph_name, buffers_dict, title_template in all_graph_types_to_process_land:
+        sorted_buffer_items = sorted(buffers_dict.items(), key=lambda item: int(item[0]))
+        
+        for days_val_str, chart_buffer_bytes in sorted_buffer_items:
             if graphs_on_current_page >= max_graphs_per_page_land:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style_land))
+                elements.append(Spacer(1, 3*mm))
+                graphs_on_current_page = 0
+                
             if chart_buffer_bytes:
                 try:
                     if isinstance(chart_buffer_bytes, bytes):
                         img_buf = BytesIO(chart_buffer_bytes)
-                    else:
+                    elif hasattr(chart_buffer_bytes, 'getvalue'):
                         img_buf = chart_buffer_bytes
+                    else:
+                        print(f"❌ {graph_name}グラフ(横) ({days_val_str}日) のバッファタイプが不正: {type(chart_buffer_bytes)}")
+                        continue
+                    
                     img_buf.seek(0)
-                    elements.append(Paragraph(f"患者移動と在院数の推移（直近{days_val_str}日間）", ja_heading2_land))
-                    elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
-                    print(f"✅ 横向き二軸グラフ追加: {days_val_str}日")
+                    elements.append(Paragraph(title_template % days_val_str, ja_heading2_land))
+                    elements.append(Spacer(1, 1*mm))
+                    # 横向きPDFでの画像サイズ調整 (例: コンテンツ幅の90%, 高さはアスペクト比0.4)
+                    elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)) 
+                    elements.append(Spacer(1, 2*mm))
+                    graphs_on_current_page += 1
                 except Exception as e:
-                    print(f"❌ 横向き二軸グラフ追加エラー ({days_val_str}日): {e}")
-        if graphs_on_current_page > 0:
-            elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
+                    print(f"❌ {graph_name}グラフ(横)追加エラー ({title_prefix}, {days_val_str}日): {e}")
+            else:
+                print(f"ℹ️ {graph_name}グラフ(横)のバッファが空です ({title_prefix}, {days_val_str}日)")
+        
+        if graphs_on_current_page > 0 and graph_name != all_graph_types_to_process_land[-1][0]:
+            if graphs_on_current_page >= max_graphs_per_page_land:
+                pass
+            elif graphs_on_current_page > 0:
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style_land))
+                elements.append(Spacer(1, 3*mm))
+                graphs_on_current_page = 0
 
-    # ... (テーブル生成・追加ロジックは create_pdf と同様だが、列幅やスタイルを横向き用に調整) ...
+    if graphs_on_current_page > 0: # 最後のグラフセットの後
+        elements.append(PageBreak())
+        elements.append(Paragraph(report_title_text, ja_style_land))
+        elements.append(Spacer(1, 3*mm))
+
     common_table_style_land_cmds = [
         ('FONTNAME', (0,0), (-1,-1), REPORTLAB_FONT_NAME),('GRID', (0,0), (-1,-1), 0.5, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),('ALIGN', (0,0), (-1,0), 'CENTER'), 
@@ -893,25 +877,37 @@ def create_landscape_pdf(
         elements.append(Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_land_cmds + [('BACKGROUND', (0,0), (-1,0), colors.blue)])))
         elements.append(Spacer(1, 2*mm))
 
-    elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm))
+    # 平日・休日テーブルの前に改ページ
+    if (df_weekday is not None and not df_weekday.empty) or \
+       (df_holiday is not None and not df_holiday.empty):
+        elements.append(PageBreak())
+        elements.append(Paragraph(report_title_text, ja_style_land))
+        elements.append(Spacer(1, 3*mm))
+        
     left_col_elements, right_col_elements = [], []
-    table_half_width = content_width_land * 0.48
+    table_half_width = content_width_land * 0.48 # 左右のテーブル幅
+    
     if df_weekday is not None and not df_weekday.empty:
         left_col_elements.append(Paragraph("平日平均値", ja_heading2_land))
-        header = [df_weekday.index.name if df_weekday.index.name else "区分"] + df_weekday.columns.tolist()
-        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in df_weekday.iterrows()]
-        num_cols = len(header); col_widths = [table_half_width*0.25] + [(table_half_width*0.75)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
-        left_col_elements.append(Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_land_cmds + [('BACKGROUND', (0,0), (-1,0), colors.teal)])))
+        header_wd = [df_weekday.index.name if df_weekday.index.name else "区分"] + df_weekday.columns.tolist()
+        table_data_wd = [header_wd] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in df_weekday.iterrows()]
+        num_cols_wd = len(header_wd); col_widths_wd = [table_half_width*0.25] + [(table_half_width*0.75)/(num_cols_wd-1 if num_cols_wd > 1 else 1)]*(num_cols_wd-1)
+        left_col_elements.append(Table(table_data_wd, colWidths=col_widths_wd, style=TableStyle(common_table_style_land_cmds + [('BACKGROUND', (0,0), (-1,0), colors.teal)])))
+    
     if df_holiday is not None and not df_holiday.empty:
         right_col_elements.append(Paragraph("休日平均値", ja_heading2_land))
-        header = [df_holiday.index.name if df_holiday.index.name else "区分"] + df_holiday.columns.tolist()
-        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in df_holiday.iterrows()]
-        num_cols = len(header); col_widths = [table_half_width*0.25] + [(table_half_width*0.75)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
-        right_col_elements.append(Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_land_cmds + [('BACKGROUND', (0,0), (-1,0), colors.orange)])))
+        header_hd = [df_holiday.index.name if df_holiday.index.name else "区分"] + df_holiday.columns.tolist()
+        table_data_hd = [header_hd] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in df_holiday.iterrows()]
+        num_cols_hd = len(header_hd); col_widths_hd = [table_half_width*0.25] + [(table_half_width*0.75)/(num_cols_hd-1 if num_cols_hd > 1 else 1)]*(num_cols_hd-1)
+        right_col_elements.append(Table(table_data_hd, colWidths=col_widths_hd, style=TableStyle(common_table_style_land_cmds + [('BACKGROUND', (0,0), (-1,0), colors.orange)])))
+    
     if left_col_elements or right_col_elements:
-        elements.append(Table([[left_col_elements if left_col_elements else "", right_col_elements if right_col_elements else ""]], 
-                                colWidths=[table_half_width, content_width_land - table_half_width - 2*mm]))
+        # Tableのセルに直接リストを渡す
+        elements.append(Table([[left_col_elements, right_col_elements]], 
+                                colWidths=[table_half_width, content_width_land - table_half_width - 2*mm], # 隙間を考慮
+                                style=TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))) # 上揃え
     elements.append(Spacer(1, 2*mm))
+
 
     if chart_data is not None and not chart_data.empty:
         generated_ward_table_data, generated_dept_table_data, period_labels_dept_ward = create_department_tables(
@@ -923,7 +919,8 @@ def create_landscape_pdf(
             ('FONTSIZE', (0,0), (-1,0), 7), ('FONTSIZE', (0,1), (-1,-1), 6.5), ('TEXTCOLOR', (0,0), (-1,0), colors.black),
         ]
         is_ward_pdf = "病棟別" in title_prefix; is_dept_pdf = "診療科別" in title_prefix
-        if (is_ward_pdf and not is_dept_pdf) or (not is_ward_pdf and not is_dept_pdf) :
+        
+        if (is_ward_pdf and not is_dept_pdf) or (not is_ward_pdf and not is_dept_pdf) : # 病棟PDF または 全体PDF の場合
             if generated_ward_table_data and len(generated_ward_table_data) > 1:
                 elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm))
                 elements.append(Paragraph("病棟別 入院患者数（在院）平均", ja_heading2_land))
@@ -932,11 +929,18 @@ def create_landscape_pdf(
                 if num_cols != len(col_widths_w) and num_cols > 0: col_widths_w = [content_width_land/num_cols] * num_cols
                 elements.append(Table(generated_ward_table_data, colWidths=col_widths_w, style=TableStyle(dept_ward_style_land + [('BACKGROUND', (0,0), (-1,0), colors.lightgrey)])))
                 elements.append(Spacer(1, 2*mm))
-        if (is_dept_pdf and not is_ward_pdf) or (not is_ward_pdf and not is_dept_pdf) :
+        
+        if (is_dept_pdf and not is_ward_pdf) or (not is_ward_pdf and not is_dept_pdf) : # 診療科PDF または 全体PDF の場合
             if generated_dept_table_data and len(generated_dept_table_data) > 1:
-                if not (is_ward_pdf and elements[-1] != PageBreak()): # 修正：条件を簡略化
-                     if not (is_ward_pdf and generated_ward_table_data and len(generated_ward_table_data) > 1 and elements[-2] != PageBreak()): # 最後の要素がSpacerでない場合も考慮
-                        elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm))
+                # 病棟別テーブルが出力されていなければ改ページ (全体PDFで病棟テーブルが先に出ている場合)
+                needs_page_break_before_dept = True
+                if (not is_ward_pdf and not is_dept_pdf) and (generated_ward_table_data and len(generated_ward_table_data) > 1):
+                    # 全体PDFで、かつ病棟テーブルが既に出力されている場合は、改ページ済みとみなす
+                     pass # 改ページは既に行われているか、病棟テーブルの直後
+                else:
+                    elements.append(PageBreak())
+                
+                elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm))
                 elements.append(Paragraph("診療科別 入院患者数（在院）平均", ja_heading2_land))
                 num_cols = len(generated_dept_table_data[0]); period_count = len(period_labels_dept_ward) if period_labels_dept_ward else 0
                 col_widths_d = [content_width_land*0.10] + [(content_width_land*0.72)/period_count if period_count > 0 else 0]*period_count + [content_width_land*0.09]*2
@@ -946,11 +950,20 @@ def create_landscape_pdf(
 
     elements.append(Spacer(1, 5*mm))
     elements.append(Paragraph(f"作成日時: {today_str}", normal_ja_land))
-    doc.build(elements)
+    
+    try:
+        doc.build(elements)
+    except Exception as e:
+        print(f"❌ 横向きPDF構築エラー ({title_prefix}): {e}")
+        import traceback
+        print(traceback.format_exc())
+        buffer.seek(0)
+        return buffer # または return None
+        
     buffer.seek(0)
     gc.collect()
     
-    print(f"🔧 横向きPDF生成完了 - {title_prefix} (所要時間: {time.time() - pdf_start_time:.2f}秒)")
+    # print(f"🔧 横向きPDF生成完了 - {title_prefix} (所要時間: {time.time() - pdf_start_time:.2f}秒)")
     return buffer
 
 
@@ -964,18 +977,25 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
         try: 
             chart_data['日付'] = pd.to_datetime(chart_data['日付'])
         except Exception: 
+            print("Error: Could not convert '日付' to datetime in create_department_tables.")
             return [], [], []
     if not isinstance(latest_date, pd.Timestamp): 
-        latest_date = pd.Timestamp(latest_date)
+        try:
+            latest_date = pd.Timestamp(latest_date)
+        except Exception:
+            print(f"Error: Could not convert latest_date '{latest_date}' to Timestamp.")
+            return [], [], []
 
-    current_year_start_month = 4
+
+    current_year_start_month = 4 # 年度開始月 (4月)
     if latest_date.month < current_year_start_month:
         current_fiscal_year_start = pd.Timestamp(year=latest_date.year - 1, month=current_year_start_month, day=1)
     else:
         current_fiscal_year_start = pd.Timestamp(year=latest_date.year, month=current_year_start_month, day=1)
-    current_fiscal_year_end_for_data = latest_date
+    current_fiscal_year_end_for_data = latest_date # データは最新日まで
+    
     previous_fiscal_year_start = current_fiscal_year_start - pd.DateOffset(years=1)
-    previous_fiscal_year_end = current_fiscal_year_start - pd.Timedelta(days=1)
+    previous_fiscal_year_end = current_fiscal_year_start - pd.Timedelta(days=1) # 前年度の最終日
 
     period_definitions = {
         "直近7日": (latest_date - pd.Timedelta(days=6), latest_date),
@@ -986,163 +1006,198 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
         f"{previous_fiscal_year_start.year}年度": (previous_fiscal_year_start, previous_fiscal_year_end),
     }
     period_labels_for_data = list(period_definitions.keys())
-    period_name_for_achievement = "直近30日"
+    period_name_for_achievement = "直近30日" # 達成率計算の基準期間
     
-    if para_style is None:
-        styles = getSampleStyleSheet()
-        font_name_to_use = REPORTLAB_FONT_NAME if REPORTLAB_FONT_NAME and pdfmetrics.getFont(REPORTLAB_FONT_NAME) else 'Helvetica'
-        para_style = ParagraphStyle('ParaNormalCenterDefault_Dept', parent=styles['Normal'], fontName=font_name_to_use, fontSize=6.5, alignment=TA_CENTER, leading=7)
+    if para_style is None: # ReportLabのParagraphStyleオブジェクトを期待
+        styles_default = getSampleStyleSheet()
+        # フォントが存在するか確認し、なければフォールバック
+        font_name_to_use = REPORTLAB_FONT_NAME
+        try:
+            pdfmetrics.getFont(font_name_to_use)
+        except KeyError:
+            print(f"Warning: Font '{font_name_to_use}' not found in ReportLab. Falling back to Helvetica.")
+            font_name_to_use = 'Helvetica' # ReportLabのデフォルトフォントの一つ
+            
+        para_style = ParagraphStyle('ParaNormalCenterDefault_Dept', 
+                                    parent=styles_default['Normal'], 
+                                    fontName=font_name_to_use, 
+                                    fontSize=6.5, 
+                                    alignment=TA_CENTER, 
+                                    leading=7)
 
+    # ヘッダーのラベルに改行を挿入 (ReportLabのParagraphはHTMLライクな<br/>タグで改行可能)
     period_labels_for_header = [Paragraph(label.replace("直近", "直近<br/>").replace("年度", "<br/>年度"), para_style) for label in period_labels_for_data]
 
     ward_codes_unique = sorted(chart_data["病棟コード"].astype(str).unique()) if "病棟コード" in chart_data.columns else []
     dept_names_original = sorted(chart_data["診療科名"].unique()) if "診療科名" in chart_data.columns else []
-    dept_names_to_process = dept_names_original
+    dept_names_to_process = dept_names_original # 特にフィルタリングがなければそのまま
     
+    # 表示名マッピング (target_data から取得、なければルールベースで生成)
     ward_display_names = {}
-    for ward_code in ward_codes_unique:
-        if target_data is not None and not target_data.empty and '部門コード' in target_data.columns and '部門名' in target_data.columns:
-            target_row = target_data[target_data['部門コード'].astype(str) == ward_code]
-            if not target_row.empty and pd.notna(target_row['部門名'].iloc[0]):
-                ward_display_names[ward_code] = target_row['部門名'].iloc[0]
-                continue
-        match = re.match(r'0*(\d+)([A-Za-z]*)', ward_code)
-        if match: 
-            ward_display_names[ward_code] = f"{match.group(1)}{match.group(2)}病棟"
-        else: 
-            ward_display_names[ward_code] = ward_code
+    if target_data is not None and not target_data.empty and '部門コード' in target_data.columns and '部門名' in target_data.columns:
+        # '部門コード'を文字列に変換してマッピングを作成
+        unique_target_wards = target_data[['部門コード', '部門名']].drop_duplicates('部門コード')
+        ward_display_map_from_target = pd.Series(unique_target_wards.部門名.values, index=unique_target_wards.部門コード.astype(str)).to_dict()
+    else:
+        ward_display_map_from_target = {}
 
+    for ward_code in ward_codes_unique:
+        display_name = ward_display_map_from_target.get(ward_code)
+        if display_name and pd.notna(display_name):
+            ward_display_names[ward_code] = display_name
+        else: # target_dataにないか、部門名がNaNの場合のフォールバック
+            match = re.match(r'0*(\d+)([A-Za-z]*)', ward_code) # 先頭の0を除去
+            if match: 
+                ward_display_names[ward_code] = f"{match.group(1)}{match.group(2)}病棟"
+            else: 
+                ward_display_names[ward_code] = ward_code # マッチしない場合はそのままコードを使用
+
+    # 集計用辞書
     ward_metrics = {ward_code: {} for ward_code in ward_codes_unique}
     dept_metrics = {dept_name: {} for dept_name in dept_names_to_process}
 
+    # 期間別集計
     for period_label, (start_dt_period, end_dt_period) in period_definitions.items():
-        if start_dt_period > end_dt_period: 
+        if start_dt_period > end_dt_period: # 前年度データがない場合など
             continue
         period_data_df = chart_data[(chart_data["日付"] >= start_dt_period) & (chart_data["日付"] <= end_dt_period)]
         if period_data_df.empty: 
             continue
-        num_days_in_period_calc = period_data_df['日付'].nunique()
+        
+        num_days_in_period_calc = period_data_df['日付'].nunique() # 期間内の実データ日数
         if num_days_in_period_calc == 0: 
             continue
             
+        # 病棟別集計
         for ward_code in ward_codes_unique:
             ward_data_df = period_data_df[period_data_df["病棟コード"].astype(str) == ward_code]
             if not ward_data_df.empty and '入院患者数（在院）' in ward_data_df.columns:
+                # 日付ごとに合計してから期間で合計 (重複日がある場合に備える)
                 total_patient_days_val = ward_data_df.groupby('日付')['入院患者数（在院）'].sum().sum()
                 avg_daily_census_val = total_patient_days_val / num_days_in_period_calc if num_days_in_period_calc > 0 else np.nan
                 ward_metrics[ward_code][period_label] = avg_daily_census_val
             else: 
-                ward_metrics[ward_code][period_label] = np.nan
+                ward_metrics[ward_code][period_label] = np.nan # データなし
 
+        # 診療科別集計
         for dept_name in dept_names_to_process:
             dept_data_df = period_data_df[period_data_df["診療科名"] == dept_name]
             if not dept_data_df.empty and '入院患者数（在院）' in dept_data_df.columns:
                 total_patient_days_val = dept_data_df.groupby('日付')['入院患者数（在院）'].sum().sum()
-                avg_daily_census_val = total_patient_days_val / num_days_in_period_calc if num_days_in_period_calc > 0 else 1
+                avg_daily_census_val = total_patient_days_val / num_days_in_period_calc if num_days_in_period_calc > 0 else np.nan
                 dept_metrics[dept_name][period_label] = avg_daily_census_val
             else: 
                 dept_metrics[dept_name][period_label] = np.nan
     
-    # 🔧 新しい目標値ファイル構造に対応した目標値取得関数
-    target_dict_cache_local = {}
-    def get_targets_achievements_new_format(items, metrics_dict, target_data_df, achievement_period=period_name_for_achievement):
-        targets = {}
-        achievements = {}
-        
-        if target_data_df is not None and not target_data_df.empty:
-            # 🔧 新しいCSVファイル構造をチェック
-            required_cols_new = ['部門コード', '指標タイプ', '期間区分', '目標値']  # 新しい構造
-            required_cols_old = ['部門コード', '区分', '目標値']  # 古い構造
-            
-            if all(col in target_data_df.columns for col in required_cols_new):
-                # 🔧 新しい構造の処理
-                print("新しい目標値ファイル構造を検出しました")
-                
-                # 日平均在院患者数の目標値のみを取得
-                daily_census_targets = target_data_df[
-                    (target_data_df['指標タイプ'].str.contains('日平均在院患者数|在院患者数', case=False, na=False)) &
-                    (target_data_df['期間区分'] == '全日')  # 全日の目標値を使用
-                ].copy()
-                
-                if not daily_census_targets.empty:
-                    daily_census_targets['部門コード'] = daily_census_targets['部門コード'].astype(str)
-                    target_mapping = dict(zip(daily_census_targets['部門コード'], daily_census_targets['目標値']))
-                    
-                    print(f"取得した目標値: {target_mapping}")
-                    
-                    for item_id_val in items:
-                        item_id_str_val = str(item_id_val)
-                        target_value_val = target_mapping.get(item_id_str_val)
-                        
-                        if target_value_val is not None and pd.notna(target_value_val):
-                            targets[item_id_val] = float(target_value_val)
-                            actual_value_val = metrics_dict.get(item_id_val, {}).get(achievement_period)
-                            if actual_value_val is not None and pd.notna(actual_value_val) and target_value_val > 0:
-                                achievements[item_id_val] = (actual_value_val / target_value_val) * 100
-                
-            elif all(col in target_data_df.columns for col in required_cols_old):
-                # 🔧 古い構造の処理（既存コードと同じ）
-                print("古い目標値ファイル構造を検出しました")
-                target_data_df['部門コード'] = target_data_df['部門コード'].astype(str)
-                
-                if 'all_targets' not in target_dict_cache_local:
-                    all_targets_map_local = {
-                        str(row['部門コード']): float(row['目標値']) 
-                        for _, row in target_data_df[target_data_df['区分'] == '全日'].iterrows() 
-                        if pd.notna(row.get('部門コード')) and pd.notna(row.get('目標値'))
-                    }
-                    target_dict_cache_local['all_targets'] = all_targets_map_local
-                
-                all_targets_map_local = target_dict_cache_local.get('all_targets', {})
-                for item_id_val in items:
-                    item_id_str_val = str(item_id_val)
-                    target_value_val = all_targets_map_local.get(item_id_str_val)
-                    if target_value_val is not None:
-                        targets[item_id_val] = target_value_val
-                        actual_value_val = metrics_dict.get(item_id_val, {}).get(achievement_period)
-                        if actual_value_val is not None and pd.notna(actual_value_val) and target_value_val > 0:
-                            achievements[item_id_val] = (actual_value_val / target_value_val) * 100
-            else:
-                print(f"目標値ファイルの列構造が認識できません。利用可能な列: {list(target_data_df.columns)}")
-        
-        return targets, achievements
+    # 目標値と達成率の取得 (新しい目標値ファイル構造に対応)
+    target_dict_cache_local = {} # 関数内での簡易キャッシュ
 
-    # 🔧 新しい関数を使用して目標値と達成率を取得
+    def get_targets_achievements_new_format(items_list, metrics_data_dict, target_data_df, achievement_period_name=period_name_for_achievement):
+        targets_map = {}
+        achievements_map = {}
+        
+        if target_data_df is None or target_data_df.empty:
+            return targets_map, achievements_map
+
+        # 必要な列を確認
+        required_cols_new = ['部門コード', '指標タイプ', '期間区分', '目標値']
+        required_cols_old = ['部門コード', '区分', '目標値'] # 古い形式
+        
+        target_data_df_local = target_data_df.copy() # 元のDFを変更しない
+
+        is_new_format = all(col in target_data_df_local.columns for col in required_cols_new)
+        is_old_format = all(col in target_data_df_local.columns for col in required_cols_old)
+
+        if is_new_format:
+            # print("Using new target file format.")
+            # 「日平均在院患者数」または「在院患者数」に関連する「全日」の目標値を取得
+            census_targets_df = target_data_df_local[
+                (target_data_df_local['指標タイプ'].astype(str).str.contains('日平均在院患者数|在院患者数', case=False, na=False)) &
+                (target_data_df_local['期間区分'].astype(str) == '全日') & # 全日の目標値のみ
+                (pd.notna(target_data_df_local['部門コード'])) &
+                (pd.notna(target_data_df_local['目標値']))
+            ]
+            if not census_targets_df.empty:
+                # 部門コードを文字列に変換して重複を削除し、辞書を作成
+                target_mapping = dict(zip(census_targets_df['部門コード'].astype(str), census_targets_df['目標値'].astype(float)))
+                
+                for item_id in items_list:
+                    item_id_str = str(item_id)
+                    target_val = target_mapping.get(item_id_str)
+                    if target_val is not None:
+                        targets_map[item_id] = target_val
+                        actual_val = metrics_data_dict.get(item_id, {}).get(achievement_period_name)
+                        if pd.notna(actual_val) and target_val > 0:
+                            achievements_map[item_id] = (actual_val / target_val) * 100
+        elif is_old_format:
+            # print("Using old target file format.")
+            # 古い形式の処理（既存のロジックに近い）
+            old_census_targets_df = target_data_df_local[
+                (target_data_df_local['区分'].astype(str) == '全日') & # 全日の目標値のみ
+                (pd.notna(target_data_df_local['部門コード'])) &
+                (pd.notna(target_data_df_local['目標値']))
+            ]
+            if not old_census_targets_df.empty:
+                target_mapping = dict(zip(old_census_targets_df['部門コード'].astype(str), old_census_targets_df['目標値'].astype(float)))
+
+                for item_id in items_list:
+                    item_id_str = str(item_id)
+                    target_val = target_mapping.get(item_id_str)
+                    if target_val is not None:
+                        targets_map[item_id] = target_val
+                        actual_val = metrics_data_dict.get(item_id, {}).get(achievement_period_name)
+                        if pd.notna(actual_val) and target_val > 0:
+                            achievements_map[item_id] = (actual_val / target_val) * 100
+        else:
+            print(f"Target file columns do not match known formats. Available columns: {list(target_data_df_local.columns)}")
+
+        return targets_map, achievements_map
+
     ward_targets, ward_achievements = get_targets_achievements_new_format(ward_codes_unique, ward_metrics, target_data)
     dept_targets, dept_achievements = get_targets_achievements_new_format(dept_names_to_process, dept_metrics, target_data)
     
-    def sort_entities(entities_list, achievements_ref_dict, targets_ref_dict):
-        entities_list_str = [str(e) for e in entities_list]
-        achievements_ref_str = {str(k): v for k, v in achievements_ref_dict.items()}
-        targets_ref_str = {str(k): v for k, v in targets_ref_dict.items()}
-        sorted_by_achievement = sorted([e for e in entities_list_str if e in achievements_ref_str], key=lambda x: achievements_ref_str.get(x, 0), reverse=True)
-        sorted_by_target_only = sorted([e for e in entities_list_str if e in targets_ref_str and e not in achievements_ref_str])
-        sorted_by_no_target = sorted([e for e in entities_list_str if e not in targets_ref_str])
-        return sorted_by_achievement + sorted_by_target_only + sorted_by_no_target
+    # テーブル表示順のソート (達成率 > 目標値あり > 目標値なし)
+    def sort_entities_for_table(entities, achievements_dict, targets_dict, display_names_dict=None):
+        # display_names_dictはソートキーには直接使わないが、元のentity IDを保持するためにラップする
+        def get_sort_key(entity_id):
+            ach = achievements_dict.get(entity_id, -float('inf')) # 達成率がない場合は最後に
+            has_target = entity_id in targets_dict
+            # 達成率で降順、目標値ありを優先、最後にIDで昇順 (文字列として)
+            return (-ach, not has_target, str(entity_id)) 
+            
+        return sorted(entities, key=get_sort_key)
 
-    sorted_ward_codes = sort_entities(ward_codes_unique, ward_achievements, ward_targets)
-    sorted_dept_names = sort_entities(dept_names_to_process, dept_achievements, dept_targets)
+    sorted_ward_codes = sort_entities_for_table(ward_codes_unique, ward_achievements, ward_targets, ward_display_names)
+    # 診療科名は既に文字列なので、display_names_dictは不要
+    sorted_dept_names = sort_entities_for_table(dept_names_to_process, dept_achievements, dept_targets)
     
-    header_items = [Paragraph("部門", para_style)] + period_labels_for_header + [Paragraph("目標値", para_style), Paragraph("達成率<br/>(%)", para_style)]
+    # テーブルヘッダー
+    header_items = [Paragraph("部門", para_style)] + period_labels_for_header + \
+                   [Paragraph("目標値", para_style), Paragraph("達成率<br/>(%)", para_style)]
     
+    # 病棟テーブルデータ作成
     ward_table_data = [header_items]
-    for ward_code_str in sorted_ward_codes:
-        row_items = [Paragraph(ward_display_names.get(ward_code_str, ward_code_str), para_style)]
+    for ward_code_val in sorted_ward_codes: # ソート済みのリストを使用
+        display_name_ward = ward_display_names.get(ward_code_val, str(ward_code_val))
+        row_items = [Paragraph(display_name_ward, para_style)]
         for period_label_val in period_labels_for_data: 
-            val = ward_metrics.get(ward_code_str, {}).get(period_label_val)
+            val = ward_metrics.get(ward_code_val, {}).get(period_label_val)
             row_items.append(f"{val:.1f}" if pd.notna(val) else "-")
-        row_items.append(f"{ward_targets.get(ward_code_str):.1f}" if ward_code_str in ward_targets else "-")
-        row_items.append(f"{ward_achievements.get(ward_code_str):.1f}" if ward_code_str in ward_achievements else "-")
+        row_items.append(f"{ward_targets.get(ward_code_val):.1f}" if ward_code_val in ward_targets else "-")
+        row_items.append(f"{ward_achievements.get(ward_code_val):.1f}" if ward_code_val in ward_achievements else "-")
         ward_table_data.append(row_items)
     
+    # 診療科テーブルデータ作成
     dept_table_data = [header_items]
-    for dept_name_str in sorted_dept_names:
-        row_items = [Paragraph(str(dept_name_str), para_style)]
+    for dept_name_val in sorted_dept_names: # ソート済みのリストを使用
+        # 診療科名はそのまま表示
+        row_items = [Paragraph(str(dept_name_val), para_style)]
         for period_label_val in period_labels_for_data: 
-            val = dept_metrics.get(dept_name_str, {}).get(period_label_val)
+            val = dept_metrics.get(dept_name_val, {}).get(period_label_val)
             row_items.append(f"{val:.1f}" if pd.notna(val) else "-")
-        row_items.append(f"{dept_targets.get(dept_name_str):.1f}" if dept_name_str in dept_targets else "-")
-        row_items.append(f"{dept_achievements.get(dept_name_str):.1f}" if dept_name_str in dept_achievements else "-")
+        row_items.append(f"{dept_targets.get(dept_name_val):.1f}" if dept_name_val in dept_targets else "-")
+        row_items.append(f"{dept_achievements.get(dept_name_val):.1f}" if dept_name_val in dept_achievements else "-")
         dept_table_data.append(row_items)
     
+    # print(f"Department table generation took: {time.time() - dept_tbl_start_time:.2f}s")
     return ward_table_data, dept_table_data, period_labels_for_data
