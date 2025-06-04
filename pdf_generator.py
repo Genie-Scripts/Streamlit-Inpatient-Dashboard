@@ -7,7 +7,7 @@ import time
 import hashlib
 import gc
 import numpy as np
-
+import tempfile
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
@@ -640,7 +640,7 @@ def create_pdf(
             continue
 
         for days_val_str, chart_buffer_bytes in sorted_buffer_items:
-            print(f"    Attempting to add '{graph_name}' for '{days_val_str}' days.")
+            print(f"    Attempting to add '{graph_name}' for '{days_val_str}' days.") # 既存ログ
             if graphs_on_current_page >= max_graphs_per_page:
                 elements.append(PageBreak())
                 elements.append(Paragraph(report_title_text, ja_style))
@@ -657,23 +657,56 @@ def create_pdf(
                         print(f"    ❌ SKIPPING '{graph_name}' ('{days_val_str}' days): Invalid buffer type {type(chart_buffer_bytes)}")
                         continue
                     
-                    img_buf.seek(0) # BytesIOのポインタを先頭に
+                    img_buf.seek(0) 
                     
-                    # === ここからデバッグ用: 画像ファイル保存 ===
-                    # ファイル名にPIDを追加して、並列処理でもファイルが上書きされないようにする
+                    # === ここからデバッグ用: 画像ファイル保存 (修正版) ===
                     pid_for_filename = os.getpid() 
-                    safe_title_prefix = "".join(c if c.isalnum() else '_' for c in title_prefix) # ファイル名安全化
-                    debug_image_filename = f"debug_pid{pid_for_filename}_{safe_title_prefix}_{graph_name.replace('/', '_')}_{days_val_str}.png"
+                    safe_title_prefix = "".join(c if c.isalnum() else '_' for c in title_prefix)
+                    base_debug_filename = f"debug_pid{pid_for_filename}_{safe_title_prefix}_{graph_name.replace('/', '_')}_{days_val_str}.png"
+                    
+                    # 保存試行パスのリスト (最初に一時ディレクトリ、次にカレントディレクトリ)
+                    save_paths_to_try = []
                     try:
-                        with open(debug_image_filename, "wb") as f_debug_img:
-                            f_debug_img.write(img_buf.getvalue()) # getvalue()で全バイト取得
-                        print(f"    🖼️ DEBUG IMAGE SAVED: {debug_image_filename}")
-                    except Exception as e_debug_save:
-                        print(f"    ⚠️ DEBUG IMAGE SAVE FAILED for {debug_image_filename}: {e_debug_save}")
-                    img_buf.seek(0) # 保存後、再度ポインタを先頭に戻す (Imageで使われるため)
+                        # システムの一時ディレクトリを取得
+                        system_temp_dir = tempfile.gettempdir()
+                        if os.access(system_temp_dir, os.W_OK): # 一時ディレクトリに書き込み可能かチェック
+                            save_paths_to_try.append(os.path.join(system_temp_dir, base_debug_filename))
+                        else:
+                            print(f"    ⚠️ System temp dir '{system_temp_dir}' not writable.")
+                    except Exception as e_tempdir:
+                        print(f"    ⚠️ Error getting system temp dir: {e_tempdir}")
+                    save_paths_to_try.append(base_debug_filename) # カレントディレクトリをフォールバックとして追加
+
+                    saved_successfully_path = None
+                    image_bytes_for_saving = None
+                    try:
+                        image_bytes_for_saving = img_buf.getvalue() # バイト列を一度だけ取得
+                        if not image_bytes_for_saving:
+                            print(f"    ⚠️ DEBUG IMAGE SAVE SKIPPED for {base_debug_filename}: img_buf.getvalue() returned empty bytes.")
+                        else:
+                            for attempt_path in save_paths_to_try:
+                                try:
+                                    with open(attempt_path, "wb") as f_debug_img:
+                                        f_debug_img.write(image_bytes_for_saving)
+                                    saved_successfully_path = os.path.abspath(attempt_path)
+                                    print(f"    🖼️ DEBUG IMAGE SAVED: {saved_successfully_path}")
+                                    break # 保存に成功したらループを抜ける
+                                except IOError as e_io:
+                                    print(f"    ⚠️ DEBUG IMAGE SAVE ATTEMPT FAILED (IOError) for '{attempt_path}': {e_io}")
+                                except Exception as e_general_save:
+                                    print(f"    ⚠️ DEBUG IMAGE SAVE ATTEMPT FAILED (General Error) for '{attempt_path}': {e_general_save}")
+                            
+                            if not saved_successfully_path:
+                                print(f"    ❌ DEBUG IMAGE SAVE FAILED for {base_debug_filename} after trying all paths. Buffer (first 100 bytes if available): {image_bytes_for_saving[:100] if image_bytes_for_saving else 'N/A'}")
+                    
+                    except Exception as e_getvalue:
+                        print(f"    ❌ DEBUG IMAGE SAVE FAILED for {base_debug_filename}: Error calling img_buf.getvalue(): {e_getvalue}")
+                    
+                    img_buf.seek(0) # ReportLabのImageで使われるため、ポインタを先頭に戻す
                     # === デバッグ用ここまで ===
 
                     elements.append(Paragraph(title_template % days_val_str, ja_heading2))
+
                     elements.append(Spacer(1, 1.5*mm))
                     elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
                     elements.append(Spacer(1, 3*mm))
