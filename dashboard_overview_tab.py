@@ -107,28 +107,45 @@ def load_target_values_csv():
                     st.error("❌ CSVファイルのエンコーディングが認識できません")
                     return st.session_state.target_values_df
                 
-                # 必要な列の確認
-                required_columns = ['部門コード', '目標値', '区分']
-                missing_columns = [col for col in required_columns if col not in target_df.columns]
+                # 必要な列の確認（柔軟性を向上）
+                required_columns = ['目標値', '区分']  # 最低限必要な列
+                optional_columns = ['部門コード', '部門名']  # どちらか一方があれば良い
                 
-                if missing_columns:
-                    st.error(f"❌ 必要な列が見つかりません: {', '.join(missing_columns)}")
-                    st.info("必要な列: 部門コード, 目標値, 区分")
+                missing_required = [col for col in required_columns if col not in target_df.columns]
+                has_dept_identifier = any(col in target_df.columns for col in optional_columns)
+                
+                if missing_required:
+                    st.error(f"❌ 必要な列が見つかりません: {', '.join(missing_required)}")
+                    st.info("必要な列: 目標値, 区分")
+                elif not has_dept_identifier:
+                    st.error("❌ 部門識別用の列が見つかりません")
+                    st.info("必要な列: 部門コード または 部門名")
                     st.info(f"読み込まれた列: {', '.join(target_df.columns.tolist())}")
                 else:
                     # データ型の変換とクリーニング（強化版）
-                    target_df['部門コード'] = target_df['部門コード'].astype(str).str.strip()
+                    if '部門コード' in target_df.columns:
+                        target_df['部門コード'] = target_df['部門コード'].astype(str).str.strip()
+                        # 空白や改行文字の除去
+                        target_df['部門コード'] = target_df['部門コード'].str.replace('\n', '').str.replace('\r', '')
+                    
+                    if '部門名' in target_df.columns:
+                        target_df['部門名'] = target_df['部門名'].astype(str).str.strip()
+                        # 空白や改行文字の除去
+                        target_df['部門名'] = target_df['部門名'].str.replace('\n', '').str.replace('\r', '')
+                    
                     target_df['目標値'] = pd.to_numeric(target_df['目標値'], errors='coerce')
                     target_df['区分'] = target_df['区分'].astype(str).str.strip()
-                    
-                    # 空白や改行文字の除去
-                    target_df['部門コード'] = target_df['部門コード'].str.replace('\n', '').str.replace('\r', '')
                     target_df['区分'] = target_df['区分'].str.replace('\n', '').str.replace('\r', '')
                     
                     # 無効なデータの除去
                     initial_rows = len(target_df)
                     target_df = target_df.dropna(subset=['目標値'])
-                    target_df = target_df[target_df['部門コード'].str.strip() != '']
+                    
+                    # 部門識別列の有効性チェック
+                    if '部門コード' in target_df.columns:
+                        target_df = target_df[target_df['部門コード'].str.strip() != '']
+                    elif '部門名' in target_df.columns:
+                        target_df = target_df[target_df['部門名'].str.strip() != '']
                     
                     rows_removed = initial_rows - len(target_df)
                     if rows_removed > 0:
@@ -143,18 +160,29 @@ def load_target_values_csv():
                         
                         # デバッグ情報表示（詳細版）
                         st.markdown("**🔍 詳細デバッグ情報**")
-                        unique_depts = sorted(target_df['部門コード'].unique())
                         unique_categories = sorted(target_df['区分'].unique())
                         
                         col_debug1, col_debug2 = st.columns(2)
                         with col_debug1:
-                            st.write(f"• 部門コード数: {len(unique_depts)}")
-                            if len(unique_depts) <= 20:
-                                st.text("部門コード一覧:")
-                                for dept in unique_depts:
-                                    st.text(f"  '{dept}'")
-                            else:
-                                st.text(f"部門コード例: {', '.join(unique_depts[:10])}...")
+                            if '部門コード' in target_df.columns:
+                                unique_codes = sorted(target_df['部門コード'].unique())
+                                st.write(f"• 部門コード数: {len(unique_codes)}")
+                                if len(unique_codes) <= 20:
+                                    st.text("部門コード一覧:")
+                                    for code in unique_codes:
+                                        st.text(f"  '{code}'")
+                                else:
+                                    st.text(f"部門コード例: {', '.join(unique_codes[:10])}...")
+                            
+                            if '部門名' in target_df.columns:
+                                unique_names = sorted(target_df['部門名'].unique())
+                                st.write(f"• 部門名数: {len(unique_names)}")
+                                if len(unique_names) <= 20:
+                                    st.text("部門名一覧:")
+                                    for name in unique_names:
+                                        st.text(f"  '{name}'")
+                                else:
+                                    st.text(f"部門名例: {', '.join(unique_names[:10])}...")
                         
                         with col_debug2:
                             st.write(f"• 区分一覧: {unique_categories}")
@@ -171,37 +199,49 @@ def load_target_values_csv():
                                 selected_depts = current_filter_config.get('selected_depts', [])
                                 st.write(f"選択診療科: {selected_depts}")
                                 
-                                # 一致確認（詳細版）
-                                matched_depts = []
-                                unmatched_depts = []
-                                for dept in selected_depts:
-                                    if dept in unique_depts:
-                                        matched_depts.append(dept)
-                                    else:
-                                        unmatched_depts.append(dept)
+                                # 一致確認（詳細版）- 部門コードと部門名両方をチェック
+                                matched_items = []
+                                unmatched_items = []
                                 
-                                if matched_depts:
-                                    st.success(f"✅ 一致: {matched_depts}")
-                                if unmatched_depts:
-                                    st.error(f"❌ 不一致: {unmatched_depts}")
+                                for dept in selected_depts:
+                                    found = False
+                                    if '部門コード' in target_df.columns and dept in target_df['部門コード'].values:
+                                        matched_items.append(f"{dept} (部門コード)")
+                                        found = True
+                                    if '部門名' in target_df.columns and dept in target_df['部門名'].values:
+                                        matched_items.append(f"{dept} (部門名)")
+                                        found = True
+                                    if not found:
+                                        unmatched_items.append(dept)
+                                
+                                if matched_items:
+                                    st.success(f"✅ 一致: {matched_items}")
+                                if unmatched_items:
+                                    st.error(f"❌ 不一致: {unmatched_items}")
                                     
                             elif filter_mode == "特定病棟":
                                 selected_wards = current_filter_config.get('selected_wards', [])
                                 st.write(f"選択病棟: {selected_wards}")
                                 
-                                # 一致確認（詳細版）
-                                matched_wards = []
-                                unmatched_wards = []
-                                for ward in selected_wards:
-                                    if ward in unique_depts:
-                                        matched_wards.append(ward)
-                                    else:
-                                        unmatched_wards.append(ward)
+                                # 一致確認（詳細版）- 部門コードと部門名両方をチェック
+                                matched_items = []
+                                unmatched_items = []
                                 
-                                if matched_wards:
-                                    st.success(f"✅ 一致: {matched_wards}")
-                                if unmatched_wards:
-                                    st.error(f"❌ 不一致: {unmatched_wards}")
+                                for ward in selected_wards:
+                                    found = False
+                                    if '部門コード' in target_df.columns and ward in target_df['部門コード'].values:
+                                        matched_items.append(f"{ward} (部門コード)")
+                                        found = True
+                                    if '部門名' in target_df.columns and ward in target_df['部門名'].values:
+                                        matched_items.append(f"{ward} (部門名)")
+                                        found = True
+                                    if not found:
+                                        unmatched_items.append(ward)
+                                
+                                if matched_items:
+                                    st.success(f"✅ 一致: {matched_items}")
+                                if unmatched_items:
+                                    st.error(f"❌ 不一致: {unmatched_items}")
                         
             except Exception as e:
                 st.error(f"❌ CSVファイル読み込みエラー: {e}")
@@ -214,15 +254,20 @@ def load_target_values_csv():
             
             # 簡単な統計情報表示
             if len(current_df) > 0:
-                unique_depts_count = current_df['部門コード'].nunique()
+                dept_count = 0
+                if '部門コード' in current_df.columns:
+                    dept_count = current_df['部門コード'].nunique()
+                elif '部門名' in current_df.columns:
+                    dept_count = current_df['部門名'].nunique()
+                
                 unique_categories = ', '.join(sorted(current_df['区分'].unique()))
-                st.caption(f"部門数: {unique_depts_count}件, 区分: {unique_categories}")
+                st.caption(f"部門数: {dept_count}件, 区分: {unique_categories}")
             
             # 現在のデータ内の部門コード確認機能（詳細版）
-            with st.expander("📋 システム内の部門コード確認", expanded=False):
+            with st.expander("📋 システム内の部門コード・部門名確認", expanded=False):
                 df_for_check = st.session_state.get('df')
                 if df_for_check is not None and not df_for_check.empty:
-                    st.markdown("**🔍 現在のデータ内の部門コード一覧**")
+                    st.markdown("**🔍 現在のデータ内の部門情報一覧**")
                     
                     col_sys1, col_sys2 = st.columns(2)
                     
@@ -252,9 +297,9 @@ def load_target_values_csv():
                                     st.text(f"  '{ward}'")
                                 st.text(f"... 他{len(unique_wards_in_data)-15}件")
                     
-                    st.markdown("**💡 ヒント**: 目標値CSVの「部門コード」は上記リストと完全一致している必要があります")
+                    st.markdown("**💡 ヒント**: 目標値CSVの「部門コード」または「部門名」は上記リストと完全一致している必要があります")
                 else:
-                    st.warning("データが読み込まれていないため、部門コードを確認できません")
+                    st.warning("データが読み込まれていないため、部門情報を確認できません")
             
             # フィルター状況との照合（詳細版）
             current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
@@ -266,12 +311,17 @@ def load_target_values_csv():
                     if filter_mode == "特定診療科":
                         selected_depts = current_filter_config.get('selected_depts', [])
                         if selected_depts:
-                            matched_depts = []
+                            matched_items = []
                             for dept in selected_depts:
-                                if dept in current_df['部門コード'].values:
-                                    matched_depts.append(dept)
-                            if matched_depts:
-                                st.success(f"🎯 現在のフィルターと一致: {', '.join(matched_depts)}")
+                                found = False
+                                if '部門コード' in current_df.columns and dept in current_df['部門コード'].values:
+                                    matched_items.append(f"{dept} (部門コード)")
+                                    found = True
+                                if '部門名' in current_df.columns and dept in current_df['部門名'].values:
+                                    matched_items.append(f"{dept} (部門名)")
+                                    found = True
+                            if matched_items:
+                                st.success(f"🎯 現在のフィルターと一致: {', '.join(matched_items)}")
                             else:
                                 st.warning(f"⚠️ 現在のフィルター診療科と目標値が一致しません")
                                 st.caption(f"選択中: {', '.join(selected_depts)}")
@@ -279,12 +329,17 @@ def load_target_values_csv():
                     elif filter_mode == "特定病棟":
                         selected_wards = current_filter_config.get('selected_wards', [])
                         if selected_wards:
-                            matched_wards = []
+                            matched_items = []
                             for ward in selected_wards:
-                                if ward in current_df['部門コード'].values:
-                                    matched_wards.append(ward)
-                            if matched_wards:
-                                st.success(f"🎯 現在のフィルターと一致: {', '.join(matched_wards)}")
+                                found = False
+                                if '部門コード' in current_df.columns and ward in current_df['部門コード'].values:
+                                    matched_items.append(f"{ward} (部門コード)")
+                                    found = True
+                                if '部門名' in current_df.columns and ward in current_df['部門名'].values:
+                                    matched_items.append(f"{ward} (部門名)")
+                                    found = True
+                            if matched_items:
+                                st.success(f"🎯 現在のフィルターと一致: {', '.join(matched_items)}")
                             else:
                                 st.warning(f"⚠️ 現在のフィルター病棟と目標値が一致しません")
                                 st.caption(f"選択中: {', '.join(selected_wards)}")
@@ -301,61 +356,61 @@ def load_target_values_csv():
             st.markdown("**📁 サンプルCSVファイル**")
             
             # 基本サンプル
-            sample_basic = """部門コード,目標値,区分
-内科,45.0,全日
-外科,35.0,全日
-ICU,12.5,全日
-HCU,15.0,全日
-整形外科,30.0,全日
-小児科,25.0,全日
-A1病棟,28.0,全日
-A2病棟,32.0,全日
-全体,560.0,全日
-病院全体,560.0,全日
-総合,560.0,全日"""
+            sample_basic = """部門コード,部門名,目標値,区分
+内科,内科,45.0,全日
+外科,外科,35.0,全日
+ICU,ICU,12.5,全日
+HCU,HCU,15.0,全日
+整形外科,整形外科,30.0,全日
+小児科,小児科,25.0,全日
+A1病棟,A1病棟,28.0,全日
+A2病棟,A2病棟,32.0,全日
+全体,全体,560.0,全日
+病院全体,病院全体,560.0,全日
+総合,総合,560.0,全日"""
             
             st.download_button(
                 label="📄 基本サンプルCSVダウンロード",
                 data=sample_basic,
                 file_name="sample_targets_basic.csv",
                 mime="text/csv",
-                help="基本的な目標値設定のサンプル（全体目標値を含む）"
+                help="基本的な目標値設定のサンプル（部門名列と全体目標値を含む）"
             )
             
             # 詳細サンプル（平日・休日別）
-            sample_detailed = """部門コード,目標値,区分
-内科,48.0,平日
-内科,40.0,休日
-外科,38.0,平日
-外科,30.0,休日
-ICU,12.5,全日
-HCU,15.0,全日
-整形外科,32.0,平日
-整形外科,26.0,休日
-小児科,28.0,平日
-小児科,20.0,休日
-A1病棟,30.0,平日
-A1病棟,24.0,休日
-A2病棟,34.0,平日
-A2病棟,28.0,休日
-全体,580.0,平日
-全体,480.0,休日
-病院全体,580.0,平日
-病院全体,480.0,休日"""
+            sample_detailed = """部門コード,部門名,目標値,区分
+内科,内科,48.0,平日
+内科,内科,40.0,休日
+外科,外科,38.0,平日
+外科,外科,30.0,休日
+ICU,ICU,12.5,全日
+HCU,HCU,15.0,全日
+整形外科,整形外科,32.0,平日
+整形外科,整形外科,26.0,休日
+小児科,小児科,28.0,平日
+小児科,小児科,20.0,休日
+A1病棟,A1病棟,30.0,平日
+A1病棟,A1病棟,24.0,休日
+A2病棟,A2病棟,34.0,平日
+A2病棟,A2病棟,28.0,休日
+全体,全体,580.0,平日
+全体,全体,480.0,休日
+病院全体,病院全体,580.0,平日
+病院全体,病院全体,480.0,休日"""
             
             st.download_button(
                 label="📄 平日・休日別サンプルCSVダウンロード",
                 data=sample_detailed,
                 file_name="sample_targets_detailed.csv",
                 mime="text/csv",
-                help="平日・休日別目標値設定のサンプル（全体目標値を含む）"
+                help="平日・休日別目標値設定のサンプル（部門名列と全体目標値を含む）"
             )
     
     return st.session_state.target_values_df
 
 def get_target_value_for_filter(target_df, filter_config, metric_type="日平均在院患者数"):
     """
-    フィルター設定に基づいて目標値を取得（全体フィルター対応版）
+    フィルター設定に基づいて目標値を取得（デバッグ強化版）
     
     Args:
         target_df (pd.DataFrame): 目標値データフレーム
@@ -376,24 +431,49 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
         # デバッグ用：目標値データの内容確認
         logger.info(f"目標値データ件数: {len(target_df)}行")
         if not target_df.empty:
-            logger.info(f"目標値データの部門コード: {target_df['部門コード'].unique().tolist()}")
+            available_codes = target_df['部門コード'].unique().tolist()
+            logger.info(f"目標値データの部門コード: {available_codes}")
+            
+            # 全体関連キーワードの詳細チェック
+            if filter_mode == "全体":
+                st.info("🔍 全体フィルター用の目標値検索を開始...")
         
-        # 全体フィルターの場合、全体目標値を探す（新機能）
+        # 全体フィルターの場合、全体目標値を探す（デバッグ強化版）
         if filter_mode == "全体":
             # 全体目標値のキーワードリスト
             overall_keywords = ['全体', '病院全体', '総合', '病院', '合計', 'ALL', 'TOTAL']
             
             for keyword in overall_keywords:
+                # 部門コードでの検索
                 overall_targets = target_df[
                     (target_df['部門コード'].astype(str).str.strip().str.contains(keyword, na=False, case=False)) & 
                     (target_df['区分'].astype(str).str.strip() == '全日')
                 ]
-                logger.info(f"全体目標値検索 '{keyword}': {len(overall_targets)}件")
+                logger.info(f"全体目標値検索 '{keyword}' (部門コード): {len(overall_targets)}件")
                 
                 if not overall_targets.empty:
                     target_value = float(overall_targets['目標値'].iloc[0])
-                    logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword})")
-                    return target_value, f"全体 ({keyword})", "全日"
+                    matched_code = overall_targets['部門コード'].iloc[0]
+                    logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword}, 部門コード: {matched_code})")
+                    st.success(f"✅ 全体目標値が見つかりました: {matched_code} = {target_value}")
+                    return target_value, f"全体 ({matched_code})", "全日"
+                    
+                # 部門名での検索（部門名列がある場合）
+                if '部門名' in target_df.columns:
+                    overall_targets_by_name = target_df[
+                        (target_df['部門名'].astype(str).str.strip().str.contains(keyword, na=False, case=False)) & 
+                        (target_df['区分'].astype(str).str.strip() == '全日')
+                    ]
+                    logger.info(f"全体目標値検索 '{keyword}' (部門名): {len(overall_targets_by_name)}件")
+                    
+                    if not overall_targets_by_name.empty:
+                        target_value = float(overall_targets_by_name['目標値'].iloc[0])
+                        matched_name = overall_targets_by_name['部門名'].iloc[0]
+                        logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword}, 部門名: {matched_name})")
+                        st.success(f"✅ 全体目標値が見つかりました: {matched_name} = {target_value}")
+                        return target_value, f"全体 ({matched_name})", "全日"
+            
+            st.warning("⚠️ 全体目標値が見つかりません。部門別目標値の合計を計算します...")
             
             # 全体目標値が見つからない場合、部門別目標値の合計を計算
             all_dept_targets = target_df[target_df['区分'].astype(str).str.strip() == '全日']
@@ -401,8 +481,10 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 total_target = all_dept_targets['目標値'].sum()
                 dept_count = len(all_dept_targets)
                 logger.info(f"部門別目標値の合計を全体目標値として使用: {total_target} ({dept_count}部門)")
+                st.info(f"📊 部門別目標値の合計: {total_target} ({dept_count}部門)")
                 return total_target, f"全体 (部門別合計: {dept_count}部門)", "全日"
             
+            st.error("❌ 全体目標値が見つかりませんでした")
             logger.warning("全体目標値が見つかりませんでした")
         
         # 特定診療科フィルターの場合
@@ -489,6 +571,7 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
         
     except Exception as e:
         logger.error(f"目標値取得エラー: {e}", exc_info=True)
+        st.error(f"❌ 目標値取得エラー: {e}")
         return None, None, None
 
 # 以下、その他の関数は元のコードと同じ
@@ -856,7 +939,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
 
 def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     """
-    KPIカード表示専用関数（デバッグ強化版）
+    KPIカード表示専用関数（データ連携修正版）
     """
     if df is None or df.empty:
         st.warning("データが読み込まれていません。")
@@ -865,8 +948,42 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         st.error("KPI計算関数が利用できません。")
         return
     
-    # 目標値データの読み込み
-    target_df = load_target_values_csv()
+    # 目標値データの取得（優先順位付き）
+    target_df = pd.DataFrame()
+    
+    # 1. データ入力タブで読み込まれた目標値データをチェック
+    if st.session_state.get('target_data') is not None:
+        target_df = st.session_state.get('target_data')
+        st.info(f"🎯 目標値データを使用中（データ入力タブ経由: {len(target_df)}行）")
+    
+    # 2. サイドバーで読み込まれた目標値データをチェック
+    elif 'target_values_df' in st.session_state and not st.session_state.target_values_df.empty:
+        target_df = st.session_state.target_values_df
+        st.info(f"🎯 目標値データを使用中（サイドバー経由: {len(target_df)}行）")
+    
+    # 3. どちらもない場合はサイドバーでの読み込みを促す
+    else:
+        st.warning("🎯 目標値データが設定されていません")
+        # サイドバーでの目標値読み込み機能を提供
+        target_df = load_target_values_csv()
+    
+    # デバッグ: 目標値データの内容確認
+    if not target_df.empty:
+        with st.expander("🔍 目標値データ確認", expanded=False):
+            st.write(f"**データ形状**: {target_df.shape}")
+            st.write(f"**列名**: {list(target_df.columns)}")
+            if '部門コード' in target_df.columns:
+                unique_codes = target_df['部門コード'].unique()
+                st.write(f"**部門コード一覧**: {list(unique_codes)}")
+                
+                # 全体関連キーワードの確認
+                overall_keywords = ['全体', '病院全体', '総合', '病院', '合計', 'ALL', 'TOTAL']
+                for keyword in overall_keywords:
+                    matches = target_df[target_df['部門コード'].astype(str).str.contains(keyword, na=False, case=False)]
+                    if not matches.empty:
+                        st.success(f"✅ '{keyword}' キーワードを含む行: {len(matches)}件")
+                        st.write(matches[['部門コード', '目標値', '区分']].to_dict('records'))
+            st.dataframe(target_df.head(), use_container_width=True)
     
     # 現在期間のKPI計算
     kpis_selected_period = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
