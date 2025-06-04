@@ -188,7 +188,8 @@ def process_pdf_in_worker_revised(
     target_data_path=None, reduced_graphs=True,
     alos_chart_buffers_payload=None,
     patient_chart_buffers_payload=None,
-    dual_axis_chart_buffers_payload=None
+    dual_axis_chart_buffers_payload=None,
+    allowed_graph_days=None  # 🔧 新しいパラメータを追加
     ):
     """
     ワーカープロセスでPDFを生成する (グラフバッファを受け取る)
@@ -196,6 +197,12 @@ def process_pdf_in_worker_revised(
     try:
         pid = os.getpid()
         print(f"🔧 PID {pid}: Worker for '{display_name}' started")
+        
+        # 🔧 allowed_graph_daysのデフォルト設定
+        if allowed_graph_days is None:
+            allowed_graph_days = ["90"]  # デフォルトはFast Mode
+        
+        print(f"🔧 PID {pid}: 許可されたグラフ日数: {allowed_graph_days}")
         
         # 🔧 受信したグラフバッファの確認
         if alos_chart_buffers_payload:
@@ -249,6 +256,9 @@ def process_pdf_in_worker_revised(
         pdf_creation_func = create_landscape_pdf if landscape else create_pdf
         
         print(f"🔧 PID {pid}: PDF生成開始 - {title_prefix_for_pdf}")
+        print(f"🔧 PID {pid}: PDF生成関数に渡すallowed_graph_days: {allowed_graph_days}")
+        
+        # 🔧 allowed_graph_daysパラメータを追加
         pdf_bytes_io_result = pdf_creation_func(
             forecast_df=forecast_df_for_pdf,
             df_weekday=summaries_worker.get("weekday"),
@@ -261,7 +271,8 @@ def process_pdf_in_worker_revised(
             filter_code=current_filter_code_worker,
             alos_chart_buffers=alos_chart_buffers_payload,
             patient_chart_buffers=patient_chart_buffers_payload,
-            dual_axis_chart_buffers=dual_axis_chart_buffers_payload
+            dual_axis_chart_buffers=dual_axis_chart_buffers_payload,
+            allowed_graph_days=allowed_graph_days  # 🔧 新しいパラメータを追加
         )
         
         if pdf_bytes_io_result:
@@ -481,12 +492,14 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                         print(f"⚠️ 許可されていない日数のバッファを除去: {graph_type} - {key}日")
                         del graph_buffers_for_task[graph_type][key]
             
+            # 🔧 allowed_graph_daysパラメータをタスクに追加
             tasks_for_worker_with_buffers.append(
                 (df_path_main, task_def_item["type"], task_def_item["value"], task_def_item["display_name"], 
                  latest_date_for_batch.isoformat(), landscape, target_data_path_main, fast_mode,
                  graph_buffers_for_task["alos"], 
                  {"all": graph_buffers_for_task["patient_all"], "weekday": graph_buffers_for_task["patient_weekday"], "holiday": graph_buffers_for_task["patient_holiday"]},
-                 graph_buffers_for_task["dual_axis"])
+                 graph_buffers_for_task["dual_axis"],
+                 allowed_graph_days)  # 🔧 新しいパラメータを追加
             )
             if progress_callback and num_task_defs > 0:
                 progress_val = int(10 + ( (i+1) / num_task_defs) * 15) # 10-25%
@@ -516,11 +529,15 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             # 🔧 デバッグ情報: ワーカーに渡すタスクの確認
             print(f"🔧 ワーカーに渡すタスク数: {len(tasks_for_worker_with_buffers)}")
             for i, task in enumerate(tasks_for_worker_with_buffers[:3]):  # 最初の3つのタスクを確認
-                _, _, _, display_name, _, _, _, _, alos_buffers, patient_buffers, dual_buffers = task
-                print(f"🔧 タスク{i+1} ({display_name}):")
-                print(f"   ALOSバッファ: {list(alos_buffers.keys()) if alos_buffers else 'None'}")
-                print(f"   患者数推移バッファ(all): {list(patient_buffers.get('all', {}).keys()) if patient_buffers else 'None'}")
-                print(f"   二軸バッファ: {list(dual_buffers.keys()) if dual_buffers else 'None'}")
+                if len(task) >= 11:  # 🔧 タプルの長さを確認
+                    _, _, _, display_name, _, _, _, _, alos_buffers, patient_buffers, dual_buffers, allowed_days = task
+                    print(f"🔧 タスク{i+1} ({display_name}):")
+                    print(f"   ALOSバッファ: {list(alos_buffers.keys()) if alos_buffers else 'None'}")
+                    print(f"   患者数推移バッファ(all): {list(patient_buffers.get('all', {}).keys()) if patient_buffers else 'None'}")
+                    print(f"   二軸バッファ: {list(dual_buffers.keys()) if dual_buffers else 'None'}")
+                    print(f"   許可された日数: {allowed_days}")
+                else:
+                    print(f"🔧 タスク{i+1}: 不正なタプル長 ({len(task)})")
 
             with multiprocessing.Pool(processes=max_workers) as pool_obj:
                 pdf_results = pool_obj.starmap(process_pdf_in_worker_revised, tasks_for_worker_with_buffers)
@@ -591,6 +608,10 @@ def batch_generate_pdfs_hyper_optimized(
     if target_data_main is not None and not target_data_main.empty:
         target_data_path = os.path.join(temp_dir, "target_data.feather")
         target_data_main.reset_index(drop=True).to_feather(target_data_path)
+    
+    # 🔧 allowed_graph_daysの設定
+    allowed_graph_days = ["90"] if fast_mode else ["90", "180"]
+    print(f"🔧 Hyper最適化: 許可されたグラフ日数: {allowed_graph_days}")
     
     try:
         # 最新日付の取得
@@ -665,7 +686,7 @@ def batch_generate_pdfs_hyper_optimized(
                     future = executor.submit(
                         process_chunk_hyper_optimized,
                         chunk, df_path, landscape, target_data_path,
-                        fast_mode, latest_date.isoformat()
+                        fast_mode, latest_date.isoformat(), allowed_graph_days  # 🔧 パラメータを追加
                     )
                     future_to_chunk[future] = chunk
                 
@@ -738,16 +759,22 @@ def batch_generate_pdfs_hyper_optimized(
             pass
         SystemOptimizer.force_cleanup()
 
-def process_chunk_hyper_optimized(task_chunk, df_path, landscape, target_data_path, fast_mode, latest_date_str):
+def process_chunk_hyper_optimized(task_chunk, df_path, landscape, target_data_path, fast_mode, latest_date_str, allowed_graph_days=None):
     """ハイパー最適化されたチャンク処理"""
     results = []
+    
+    # 🔧 allowed_graph_daysの設定
+    if allowed_graph_days is None:
+        allowed_graph_days = ["90"] if fast_mode else ["90", "180"]
+    print(f"🔧 Chunk処理: 許可されたグラフ日数: {allowed_graph_days}")
     
     try:
         for task in task_chunk:
             result = process_pdf_in_worker_revised(
                 df_path, task["type"], task["value"], task["display_name"],
                 latest_date_str, landscape, target_data_path, fast_mode,
-                None, None, None  # グラフバッファは後で最適化
+                None, None, None,  # グラフバッファは後で最適化
+                allowed_graph_days  # 🔧 パラメータを追加
             )
             
             if result:
@@ -799,6 +826,10 @@ def batch_generate_pdfs_full_optimized(
         all_summaries = generate_filtered_summaries(df)
         latest_date_seq = all_summaries.get("latest_date", pd.Timestamp.now().normalize())
         
+        # 🔧 allowed_graph_daysの設定
+        allowed_graph_days_seq = ["90"] if fast_mode else ["90", "180"]
+        print(f"🔧 シングルプロセス: 許可されたグラフ日数: {allowed_graph_days_seq}")
+        
         tasks_seq = []
         # 🔧 新しい目標値ファイル構造に対応した表示名マッピング
         dept_display_map_seq, ward_display_map_seq = create_display_mapping_with_new_target_format(target_data)
@@ -829,27 +860,14 @@ def batch_generate_pdfs_full_optimized(
             completed_seq = 0
             total_seq = len(tasks_seq)
             for task_item in tasks_seq:
-                # グラフバッファはここでは生成しない (process_pdf_in_worker_revised が内部で生成する)
-                # process_pdf_in_worker_revised はFeatherパスとグラフバッファ引数を期待する
-                # シングルプロセスではグラフバッファをNoneとして渡すか、process_pdf_in_worker_revisedを修正
-                # または、シングルプロセス用の別関数を用意する方が良い。
-                # ここでは、process_pdf_in_worker_revised をそのまま使い、バッファは None とする。
-                # その場合、process_pdf_in_worker_revised 側でバッファがNoneの場合の処理が必要になる。
-                # (または、シングルプロセスではグラフ生成を process_pdf_in_worker_revised に任せる)
-
-                # シングルプロセス実行のために、グラフを都度生成する。
-                # この部分は、メインプロセスのグラフ生成ロジックをここに移植する必要がある。
-                # 簡単のため、ALOSグラフのみを仮に生成して渡す形にする。
-                # **注意:** このシングルプロセス版は、グラフ事前生成とキャッシュの恩恵を受けないため、
-                #           パフォーマンスが大幅に劣る。あくまでデバッグ用やフォールバック。
-
                 current_task_data_seq = df.copy()
                 if task_item["type"] == "dept": current_task_data_seq = df[df["診療科名"] == task_item["value"]].copy()
                 elif task_item["type"] == "ward": current_task_data_seq = df[df["病棟コード"] == task_item["value"]].copy()
 
                 alos_bufs_seq = {}
                 if not current_task_data_seq.empty:
-                     for days_str_seq in (["90"] if fast_mode else ["90", "180"]):
+                    # 🔧 allowed_graph_daysに基づいてグラフ生成
+                    for days_str_seq in allowed_graph_days_seq:  # 🔧 修正
                         buf_io = create_alos_chart_for_pdf(current_task_data_seq, task_item["display_name"], latest_date_seq, 30, MATPLOTLIB_FONT_NAME, days_to_show=int(days_str_seq))
                         if buf_io: alos_bufs_seq[days_str_seq] = buf_io.getvalue() # バイト列を保存
                 
@@ -858,13 +876,13 @@ def batch_generate_pdfs_full_optimized(
                 patient_bufs_seq = {"all": {}, "weekday": {}, "holiday": {}} # ダミー
                 dual_bufs_seq = {} # ダミー
 
-
                 result_seq = process_pdf_in_worker_revised(
                     df_path_seq, task_item["type"], task_item["value"], task_item["display_name"],
                     latest_date_seq.isoformat(), landscape, target_data_path_seq, fast_mode,
                     alos_chart_buffers_payload=alos_bufs_seq, # バイト列の辞書
                     patient_chart_buffers_payload=patient_bufs_seq, # ダミー
-                    dual_axis_chart_buffers_payload=dual_bufs_seq   # ダミー
+                    dual_axis_chart_buffers_payload=dual_bufs_seq,   # ダミー
+                    allowed_graph_days=allowed_graph_days_seq  # 🔧 パラメータを追加
                 )
                 if result_seq:
                     title_res_seq, pdf_io_seq = result_seq
