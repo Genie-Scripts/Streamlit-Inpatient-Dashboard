@@ -627,11 +627,12 @@ def display_advanced_metrics_layout(metrics, selected_period_info, prev_year_met
         st.markdown("---")
         st.markdown("### 📊 昨年度同期間比較")
         st.info(f"📊 昨年度同期間: {prev_year_period_info}")
+        st.caption("※部門フィルターが適用された昨年度同期間データとの比較")
         
-        # 昨年度比較表示のロジックは既存のまま維持
         prev_col1, prev_col2, prev_col3, prev_col4 = st.columns(4)
         
         with prev_col1:
+            # 昨年度日平均在院患者数
             prev_avg_daily_census = prev_year_metrics.get('avg_daily_census', 0)
             yoy_census_change = avg_daily_census_val - prev_avg_daily_census
             yoy_census_pct = (yoy_census_change / prev_avg_daily_census * 100) if prev_avg_daily_census > 0 else 0
@@ -641,7 +642,51 @@ def display_advanced_metrics_layout(metrics, selected_period_info, prev_year_met
                 "👥 日平均在院患者数",
                 f"{prev_avg_daily_census:.1f}人",
                 delta=f"{yoy_census_change:+.1f}人 ({yoy_census_pct:+.1f}%)",
-                delta_color=yoy_census_color
+                delta_color=yoy_census_color,
+                help=f"昨年度同期間の日平均在院患者数との比較"
+            )
+            
+        with prev_col2:
+            # 昨年度病床利用率
+            prev_bed_occupancy = prev_year_metrics.get('bed_occupancy_rate', 0)
+            yoy_occupancy_change = bed_occupancy_rate_val - prev_bed_occupancy
+            yoy_occupancy_color = "normal" if yoy_occupancy_change >= 0 else "inverse"
+            
+            st.metric(
+                "🏥 病床利用率",
+                f"{prev_bed_occupancy:.1f}%",
+                delta=f"{yoy_occupancy_change:+.1f}%",
+                delta_color=yoy_occupancy_color,
+                help="昨年度同期間の病床利用率との比較"
+            )
+            
+        with prev_col3:
+            # 昨年度平均在院日数
+            prev_avg_los = prev_year_metrics.get('avg_los', 0)
+            yoy_los_change = avg_los_val - prev_avg_los
+            yoy_los_color = "inverse" if yoy_los_change > 0 else "normal"  # 短縮が良い
+            
+            st.metric(
+                "📅 平均在院日数",
+                f"{prev_avg_los:.1f}日",
+                delta=f"{yoy_los_change:+.1f}日",
+                delta_color=yoy_los_color,
+                help="昨年度同期間の平均在院日数との比較"
+            )
+            
+        with prev_col4:
+            # 昨年度日平均新入院患者数
+            prev_avg_daily_admissions = prev_year_metrics.get('avg_daily_admissions', 0)
+            yoy_admissions_change = avg_daily_admissions_val - prev_avg_daily_admissions
+            yoy_admissions_pct = (yoy_admissions_change / prev_avg_daily_admissions * 100) if prev_avg_daily_admissions > 0 else 0
+            yoy_admissions_color = "normal" if yoy_admissions_change >= 0 else "inverse"
+            
+            st.metric(
+                "📈 日平均新入院患者数",
+                f"{prev_avg_daily_admissions:.1f}人/日",
+                delta=f"{yoy_admissions_change:+.1f}人/日 ({yoy_admissions_pct:+.1f}%)",
+                delta_color=yoy_admissions_color,
+                help="昨年度同期間の日平均新入院患者数との比較"
             )
 
     # 詳細情報セクション
