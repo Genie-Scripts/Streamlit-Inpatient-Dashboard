@@ -482,8 +482,7 @@ def display_advanced_metrics_layout(metrics, selected_period_info, prev_year_met
     avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
     target_admissions_monthly = st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS)
 
-    st.info(f"📊 分析期間: {selected_period_info}")
-    st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
+    # 期間表示は下部のシンプルな表示のみ使用
 
     # 高度目標値情報の表示
     if advanced_targets:
