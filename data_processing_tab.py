@@ -1,601 +1,1015 @@
-# data_processing_tab.py (修正版 - 構文エラー解決)
+# dashboard_overview_tab.py (高度目標値管理対応版)
+# 既存のdashboard_overview_tab.pyと置き換えてください
 
-import warnings
-warnings.filterwarnings('ignore', category=FutureWarning)
 import streamlit as st
 import pandas as pd
-import numpy as np
-import time
-import os
-import tempfile
-import gc
-import psutil
+from datetime import timedelta, datetime
 import logging
-import traceback  # トレースバック用のインポートを追加
 
 logger = logging.getLogger(__name__)
 
-from integrated_preprocessing import (
-    integrated_preprocess_data, calculate_file_hash, efficient_duplicate_check
+# dashboard_charts.py からのインポートは維持
+try:
+    from dashboard_charts import (
+        create_monthly_trend_chart,
+        create_admissions_discharges_chart,
+        create_occupancy_chart
+    )
+except ImportError:
+    st.error("dashboard_charts.py が見つからないか、必要な関数が定義されていません。")
+    create_monthly_trend_chart = None
+    create_admissions_discharges_chart = None
+    create_occupancy_chart = None
+
+# kpi_calculator.py からのインポートは維持
+try:
+    from kpi_calculator import calculate_kpis, analyze_kpi_insights, get_kpi_status
+except ImportError:
+    st.error("kpi_calculator.py が見つからないか、必要な関数が定義されていません。")
+    calculate_kpis = None
+    analyze_kpi_insights = None
+    get_kpi_status = None
+
+# unified_filters.py からのインポート
+try:
+    from unified_filters import apply_unified_filters, get_unified_filter_config
+except ImportError:
+    st.error("unified_filters.py が見つからないか、必要な関数が定義されていません。")
+    apply_unified_filters = None
+    get_unified_filter_config = None
+
+# config.py から定数をインポート
+from config import (
+    DEFAULT_OCCUPANCY_RATE,
+    DEFAULT_ADMISSION_FEE,
+    DEFAULT_TARGET_PATIENT_DAYS,
+    APP_VERSION,
+    NUMBER_FORMAT,
+    DEFAULT_TOTAL_BEDS,
+    DEFAULT_AVG_LENGTH_OF_STAY,
+    DEFAULT_TARGET_ADMISSIONS
 )
-from loader import load_files
-from forecast import generate_filtered_summaries
-from utils import initialize_all_mappings, create_dept_mapping_table
 
-EXCEL_USE_COLUMNS = [
-    "病棟コード", "診療科名", "日付", "在院患者数",
-    "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
-]
-EXCEL_DTYPES = {
-    "病棟コード": str, "診療科名": str, "在院患者数": float,
-    "入院患者数": float, "緊急入院患者数": float, "退院患者数": float, "死亡患者数": float
-}
-
-def log_memory_usage():
-    try:
-        process = psutil.Process()
-        mem_info = process.memory_info()
-        return {
-            'process_mb': mem_info.rss / (1024 * 1024), 
-            'process_percent': process.memory_percent(),
-            'system_percent': psutil.virtual_memory().percent, 
-            'available_mb': psutil.virtual_memory().available / (1024 * 1024)
-        }
-    except Exception as e:
-        logger.error(f"メモリ情報取得エラー: {e}", exc_info=True)
-        return None
-
-def perform_cleanup(deep=False):
-    if deep and 'df' in st.session_state and st.session_state.df is not None:
-        if 'filtered_results' in st.session_state and st.session_state.get('filtered_results') != st.session_state.get('all_results'):
-            st.session_state.filtered_results = None
-        if 'forecast_model_results' in st.session_state:
-            st.session_state.forecast_model_results = None
-    try:
-        temp_dir_root = tempfile.gettempdir()
-        app_temp_files_pattern = os.path.join(temp_dir_root, "integrated_dashboard_temp_*")
-        import glob, shutil
-        for temp_file_path in glob.glob(app_temp_files_pattern):
-            try:
-                if os.path.isfile(temp_file_path): 
-                    os.unlink(temp_file_path)
-                elif os.path.isdir(temp_file_path): 
-                    shutil.rmtree(temp_file_path, ignore_errors=True)
-            except Exception as e_file_del: 
-                logger.warning(f"一時ファイルの削除中にエラー: {e_file_del}")
-    except Exception as e_temp_clean: 
-        logger.warning(f"一時ファイルクリーンアップ処理中にエラー: {e_temp_clean}")
-    gc.collect()
-    time.sleep(0.1)
-    gc.collect()
-
-def get_app_data_dir():
-    base_temp_dir = tempfile.gettempdir()
-    app_data_dir = os.path.join(base_temp_dir, "integrated_dashboard_data")
-    if not os.path.exists(app_data_dir):
-        try: 
-            os.makedirs(app_data_dir, exist_ok=True)
-        except OSError as e: 
-            st.error(f"データ保存ディレクトリの作成に失敗: {app_data_dir}\n{e}")
-            return None
-    return app_data_dir
-
-def get_base_file_info(app_data_dir):
-    if app_data_dir is None: 
-        return None
-    info_path = os.path.join(app_data_dir, "base_file_info.json")
-    if os.path.exists(info_path):
+def format_number_with_config(value, unit="", format_type="default"):
+    """数値フォーマット関数（既存と同じ）"""
+    if pd.isna(value) or value is None:
+        return f"0{unit}" if unit else "0"
+    if isinstance(value, str):
         try:
-            import json
-            with open(info_path, 'r', encoding='utf-8') as f: 
-                return json.load(f)
-        except Exception as e: 
-            logger.error(f"ベースファイル情報の読み込みエラー: {e}", exc_info=True)
-            return None
-    return None
+            value = float(value)
+        except ValueError:
+            return str(value)
+    if value == 0:
+        return f"0{unit}" if unit else "0"
 
-def save_base_file_info(app_data_dir, file_name, file_size, file_hash):
-    if app_data_dir is None: 
-        return
-    info_path = os.path.join(app_data_dir, "base_file_info.json")
-    info = {"file_name": file_name, "file_size": file_size, "file_hash": file_hash}
-    try:
-        import json
-        with open(info_path, 'w', encoding='utf-8') as f: 
-            json.dump(info, f, ensure_ascii=False, indent=2)
-    except Exception as e: 
-        logger.error(f"ベースファイル情報の保存エラー: {e}", exc_info=True)
+    if format_type == "currency":
+        return f"{value:,.0f}{NUMBER_FORMAT['currency_symbol']}"
+    elif format_type == "percentage":
+        return f"{value:.1f}{NUMBER_FORMAT['percentage_symbol']}"
+    else:
+        return f"{value:,.1f}{unit}" if isinstance(value, float) else f"{value:,.0f}{unit}"
 
-def debug_target_file_processing(target_data, search_keywords=['全体', '病院全体', '病院']):
-    debug_info = {
-        'file_loaded': target_data is not None, 
-        'columns': [], 
-        'shape': (0,0), 
-        'search_results': {}, 
-        'sample_data': None
-    }
-    if target_data is not None and not target_data.empty:
-        debug_info['columns'] = list(target_data.columns)
-        debug_info['shape'] = target_data.shape
-        debug_info['sample_data'] = target_data.head(3).to_dict('records') if len(target_data) > 0 else []
+def get_current_period_type(current_date=None):
+    """
+    現在の期間タイプ（平日/休日）を判定
+    
+    Args:
+        current_date (pd.Timestamp, optional): 判定対象日（Noneの場合は今日）
         
-        for keyword in search_keywords:
-            results = []
-            for col in target_data.columns:
-                if target_data[col].dtype == 'object':
-                    try:
-                        matches = target_data[target_data[col].astype(str).str.contains(keyword, na=False, case=False)]
-                        if len(matches) > 0:
-                            results.append({
-                                'column': col, 
-                                'matches': len(matches), 
-                                'sample_values': matches[col].unique()[:3].tolist()
-                            })
-                    except Exception as e_search: 
-                        logger.debug(f"目標値ファイルデバッグ検索中エラー ({col}, {keyword}): {e_search}")
-            debug_info['search_results'][keyword] = results
-    return debug_info
+    Returns:
+        str: "平日", "休日", または "全日"
+    """
+    if current_date is None:
+        current_date = pd.Timestamp.now()
+    
+    if isinstance(current_date, str):
+        current_date = pd.to_datetime(current_date)
+    
+    # 土日は休日、平日は平日として判定
+    if current_date.weekday() in [5, 6]:  # 土曜日(5), 日曜日(6)
+        return "休日"
+    else:
+        return "平日"
 
-def extract_targets_from_file(target_data):
-    if target_data is None or target_data.empty: 
-        return None, None
+def load_advanced_target_values_csv():
+    """
+    高度目標値CSVファイル読み込み機能（7列構造対応）
     
-    debug_info = debug_target_file_processing(target_data)
-    search_patterns = [
-        ('部門コード', ['全体', '病院', '総合']), 
-        ('部門名', ['病院全体', '全体', '病院', '総合']),
-        ('診療科名', ['病院全体', '全体', '病院', '総合']), 
-        ('科名', ['病院全体', '全体', '病院', '総合'])
-    ]
+    Returns:
+        pd.DataFrame: 目標値データフレーム
+    """
+    if 'advanced_target_values_df' not in st.session_state:
+        st.session_state.advanced_target_values_df = pd.DataFrame()
     
-    target_row = None
-    used_pattern = None
-    
-    for col_name, keywords in search_patterns:
-        if col_name in target_data.columns:
-            for keyword in keywords:
-                try:
-                    mask = target_data[col_name].astype(str).str.contains(keyword, na=False, case=False)
-                    matches = target_data[mask]
-                    if len(matches) > 0: 
-                        target_row = matches.iloc[0]
-                        used_pattern = f"{col_name}='{keyword}'"
-                        logger.info(f"目標値データ検索成功: {used_pattern}")
-                        break
-                except Exception as e_pat: 
-                    logger.debug(f"目標値検索パターンエラー ({col_name}, {keyword}): {e_pat}")
-            if target_row is not None: 
-                break
-    
-    if target_row is None:
-        logger.warning("目標値データで「全体」に相当する行が見つかりませんでした。")
-        return None, debug_info
-
-    target_days = None
-    target_admissions = None
-    days_columns = ['延べ在院日数目標', '在院日数目標', '目標在院日数', '延べ在院日数', '在院日数']
-    admission_columns = ['新入院患者数目標', '入院患者数目標', '目標入院患者数', '新入院患者数', '入院患者数']
-    
-    for col in days_columns:
-        if col in target_data.columns:
-            try:
-                value = target_row[col]
-                if pd.notna(value) and str(value).strip() != '':
-                    target_days = float(str(value).replace(',', '').replace('人日', '').strip())
-                    logger.info(f"延べ在院日数目標を取得: {target_days} (列: {col})")
-                    break
-            except (ValueError, TypeError) as e: 
-                logger.warning(f"延べ在院日数目標の変換エラー (列: {col}): {e}")
-    
-    for col in admission_columns:
-        if col in target_data.columns:
-            try:
-                value = target_row[col]
-                if pd.notna(value) and str(value).strip() != '':
-                    target_admissions = float(str(value).replace(',', '').replace('人', '').strip())
-                    logger.info(f"新入院患者数目標を取得: {target_admissions} (列: {col})")
-                    break
-            except (ValueError, TypeError) as e: 
-                logger.warning(f"新入院患者数目標の変換エラー (列: {col}): {e}")
-    
-    if (target_days is None or target_admissions is None) and '目標値' in target_data.columns:
-        try:
-            general_target = float(str(target_row['目標値']).replace(',', '').strip())
-            if target_days is None: 
-                target_days = general_target
-                logger.info(f"一般目標値から延べ在院日数目標を設定: {target_days}")
-            if target_admissions is None: 
-                target_admissions = general_target
-                logger.info(f"一般目標値から新入院患者数目標を設定: {target_admissions}")
-        except (ValueError, TypeError) as e: 
-            logger.warning(f"一般目標値の変換エラー: {e}")
-    
-    return {
-        'target_days': target_days, 
-        'target_admissions': target_admissions, 
-        'used_pattern': used_pattern, 
-        'source_row': target_row.to_dict() if target_row is not None else None
-    }, debug_info
-
-def process_data_with_progress(base_file_uploader_obj, new_files_uploader_list, target_file_uploader_obj, progress_bar):
-    try:
-        start_time_total = time.time()
-        st.session_state.performance_metrics = st.session_state.get('performance_metrics', {})
-        st.session_state.performance_metrics['data_conversion_time'] = 0
-
-        progress_bar.progress(5, text="1. ファイルデータの読み込み準備中...")
-        load_start_time = time.time()
-
-        df_raw, processed_files_info = load_files(
-            base_file_uploader_obj,
-            new_files_uploader_list,
-            usecols_excel=EXCEL_USE_COLUMNS,
-            dtype_excel=EXCEL_DTYPES
+    with st.sidebar.expander("🎯 高度目標値設定", expanded=False):
+        st.markdown("##### 高度目標値CSVファイル読み込み")
+        
+        # CSVファイルアップロード
+        uploaded_target_file = st.file_uploader(
+            "高度目標値CSVファイルを選択",
+            type=['csv'],
+            key="advanced_target_values_upload",
+            help="部門コード、部門名、部門種別、指標タイプ、期間区分、単位、目標値が含まれるCSVファイルをアップロード"
         )
-        load_end_time = time.time()
-        st.session_state.performance_metrics['data_load_time'] = load_end_time - load_start_time
-
-        successful_reads = 0
-        failed_files = []
-        if processed_files_info:
-            for info in processed_files_info:
-                if info['status'] == 'success':
-                    successful_reads += 1
-                else:
-                    failed_files.append(f"{info['name']} ({info['message']})")
-            if successful_reads > 0:
-                st.success(f"{successful_reads} 件のファイルが正常に読み込まれました。")
-            if failed_files:
-                st.warning(f"{len(failed_files)} 件のファイルの読み込みに失敗またはスキップされました:")
-                for f_info in failed_files:
-                    st.caption(f"- {f_info}")
-        elif df_raw.empty:
-            st.error("読み込むデータがありません。固定ファイルまたは追加ファイルをアップロードしてください。")
-            progress_bar.progress(100, text="データ読み込み失敗。")
-            return False, None, None, None, None
-
-        if df_raw.empty:
-            st.error("読み込まれたデータが空です。ファイル内容を確認してください。")
-            progress_bar.progress(100, text="データ内容が空です。")
-            return False, None, None, None, None
-
-        progress_bar.progress(20, text="1. ファイル読み込み完了。データ結合中...")
-
-        source_info_cols = ['_source_file_', '_source_type_']
-        cols_to_drop_before_dup_check = [col for col in source_info_cols if col in df_raw.columns]
-        df_raw_for_dup_check = df_raw.drop(columns=cols_to_drop_before_dup_check, errors='ignore')
-
-        progress_bar.progress(22, text="2. 重複チェック中...")
-        df_processed_duplicates = efficient_duplicate_check(df_raw_for_dup_check)
-        del df_raw_for_dup_check, df_raw
-        gc.collect()
-
-        target_data = None
-        target_file_debug_info = None
-        extracted_targets = None
-        if target_file_uploader_obj:
-            progress_bar.progress(25, text="目標値ファイルの読み込み中...")
+        
+        if uploaded_target_file is not None:
             try:
-                target_file_uploader_obj.seek(0)
-                encodings_to_try = ['utf-8', 'shift_jis', 'cp932', 'utf-8-sig']
-                target_df_temp = None
-                for enc in encodings_to_try:
-                    try:
-                        target_df_temp = pd.read_csv(target_file_uploader_obj, encoding=enc)
-                        logger.info(f"目標値ファイルを{enc}で読み込み成功")
-                        target_file_uploader_obj.seek(0)
-                        break
-                    except UnicodeDecodeError:
-                        logger.debug(f"目標値ファイルのエンコード試行失敗: {enc}")
-                        target_file_uploader_obj.seek(0)
-                        continue
-                if target_df_temp is None or target_df_temp.empty:
-                    st.warning("目標値ファイルの読み込みに失敗しました（適切なエンコードが見つからないか、ファイルが空です）。")
+                target_df = pd.read_csv(uploaded_target_file, encoding='utf-8-sig')
+                
+                # 必要な列の確認（新しい7列構造）
+                required_columns = ['部門コード', '部門名', '部門種別', '指標タイプ', '期間区分', '単位', '目標値']
+                missing_columns = [col for col in required_columns if col not in target_df.columns]
+                
+                if missing_columns:
+                    st.error(f"❌ 必要な列が見つかりません: {', '.join(missing_columns)}")
+                    st.info("必要な列: 部門コード, 部門名, 部門種別, 指標タイプ, 期間区分, 単位, 目標値")
+                    st.info(f"読み込まれた列: {', '.join(target_df.columns.tolist())}")
                 else:
-                    target_data = target_df_temp
-                    extracted_targets, target_file_debug_info = extract_targets_from_file(target_data)
-                    st.session_state.target_file_debug_info = target_file_debug_info
-                    st.session_state.extracted_targets = extracted_targets
-                    st.success("目標値ファイルの読み込みと解析が完了しました。")
-            except Exception as e_target:
-                st.warning(f"目標値ファイルの処理中にエラーが発生しました: {str(e_target)}")
-                logger.error(f"目標値ファイル処理エラー: {e_target}", exc_info=True)
-                target_data = None
+                    # データ型の変換とクリーニング
+                    target_df['部門コード'] = target_df['部門コード'].astype(str).str.strip()
+                    target_df['部門名'] = target_df['部門名'].astype(str).str.strip()
+                    target_df['部門種別'] = target_df['部門種別'].astype(str).str.strip()
+                    target_df['指標タイプ'] = target_df['指標タイプ'].astype(str).str.strip()
+                    target_df['期間区分'] = target_df['期間区分'].astype(str).str.strip()
+                    target_df['単位'] = target_df['単位'].astype(str).str.strip()
+                    target_df['目標値'] = pd.to_numeric(target_df['目標値'], errors='coerce')
+                    
+                    # 無効なデータの除去
+                    invalid_rows = target_df['目標値'].isna()
+                    if invalid_rows.any():
+                        st.warning(f"⚠️ 無効な目標値を持つ行を除外しました: {invalid_rows.sum()}行")
+                        target_df = target_df[~invalid_rows]
+                    
+                    st.session_state.advanced_target_values_df = target_df
+                    st.success(f"✅ 高度目標値データを読み込みました（{len(target_df)}行）")
+                    
+                    # データプレビューとデバッグ情報
+                    with st.expander("📋 高度目標値データプレビュー", expanded=False):
+                        st.dataframe(target_df.head(10), use_container_width=True)
+                        
+                        # 統計情報表示
+                        st.markdown("**🔍 統計情報**")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            unique_depts = target_df['部門コード'].unique()
+                            unique_dept_types = target_df['部門種別'].unique()
+                            st.write(f"**部門数**: {len(unique_depts)}件")
+                            st.write(f"**部門種別**: {', '.join(unique_dept_types)}")
+                        
+                        with col2:
+                            unique_indicators = target_df['指標タイプ'].unique()
+                            unique_periods = target_df['期間区分'].unique()
+                            st.write(f"**指標タイプ**: {len(unique_indicators)}種類")
+                            st.write(f"**期間区分**: {', '.join(unique_periods)}")
+                        
+                        with col3:
+                            unique_units = target_df['単位'].unique()
+                            target_range = f"{target_df['目標値'].min():.1f} ～ {target_df['目標値'].max():.1f}"
+                            st.write(f"**単位種類**: {len(unique_units)}種類")
+                            st.write(f"**目標値範囲**: {target_range}")
+                        
+                        # 指標タイプ別の詳細
+                        st.markdown("**📊 指標タイプ別データ数**")
+                        indicator_counts = target_df['指標タイプ'].value_counts()
+                        for indicator, count in indicator_counts.items():
+                            st.caption(f"• {indicator}: {count}件")
+                        
+            except Exception as e:
+                st.error(f"❌ CSVファイル読み込みエラー: {e}")
+                logger.error(f"高度目標値CSVファイル読み込みエラー: {e}", exc_info=True)
+        
+        # 現在の読み込み状況表示
+        if not st.session_state.advanced_target_values_df.empty:
+            current_df = st.session_state.advanced_target_values_df
+            st.info(f"📊 現在の高度目標値データ: {len(current_df)}行")
+            
+            # 簡単な統計情報表示
+            if len(current_df) > 0:
+                dept_count = current_df['部門コード'].nunique()
+                indicator_count = current_df['指標タイプ'].nunique()
+                st.caption(f"部門数: {dept_count}件, 指標種類: {indicator_count}種類")
+            
+            # フィルター状況との照合とデバッグ情報
+            current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
+            if current_filter_config:
+                filter_mode = current_filter_config.get('filter_mode', '全体')
+                
+                # デバッグ情報表示セクション
+                with st.expander("🔍 目標値マッチングデバッグ", expanded=False):
+                    st.markdown("**現在のフィルター設定**")
+                    st.write(f"フィルターモード: {filter_mode}")
+                    
+                    if filter_mode == "特定診療科":
+                        selected_depts = current_filter_config.get('selected_depts', [])
+                        st.write(f"選択された診療科: {selected_depts}")
+                        
+                        if selected_depts:
+                            st.markdown("**マッチング結果**")
+                            for dept in selected_depts:
+                                # 完全一致検索
+                                exact_matches = current_df[
+                                    ((current_df['部門コード'].astype(str).str.strip() == str(dept).strip()) | 
+                                     (current_df['部門名'].astype(str).str.strip() == str(dept).strip())) &
+                                    (current_df['部門種別'].astype(str).str.strip().isin(['診療科', '部門', '科']))
+                                ]
+                                
+                                if not exact_matches.empty:
+                                    st.success(f"✅ '{dept}' → {len(exact_matches)}件の目標値")
+                                    for _, row in exact_matches.iterrows():
+                                        st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
+                                else:
+                                    st.warning(f"❌ '{dept}' → マッチなし")
+                                    
+                                    # 部分一致の候補を表示
+                                    partial_matches = current_df[
+                                        (current_df['部門コード'].astype(str).str.contains(str(dept), case=False, na=False)) |
+                                        (current_df['部門名'].astype(str).str.contains(str(dept), case=False, na=False))
+                                    ]
+                                    
+                                    if not partial_matches.empty:
+                                        st.info(f"📋 部分一致候補:")
+                                        for _, row in partial_matches.head(3).iterrows():
+                                            st.caption(f"　　{row['部門コード']} / {row['部門名']} ({row['部門種別']})")
+                                    else:
+                                        st.caption("　　候補なし")
+                    
+                    elif filter_mode == "特定病棟":
+                        selected_wards = current_filter_config.get('selected_wards', [])
+                        st.write(f"選択された病棟: {selected_wards}")
+                        
+                        if selected_wards:
+                            st.markdown("**マッチング結果**")
+                            for ward in selected_wards:
+                                exact_matches = current_df[
+                                    ((current_df['部門コード'].astype(str).str.strip() == str(ward).strip()) | 
+                                     (current_df['部門名'].astype(str).str.strip() == str(ward).strip())) &
+                                    (current_df['部門種別'].astype(str).str.strip().isin(['病棟', '部門', '棟']))
+                                ]
+                                
+                                if not exact_matches.empty:
+                                    st.success(f"✅ '{ward}' → {len(exact_matches)}件の目標値")
+                                    for _, row in exact_matches.iterrows():
+                                        st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
+                                else:
+                                    st.warning(f"❌ '{ward}' → マッチなし")
+                    
+                    else:  # 全体
+                        st.write("全体フィルター選択中")
+                        hospital_targets = current_df[
+                            (current_df['部門種別'].astype(str).str.strip().isin(['全体', '病院全体', '病院', '全体'])) |
+                            (current_df['部門コード'].astype(str).str.strip().isin(['病院全体', '全体', 'HOSPITAL', 'ALL']))
+                        ]
+                        
+                        if not hospital_targets.empty:
+                            st.success(f"✅ 病院全体目標値: {len(hospital_targets)}件")
+                            for _, row in hospital_targets.iterrows():
+                                st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
+                        else:
+                            st.warning("❌ 病院全体の目標値が見つかりません")
+                
+                if filter_mode == "特定診療科":
+                    selected_depts = current_filter_config.get('selected_depts', [])
+                    if selected_depts:
+                        # 診療科の目標値確認
+                        matched_targets = []
+                        for dept in selected_depts:
+                            dept_targets = current_df[
+                                (current_df['部門コード'] == dept) | 
+                                (current_df['部門名'] == dept)
+                            ]
+                            if not dept_targets.empty:
+                                matched_targets.extend(dept_targets['指標タイプ'].unique())
+                        
+                        if matched_targets:
+                            st.success(f"🎯 診療科目標値: {len(set(matched_targets))}種類の指標")
+                            st.caption(f"対象指標: {', '.join(set(matched_targets))}")
+                        else:
+                            st.warning(f"⚠️ 選択診療科の目標値が見つかりません")
+                
+                elif filter_mode == "特定病棟":
+                    selected_wards = current_filter_config.get('selected_wards', [])
+                    if selected_wards:
+                        # 病棟の目標値確認
+                        matched_targets = []
+                        for ward in selected_wards:
+                            ward_targets = current_df[
+                                (current_df['部門コード'] == ward) | 
+                                (current_df['部門名'] == ward)
+                            ]
+                            if not ward_targets.empty:
+                                matched_targets.extend(ward_targets['指標タイプ'].unique())
+                        
+                        if matched_targets:
+                            st.success(f"🎯 病棟目標値: {len(set(matched_targets))}種類の指標")
+                            st.caption(f"対象指標: {', '.join(set(matched_targets))}")
+                        else:
+                            st.warning(f"⚠️ 選択病棟の目標値が見つかりません")
+            
+            # クリアボタン
+            if st.button("🗑️ 高度目標値データクリア", key="clear_advanced_target_values"):
+                st.session_state.advanced_target_values_df = pd.DataFrame()
+                st.success("高度目標値データをクリアしました")
+                st.rerun()
         else:
-            logger.info("目標値ファイルはアップロードされていません。")
-        progress_bar.progress(28, text="目標値ファイルの処理完了。")
+            st.info("高度目標値データが設定されていません")
+            
+            # 高度サンプルCSVのダウンロードリンク
+            st.markdown("**📁 高度サンプルCSVファイル**")
+            
+            # 包括的サンプル
+            sample_comprehensive = """部門コード,部門名,部門種別,指標タイプ,期間区分,単位,目標値
+内科,内科,診療科,日平均在院患者数,全日,人/日,45.0
+内科,内科,診療科,日平均在院患者数,平日,人/日,48.0
+内科,内科,診療科,日平均在院患者数,休日,人/日,40.0
+内科,内科,診療科,週間新入院患者数,全日,人/週,28.0
+外科,外科,診療科,日平均在院患者数,全日,人/日,35.0
+外科,外科,診療科,週間新入院患者数,全日,人/週,21.0
+ICU,ICU,病棟,日平均在院患者数,全日,人/日,12.5
+A1病棟,A1病棟,病棟,日平均在院患者数,全日,人/日,30.0
+病院全体,病院全体,全体,日平均在院患者数,平日,人/日,480.0
+病院全体,病院全体,全体,日平均在院患者数,休日,人/日,400.0
+病院全体,病院全体,全体,日平均新入院患者数,平日,人/日,32.0
+病院全体,病院全体,全体,病床利用率,全日,%,85.0"""
+            
+            st.download_button(
+                label="📄 包括的サンプルCSVダウンロード",
+                data=sample_comprehensive,
+                file_name="advanced_targets_comprehensive.csv",
+                mime="text/csv",
+                help="複数指標・期間区分対応の包括的な目標値設定サンプル"
+            )
+    
+    return st.session_state.advanced_target_values_df
 
-        progress_bar.progress(30, text="3. データの前処理中...")
-        preprocess_start_time = time.time()
-        df_final, validation_results = integrated_preprocess_data(df_processed_duplicates, target_data_df=target_data)
-        preprocess_end_time = time.time()
-        st.session_state.performance_metrics['processing_time'] = preprocess_end_time - preprocess_start_time
-        del df_processed_duplicates
-        gc.collect()
-
-        if df_final is None or df_final.empty:
-            progress_bar.progress(100, text="データ前処理に失敗しました。")
-            st.error("データ前処理の結果、有効なデータが残りませんでした。")
-            if validation_results and validation_results.get('errors'):
-                for err_msg in validation_results.get('errors', []): 
-                    st.error(err_msg)
-            return False, None, None, None, validation_results
-
-        progress_bar.progress(50, text="4. データの検証中...")
-        st.session_state.validation_results = validation_results
-        if validation_results:
-            if validation_results.get("errors"):
-                st.error("データ検証で以下のエラーが検出されました。処理を継続できません。")
-                for err_msg in validation_results["errors"]: 
-                    st.error(err_msg)
-                if not validation_results.get("is_valid", True):
-                     return False, None, None, None, validation_results
-            if validation_results.get("warnings"):
-                with st.expander("データ検証の警告", expanded=False):
-                    for warn_msg in validation_results["warnings"]: 
-                        st.warning(warn_msg)
-
-        progress_bar.progress(85, text="5. 全体データの集計中...")
-        all_results = None
-        try:
-            all_results = generate_filtered_summaries(df_final, None, None)
-        except Exception as e_summary:
-            st.warning(f"全体データの集計中にエラーが発生しました: {e_summary}")
-            logger.error(f"全体データ集計エラー: {e_summary}", exc_info=True)
-
-        if all_results is None or not all_results.get("summary", pd.DataFrame()).empty is False:
-            default_latest_date = df_final["日付"].max() if not df_final.empty and "日付" in df_final.columns else pd.Timestamp.now().normalize()
-            all_results = {
-                "latest_date": default_latest_date,
-                "summary": pd.DataFrame(), 
-                "weekday": pd.DataFrame(), 
-                "holiday": pd.DataFrame(),
-                "monthly_all": pd.DataFrame(), 
-                "monthly_weekday": pd.DataFrame(), 
-                "monthly_holiday": pd.DataFrame(),
-            }
-            if df_final is not None and not df_final.empty :
-                 st.warning("全体結果の集計に一部失敗したため、限定的な結果になります。")
-
-        latest_data_date_obj = all_results.get("latest_date", pd.Timestamp.now().normalize())
-
-        progress_bar.progress(95, text="6. マッピング情報の初期化中...")
-        if df_final is not None and not df_final.empty:
-            initialize_all_mappings(df_final, target_data)
-            logger.info("診療科および病棟のマッピング情報を初期化・更新しました。")
-
-        total_time_taken = time.time() - start_time_total
-        logger.info(f"データ処理全体完了。処理時間: {total_time_taken:.1f}秒, レコード数: {len(df_final) if df_final is not None else 0}")
-
-        if 'performance_logs' not in st.session_state: 
-            st.session_state.performance_logs = []
-        st.session_state.performance_logs.append({
-            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"), 
-            'operation': 'データ処理全体', 
-            'duration': total_time_taken,
-            'details': {
-                'rows': len(df_final) if df_final is not None else 0,
-                'columns': len(df_final.columns) if df_final is not None and hasattr(df_final, 'columns') else 0,
-                'files_new': len(new_files_uploader_list) if new_files_uploader_list else 0,
-            }
-        })
-        progress_bar.progress(100, text=f"データの処理が完了しました。処理時間: {total_time_taken:.1f}秒")
-        return True, df_final, target_data, all_results, latest_data_date_obj
-
-    except Exception as e_main:
-        logger.error(f"データ処理のメインプロセスでエラーが発生しました: {e_main}", exc_info=True)
-        progress_bar.progress(100, text=f"エラーが発生しました: {str(e_main)}")
-        st.error(f"データ処理中に予期せぬエラーが発生しました: {str(e_main)}")
-        # 修正：tracebackを適切に使用
-        st.error(traceback.format_exc())
-        return False, None, None, None, None
-
-
-def create_data_processing_tab():
-    st.header("📊 データ入力")
-
-    with st.expander("ℹ️ データ入力について", expanded=False):
-        st.markdown("""
-        **データ入力の流れ:**
-        1. **固定ファイル**: メインとなる入院患者データ（必須またはキャッシュ利用）
-        2. **追加ファイル**: 補完データ（オプション、複数可）
-        3. **目標値ファイル**: 部門別目標設定（オプション、CSV形式）
-
-        **対応ファイル形式 (入院データ):** Excel (.xlsx, .xls)
-        **必要な列名 (柔軟に対応試行):**
-        病棟コード, 診療科名, 日付, 在院患者数, 入院患者数, 緊急入院患者数, 退院患者数, 死亡患者数
-        """)
-
-    if 'data_processing_initialized' not in st.session_state:
-        st.session_state.data_processing_initialized = True
-        st.session_state.data_processed = False
-        st.session_state.df = None
-        st.session_state.target_data = None
-        st.session_state.all_results = None
-        st.session_state.validation_results = None
-        st.session_state.latest_data_date_str = "データ読込前"
-        st.session_state.target_file_debug_info = None
-        st.session_state.extracted_targets = None
-        if 'performance_metrics' not in st.session_state:
-            st.session_state.performance_metrics = {
-                'data_load_time': 0, 
-                'data_conversion_time': 0, 
-                'processing_time': 0
-            }
-
-    st.subheader("📁 ファイルアップロード")
-    base_file_key = "dp_base_file_uploader"
-    new_files_key = "dp_new_files_uploader"
-    target_file_key = "dp_target_file_uploader"
-
-    col_f1_dp, col_f2_dp, col_f3_dp = st.columns(3)
-    with col_f1_dp:
-        base_file_uploader_widget_dp = st.file_uploader(
-            "固定ファイル (Excel)", type=["xlsx", "xls"], key=base_file_key,
-            help="メインのExcelファイル。過去処理済みの同一ファイルはキャッシュ利用可（アップロード不要）。"
-        )
-    with col_f2_dp:
-        new_files_uploader_widget_dp = st.file_uploader(
-            "追加ファイル (Excel)", type=["xlsx", "xls"], accept_multiple_files=True,
-            key=new_files_key, help="補完データファイル（複数可）。"
-        )
-    with col_f3_dp:
-        target_file_uploader_widget_dp = st.file_uploader(
-            "目標値ファイル (CSV)", type=["csv"], key=target_file_key,
-            help="部門別の目標値データ（CSV形式）。"
-        )
-
-    app_data_dir_val_dp = get_app_data_dir()
-    parquet_base_path_val_dp = os.path.join(app_data_dir_val_dp, "processed_base_data.parquet") if app_data_dir_val_dp else None
-    can_process_now_dp = False
-    base_file_info_dp = get_base_file_info(app_data_dir_val_dp)
-
-    if base_file_uploader_widget_dp is not None:
-        can_process_now_dp = True
-    elif parquet_base_path_val_dp and os.path.exists(parquet_base_path_val_dp) and base_file_info_dp:
-        if base_file_uploader_widget_dp is None:
-             st.info(f"以前処理したベースデータ「{base_file_info_dp.get('file_name', '不明')}」のキャッシュを利用できます。")
-        can_process_now_dp = True
-    elif new_files_uploader_widget_dp:
-        can_process_now_dp = True
-
-    if can_process_now_dp:
-        if not st.session_state.get('data_processed', False):
-            process_button_key_dp_run = "process_data_button_dp_tab_run"
-            if st.button("データ処理を実行", key=process_button_key_dp_run, use_container_width=True):
-                base_file_to_process_dp = base_file_uploader_widget_dp
-                new_files_to_process_dp = new_files_uploader_widget_dp if new_files_uploader_widget_dp else []
-                target_file_to_process_dp = target_file_uploader_widget_dp
-
-                progress_bar_ui_main_dp = st.progress(0, text="データ処理を開始します...")
-                success_flag_dp, df_result_main_dp, target_data_result_main_dp, all_results_main_dp, last_val_or_validation_res = process_data_with_progress(
-                    base_file_to_process_dp, new_files_to_process_dp, target_file_to_process_dp, progress_bar_ui_main_dp
+def get_advanced_target_values(target_df, filter_config, analysis_date=None):
+    """
+    高度フィルター設定に基づいて複数の目標値を取得（デバッグ強化版）
+    
+    Args:
+        target_df (pd.DataFrame): 高度目標値データフレーム
+        filter_config (dict): フィルター設定
+        analysis_date (pd.Timestamp, optional): 分析対象日（期間区分判定用）
+        
+    Returns:
+        dict: 指標タイプ別の目標値情報
+    """
+    if target_df.empty or not filter_config:
+        logger.info("高度目標値取得: 目標値データまたはフィルター設定が空です")
+        return {}
+    
+    try:
+        filter_mode = filter_config.get('filter_mode', '全体')
+        logger.info(f"高度目標値取得: フィルターモード = {filter_mode}")
+        
+        # デバッグ: 目標値データの内容確認
+        logger.info(f"目標値データ行数: {len(target_df)}")
+        logger.info(f"目標値データの部門コード一覧: {target_df['部門コード'].unique().tolist()}")
+        logger.info(f"目標値データの部門種別一覧: {target_df['部門種別'].unique().tolist()}")
+        logger.info(f"目標値データの指標タイプ一覧: {target_df['指標タイプ'].unique().tolist()}")
+        
+        # 現在の期間タイプを判定
+        current_period_type = get_current_period_type(analysis_date)
+        logger.info(f"期間タイプ判定: {current_period_type}")
+        
+        target_results = {}
+        
+        if filter_mode == "特定診療科":
+            selected_depts = filter_config.get('selected_depts', [])
+            logger.info(f"選択された診療科: {selected_depts}")
+            
+            if selected_depts:
+                for dept in selected_depts:
+                    logger.info(f"診療科 '{dept}' の目標値を検索中...")
+                    
+                    # より柔軟なマッチング検索
+                    dept_targets = target_df[
+                        ((target_df['部門コード'].astype(str).str.strip() == str(dept).strip()) | 
+                         (target_df['部門名'].astype(str).str.strip() == str(dept).strip())) &
+                        (target_df['部門種別'].astype(str).str.strip().isin(['診療科', '部門', '科']))
+                    ]
+                    
+                    logger.info(f"診療科 '{dept}' で見つかった目標値: {len(dept_targets)}件")
+                    
+                    if dept_targets.empty:
+                        # より広範囲の検索を試行
+                        dept_targets_broad = target_df[
+                            (target_df['部門コード'].astype(str).str.contains(str(dept), case=False, na=False)) |
+                            (target_df['部門名'].astype(str).str.contains(str(dept), case=False, na=False))
+                        ]
+                        logger.info(f"診療科 '{dept}' の部分一致検索結果: {len(dept_targets_broad)}件")
+                        if not dept_targets_broad.empty:
+                            logger.info(f"部分一致の候補: {dept_targets_broad[['部門コード', '部門名', '部門種別']].to_dict('records')}")
+                    
+                    for _, target_row in dept_targets.iterrows():
+                        indicator_type = target_row['指標タイプ']
+                        period_type = target_row['期間区分']
+                        target_value = target_row['目標値']
+                        unit = target_row['単位']
+                        
+                        logger.info(f"目標値詳細: 指標={indicator_type}, 期間={period_type}, 値={target_value}, 単位={unit}")
+                        
+                        # より柔軟な期間区分マッチング（全日を優先、期間指定なしも許可）
+                        period_match = (
+                            period_type == '全日' or 
+                            period_type == current_period_type or
+                            pd.isna(period_type) or
+                            str(period_type).strip() == ''
+                        )
+                        
+                        if period_match:
+                            if indicator_type not in target_results:
+                                target_results[indicator_type] = {
+                                    'value': 0,
+                                    'unit': unit,
+                                    'departments': [],
+                                    'period_type': period_type
+                                }
+                            
+                            target_results[indicator_type]['value'] += target_value
+                            if dept not in target_results[indicator_type]['departments']:
+                                target_results[indicator_type]['departments'].append(dept)
+                            
+                            logger.info(f"目標値を追加: {indicator_type} = {target_value} ({period_type})")
+        
+        elif filter_mode == "特定病棟":
+            selected_wards = filter_config.get('selected_wards', [])
+            logger.info(f"選択された病棟: {selected_wards}")
+            
+            if selected_wards:
+                for ward in selected_wards:
+                    logger.info(f"病棟 '{ward}' の目標値を検索中...")
+                    
+                    # より柔軟なマッチング検索
+                    ward_targets = target_df[
+                        ((target_df['部門コード'].astype(str).str.strip() == str(ward).strip()) | 
+                         (target_df['部門名'].astype(str).str.strip() == str(ward).strip())) &
+                        (target_df['部門種別'].astype(str).str.strip().isin(['病棟', '部門', '棟']))
+                    ]
+                    
+                    logger.info(f"病棟 '{ward}' で見つかった目標値: {len(ward_targets)}件")
+                    
+                    for _, target_row in ward_targets.iterrows():
+                        indicator_type = target_row['指標タイプ']
+                        period_type = target_row['期間区分']
+                        target_value = target_row['目標値']
+                        unit = target_row['単位']
+                        
+                        # より柔軟な期間区分マッチング
+                        period_match = (
+                            period_type == '全日' or 
+                            period_type == current_period_type or
+                            pd.isna(period_type) or
+                            str(period_type).strip() == ''
+                        )
+                        
+                        if period_match:
+                            if indicator_type not in target_results:
+                                target_results[indicator_type] = {
+                                    'value': 0,
+                                    'unit': unit,
+                                    'departments': [],
+                                    'period_type': period_type
+                                }
+                            
+                            target_results[indicator_type]['value'] += target_value
+                            if ward not in target_results[indicator_type]['departments']:
+                                target_results[indicator_type]['departments'].append(ward)
+                            
+                            logger.info(f"目標値を追加: {indicator_type} = {target_value} ({period_type})")
+        
+        else:  # 全体フィルター
+            logger.info("病院全体の目標値を検索中...")
+            
+            # 病院全体の目標値を検索（より柔軟に）
+            hospital_targets = target_df[
+                (target_df['部門種別'].astype(str).str.strip().isin(['全体', '病院全体', '病院', '全体'])) |
+                (target_df['部門コード'].astype(str).str.strip().isin(['病院全体', '全体', 'HOSPITAL', 'ALL']))
+            ]
+            
+            logger.info(f"病院全体で見つかった目標値: {len(hospital_targets)}件")
+            
+            for _, target_row in hospital_targets.iterrows():
+                indicator_type = target_row['指標タイプ']
+                period_type = target_row['期間区分']
+                target_value = target_row['目標値']
+                unit = target_row['単位']
+                
+                # より柔軟な期間区分マッチング
+                period_match = (
+                    period_type == '全日' or 
+                    period_type == current_period_type or
+                    pd.isna(period_type) or
+                    str(period_type).strip() == ''
                 )
                 
-                if success_flag_dp and df_result_main_dp is not None and not df_result_main_dp.empty:
-                    st.session_state.df = df_result_main_dp
-                    st.session_state.target_data = target_data_result_main_dp
-                    st.session_state.all_results = all_results_main_dp
-                    st.session_state.data_processed = True
+                if period_match:
+                    target_results[indicator_type] = {
+                        'value': target_value,
+                        'unit': unit,
+                        'departments': ['病院全体'],
+                        'period_type': period_type
+                    }
                     
-                    if isinstance(last_val_or_validation_res, pd.Timestamp):
-                        st.session_state.latest_data_date_str = last_val_or_validation_res.strftime("%Y年%m月%d日")
-                    else:
-                        st.session_state.latest_data_date_str = "データ処理完了 (日付不明)"
-                        if isinstance(last_val_or_validation_res, dict):
-                            st.session_state.validation_results = last_val_or_validation_res
+                    logger.info(f"病院全体目標値を追加: {indicator_type} = {target_value} ({period_type})")
+        
+        logger.info(f"最終的に取得された目標値: {len(target_results)}種類の指標")
+        for indicator_type, target_info in target_results.items():
+            logger.info(f"  - {indicator_type}: {target_info['value']}{target_info['unit']} ({', '.join(target_info['departments'])})")
+        
+        return target_results
+        
+    except Exception as e:
+        logger.error(f"高度目標値取得エラー: {e}", exc_info=True)
+        return {}
 
-                    st.success(f"データの処理が完了しました。最新データ日付: {st.session_state.latest_data_date_str}")
-                    st.session_state.mappings_initialized_after_processing = True
-                    perform_cleanup(deep=True)
-                    st.rerun()
-                else:
-                    if not success_flag_dp:
-                         st.error("データ処理中にエラーが発生しました。詳細はログを確認してください。")
-                    if isinstance(last_val_or_validation_res, dict) and last_val_or_validation_res.get('errors'):
-                        st.error("データ検証でエラーが検出されました。")
-                        for err_msg_dp in last_val_or_validation_res.get('errors', []): 
-                            st.error(err_msg_dp)
+def calculate_previous_year_same_period(df_original, current_end_date, current_filter_config):
+    """
+    昨年度同期間のデータを計算（統一フィルター適用）
+    
+    Args:
+        df_original (pd.DataFrame): 元のデータフレーム
+        current_end_date (pd.Timestamp): 現在の直近データ日付
+        current_filter_config (dict): 現在のフィルター設定
+        
+    Returns:
+        tuple: (昨年度同期間データ, 開始日, 終了日, 期間説明文)
+    """
+    try:
+        if df_original is None or df_original.empty:
+            return pd.DataFrame(), None, None, "データなし"
+        
+        # 現在の年度を判定
+        if current_end_date.month >= 4:
+            current_fiscal_year = current_end_date.year
         else:
-            st.success(f"データ処理済み（最新データ日付: {st.session_state.latest_data_date_str}）")
-            if st.session_state.get('target_data') is not None: 
-                st.success("目標値データも読み込み済みです。")
-            else: 
-                st.info("目標値データは読み込まれていません。")
+            current_fiscal_year = current_end_date.year - 1
+        
+        # 昨年度の開始日（昨年度4月1日）
+        prev_fiscal_start = pd.Timestamp(year=current_fiscal_year - 1, month=4, day=1)
+        
+        # 昨年度の終了日（昨年度の同月日）
+        try:
+            prev_fiscal_end = pd.Timestamp(
+                year=current_end_date.year - 1, 
+                month=current_end_date.month, 
+                day=current_end_date.day
+            )
+        except ValueError:
+            # 2月29日などの特殊ケース対応
+            prev_fiscal_end = pd.Timestamp(
+                year=current_end_date.year - 1, 
+                month=current_end_date.month, 
+                day=28
+            )
+        
+        # 昨年度同期間のデータをフィルタリング
+        if '日付' in df_original.columns:
+            df_original['日付'] = pd.to_datetime(df_original['日付'])
+            prev_year_data = df_original[
+                (df_original['日付'] >= prev_fiscal_start) & 
+                (df_original['日付'] <= prev_fiscal_end)
+            ].copy()
+        else:
+            prev_year_data = pd.DataFrame()
+        
+        # 統一フィルターの部門設定を昨年度データに適用
+        if apply_unified_filters and current_filter_config and not prev_year_data.empty:
+            filter_mode = current_filter_config.get('filter_mode', '全体')
+            
+            if filter_mode == "特定診療科" and current_filter_config.get('selected_depts'):
+                if '診療科名' in prev_year_data.columns:
+                    prev_year_data = prev_year_data[
+                        prev_year_data['診療科名'].isin(current_filter_config['selected_depts'])
+                    ]
+            
+            elif filter_mode == "特定病棟" and current_filter_config.get('selected_wards'):
+                if '病棟コード' in prev_year_data.columns:
+                    prev_year_data = prev_year_data[
+                        prev_year_data['病棟コード'].isin(current_filter_config['selected_wards'])
+                    ]
+        
+        # 期間説明文
+        period_days = (prev_fiscal_end - prev_fiscal_start).days + 1
+        period_description = f"{prev_fiscal_start.strftime('%Y年%m月%d日')} ～ {prev_fiscal_end.strftime('%Y年%m月%d日')} ({period_days}日間)"
+        
+        logger.info(f"昨年度同期間データ抽出完了: {len(prev_year_data)}行, 期間: {period_description}")
+        
+        return prev_year_data, prev_fiscal_start, prev_fiscal_end, period_description
+        
+    except Exception as e:
+        logger.error(f"昨年度同期間データ計算エラー: {e}", exc_info=True)
+        return pd.DataFrame(), None, None, "計算エラー"
 
-            if st.session_state.get('df') is not None:
-                df_display_main_dp_after = st.session_state.df
-                with st.expander("データ概要", expanded=True):
-                    col1_sum_dp_after, col2_sum_dp_after, col3_sum_dp_after = st.columns(3)
-                    with col1_sum_dp_after:
-                        if not df_display_main_dp_after.empty and '日付' in df_display_main_dp_after.columns:
-                            min_dt_dp_after = df_display_main_dp_after['日付'].min()
-                            max_dt_dp_after = df_display_main_dp_after['日付'].max()
-                            if pd.notna(min_dt_dp_after) and pd.notna(max_dt_dp_after):
-                                st.metric("データ期間", f"{min_dt_dp_after.strftime('%Y/%m/%d')} - {max_dt_dp_after.strftime('%Y/%m/%d')}")
-                            else: 
-                                st.metric("データ期間", "N/A (無効な日付)")
-                        else: 
-                            st.metric("データ期間", "N/A")
-                    with col2_sum_dp_after: 
-                        st.metric("総レコード数", f"{len(df_display_main_dp_after):,}")
-                    with col3_sum_dp_after: 
-                        st.metric("病棟数", f"{df_display_main_dp_after['病棟コード'].nunique() if '病棟コード' in df_display_main_dp_after.columns else 'N/A'}")
+def display_advanced_metrics_layout(metrics, selected_period_info, prev_year_metrics=None, prev_year_period_info=None, advanced_targets=None):
+    """
+    高度目標値対応の統合メトリクス表示
+    
+    Args:
+        metrics (dict): 計算されたメトリクス
+        selected_period_info (str): 選択期間の説明
+        prev_year_metrics (dict, optional): 昨年度同期間のメトリクス
+        prev_year_period_info (str, optional): 昨年度同期間の説明
+        advanced_targets (dict, optional): 高度目標値データ
+    """
+    if not metrics:
+        st.warning("表示するメトリクスデータがありません。")
+        return
 
-                    col1_sum2_dp_after, col2_sum2_dp_after, col3_sum2_dp_after = st.columns(3)
-                    with col1_sum2_dp_after: 
-                        st.metric("診療科数", f"{df_display_main_dp_after['診療科名'].nunique() if '診療科名' in df_display_main_dp_after.columns else 'N/A'}")
-                    with col2_sum2_dp_after: 
-                        st.metric("平日数", f"{(df_display_main_dp_after['平日判定'] == '平日').sum()}" if "平日判定" in df_display_main_dp_after.columns else "N/A")
-                    with col3_sum2_dp_after: 
-                        st.metric("休日数", f"{(df_display_main_dp_after['平日判定'] == '休日').sum()}" if "平日判定" in df_display_main_dp_after.columns else "N/A")
+    # 設定値の取得
+    total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
+    target_occupancy_rate = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE)
+    avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
+    target_admissions_monthly = st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS)
 
-                    perf_metrics_disp_dp_after = st.session_state.get('performance_metrics', {})
-                    if perf_metrics_disp_dp_after:
-                        st.subheader("処理パフォーマンス")
-                        pcol1_dp_after, pcol2_dp_after, pcol3_dp_after, pcol4_dp_after = st.columns(4)
-                        with pcol1_dp_after: 
-                            st.metric("データ読込時間", f"{perf_metrics_disp_dp_after.get('data_load_time', 0):.1f}秒")
-                        with pcol2_dp_after: 
-                            pass
-                        with pcol3_dp_after: 
-                            st.metric("データ処理時間", f"{perf_metrics_disp_dp_after.get('processing_time', 0):.1f}秒")
-                        with pcol4_dp_after:
-                            try:
-                                mem_info_disp_dp_after = log_memory_usage()
-                                if mem_info_disp_dp_after:
-                                    st.metric("現在のメモリ使用", f"{mem_info_disp_dp_after.get('process_mb', 0):.1f} MB ({mem_info_disp_dp_after.get('process_percent', 0):.1f}%)")
-                                else:
-                                    st.metric("メモリ情報", "取得不可")
-                            except Exception:
-                                st.metric("メモリ情報", "取得エラー")
+    # 期間表示は下部のシンプルな表示のみ使用
 
-                validation_res_main_dp_after = st.session_state.get('validation_results')
-                if validation_res_main_dp_after:
-                    if validation_res_main_dp_after.get("warnings") or validation_res_main_dp_after.get("info") or validation_res_main_dp_after.get("errors"):
-                        with st.expander("データ検証結果", expanded=False):
-                            for err_msg_disp_dp_after in validation_res_main_dp_after.get("errors", []): 
-                                st.error(err_msg_disp_dp_after)
-                            for info_msg_disp_dp_after in validation_res_main_dp_after.get("info", []): 
-                                st.info(info_msg_disp_dp_after)
-                            for warn_msg_disp_main_dp_after in validation_res_main_dp_after.get("warnings", []): 
-                                st.warning(warn_msg_disp_main_dp_after)
+    # 高度目標値情報の表示
+    if advanced_targets:
+        st.markdown("### 🎯 設定目標値")
+        target_cols = st.columns(min(len(advanced_targets), 4))
+        
+        for i, (indicator_type, target_info) in enumerate(advanced_targets.items()):
+            col_idx = i % 4
+            with target_cols[col_idx]:
+                departments_str = ', '.join(target_info['departments'])
+                st.metric(
+                    f"{indicator_type}",
+                    f"{target_info['value']:.1f}{target_info['unit']}",
+                    delta=f"{target_info['period_type']} | {departments_str}",
+                    delta_color="off"
+                )
 
-            if st.button("データをリセット (キャッシュも削除)", key="reset_data_button_dp_tab_v3_final", use_container_width=True):
-                st.session_state.data_processed = False
-                st.session_state.df = None
-                st.session_state.all_results = None
-                st.session_state.target_data = None
-                st.session_state.validation_results = None
-                st.session_state.latest_data_date_str = "データ読込前"
-                st.session_state.target_file_debug_info = None
-                st.session_state.extracted_targets = None
-                st.session_state.performance_metrics = {
-                    'data_load_time': 0, 
-                    'data_conversion_time': 0, 
-                    'processing_time': 0
-                }
-                st.session_state.dept_mapping = {}
-                st.session_state.dept_mapping_initialized = False
-                st.session_state.ward_mapping = {}
-                st.session_state.ward_mapping_initialized = False
-                st.session_state.mappings_initialized_after_processing = False
+    # 主要指標を4つ横一列で表示
+    st.markdown("### 📊 主要指標")
+    col1, col2, col3, col4 = st.columns(4)
 
-                if app_data_dir_val_dp:
-                    parquet_to_delete_main_dp_after = os.path.join(app_data_dir_val_dp, "processed_base_data.parquet")
-                    info_to_delete_main_dp_after = os.path.join(app_data_dir_val_dp, "base_file_info.json")
-                    if os.path.exists(parquet_to_delete_main_dp_after):
-                        try: 
-                            os.remove(parquet_to_delete_main_dp_after)
-                            st.info("キャッシュされたベースデータを削除しました。")
-                        except Exception as e_del_pq_dp_after: 
-                            logger.warning(f"Parquet削除エラー: {e_del_pq_dp_after}")
-                    if os.path.exists(info_to_delete_main_dp_after):
-                        try: 
-                            os.remove(info_to_delete_main_dp_after)
-                        except Exception as e_del_info_dp_after: 
-                            logger.warning(f"Infoファイル削除エラー: {e_del_info_dp_after}")
-                perform_cleanup(deep=True)
-                st.rerun()
+    with col1:
+        # 日平均在院患者数（高度目標値対応）
+        avg_daily_census_val = metrics.get('avg_daily_census', 0)
+        
+        # 高度目標値から対応する目標を取得
+        target_census = None
+        target_source = "デフォルト"
+        
+        if advanced_targets and '日平均在院患者数' in advanced_targets:
+            target_census = advanced_targets['日平均在院患者数']['value']
+            target_source = "設定目標"
+        else:
+            target_census = total_beds * target_occupancy_rate
+            target_source = "理論値"
+        
+        census_delta = avg_daily_census_val - target_census
+        census_color = "normal" if census_delta >= 0 else "inverse"
+        
+        st.metric(
+            "👥 日平均在院患者数",
+            f"{avg_daily_census_val:.1f}人",
+            delta=f"{census_delta:+.1f}人 ({target_source}比)",
+            delta_color=census_color,
+            help=f"{selected_period_info}の日平均在院患者数"
+        )
+        st.caption(f"目標: {target_census:.1f}人")
+        if target_census > 0:
+            achievement_rate = (avg_daily_census_val / target_census * 100)
+            st.caption(f"達成率: {achievement_rate:.1f}%")
+
+    with col2:
+        # 病床利用率（高度目標値対応）
+        bed_occupancy_rate_val = metrics.get('bed_occupancy_rate', 0)
+        
+        # 高度目標値から目標病床利用率を取得
+        target_occupancy = None
+        if advanced_targets and '病床利用率' in advanced_targets:
+            target_occupancy = advanced_targets['病床利用率']['value']
+        else:
+            target_occupancy = target_occupancy_rate * 100
+        
+        occupancy_delta = bed_occupancy_rate_val - target_occupancy if bed_occupancy_rate_val is not None else 0
+        delta_color = "normal" if abs(occupancy_delta) <= 5 else ("inverse" if occupancy_delta < -5 else "normal")
+        
+        st.metric(
+            "🏥 病床利用率",
+            f"{bed_occupancy_rate_val:.1f}%" if bed_occupancy_rate_val is not None else "N/A",
+            delta=f"{occupancy_delta:+.1f}% (目標比)",
+            delta_color=delta_color,
+            help="日平均在院患者数と総病床数から算出"
+        )
+        st.caption(f"目標: {target_occupancy:.1f}%")
+
+    with col3:
+        # 平均在院日数
+        avg_los_val = metrics.get('avg_los', 0)
+        alos_delta = avg_los_val - avg_length_of_stay_target
+        alos_color = "inverse" if alos_delta > 0 else "normal"
+        
+        st.metric(
+            "📅 平均在院日数",
+            f"{avg_los_val:.1f}日",
+            delta=f"{alos_delta:+.1f}日 (目標比)",
+            delta_color=alos_color,
+            help=f"{selected_period_info}の平均在院日数"
+        )
+        st.caption(f"目標: {avg_length_of_stay_target:.1f}日")
+
+    with col4:
+        # 日平均新入院患者数（高度目標値対応）
+        avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
+        
+        # 高度目標値から目標を取得
+        target_daily_admissions = None
+        if advanced_targets and '日平均新入院患者数' in advanced_targets:
+            target_daily_admissions = advanced_targets['日平均新入院患者数']['value']
+        else:
+            target_daily_admissions = target_admissions_monthly / 30
+        
+        daily_delta = avg_daily_admissions_val - target_daily_admissions
+        daily_color = "normal" if daily_delta >= 0 else "inverse"
+        
+        st.metric(
+            "📈 日平均新入院患者数",
+            f"{avg_daily_admissions_val:.1f}人/日",
+            delta=f"{daily_delta:+.1f}人/日 (目標比)",
+            delta_color=daily_color,
+            help=f"{selected_period_info}の日平均新入院患者数"
+        )
+        st.caption(f"目標: {target_daily_admissions:.1f}人/日")
+
+    # 週間目標値がある場合の追加表示
+    if advanced_targets and '週間新入院患者数' in advanced_targets:
+        st.markdown("---")
+        st.markdown("### 📈 週間指標")
+        
+        week_col1, week_col2, week_col3 = st.columns(3)
+        
+        with week_col1:
+            # 週間新入院患者数の計算
+            period_days_val = metrics.get('period_days', 7)
+            total_admissions = metrics.get('total_admissions', 0)
+            weekly_admissions_equivalent = (total_admissions / period_days_val) * 7 if period_days_val > 0 else 0
+            
+            target_weekly_admissions = advanced_targets['週間新入院患者数']['value']
+            weekly_delta = weekly_admissions_equivalent - target_weekly_admissions
+            weekly_color = "normal" if weekly_delta >= 0 else "inverse"
+            
+            st.metric(
+                "📊 週換算新入院患者数",
+                f"{weekly_admissions_equivalent:.1f}人/週",
+                delta=f"{weekly_delta:+.1f}人/週 (目標比)",
+                delta_color=weekly_color,
+                help="期間データを週換算した新入院患者数"
+            )
+            st.caption(f"目標: {target_weekly_admissions:.1f}人/週")
+
+    # 昨年度同期間との比較（既存機能維持）
+    if prev_year_metrics and prev_year_period_info:
+        st.markdown("---")
+        st.markdown("### 📊 昨年度同期間比較")
+        st.info(f"📊 昨年度同期間: {prev_year_period_info}")
+        st.caption("※部門フィルターが適用された昨年度同期間データとの比較")
+        
+        prev_col1, prev_col2, prev_col3, prev_col4 = st.columns(4)
+        
+        with prev_col1:
+            # 昨年度日平均在院患者数
+            prev_avg_daily_census = prev_year_metrics.get('avg_daily_census', 0)
+            yoy_census_change = avg_daily_census_val - prev_avg_daily_census
+            yoy_census_pct = (yoy_census_change / prev_avg_daily_census * 100) if prev_avg_daily_census > 0 else 0
+            yoy_census_color = "normal" if yoy_census_change >= 0 else "inverse"
+            
+            st.metric(
+                "👥 日平均在院患者数",
+                f"{prev_avg_daily_census:.1f}人",
+                delta=f"{yoy_census_change:+.1f}人 ({yoy_census_pct:+.1f}%)",
+                delta_color=yoy_census_color,
+                help=f"昨年度同期間の日平均在院患者数との比較"
+            )
+            
+        with prev_col2:
+            # 昨年度病床利用率
+            prev_bed_occupancy = prev_year_metrics.get('bed_occupancy_rate', 0)
+            yoy_occupancy_change = bed_occupancy_rate_val - prev_bed_occupancy
+            yoy_occupancy_color = "normal" if yoy_occupancy_change >= 0 else "inverse"
+            
+            st.metric(
+                "🏥 病床利用率",
+                f"{prev_bed_occupancy:.1f}%",
+                delta=f"{yoy_occupancy_change:+.1f}%",
+                delta_color=yoy_occupancy_color,
+                help="昨年度同期間の病床利用率との比較"
+            )
+            
+        with prev_col3:
+            # 昨年度平均在院日数
+            prev_avg_los = prev_year_metrics.get('avg_los', 0)
+            yoy_los_change = avg_los_val - prev_avg_los
+            yoy_los_color = "inverse" if yoy_los_change > 0 else "normal"  # 短縮が良い
+            
+            st.metric(
+                "📅 平均在院日数",
+                f"{prev_avg_los:.1f}日",
+                delta=f"{yoy_los_change:+.1f}日",
+                delta_color=yoy_los_color,
+                help="昨年度同期間の平均在院日数との比較"
+            )
+            
+        with prev_col4:
+            # 昨年度日平均新入院患者数
+            prev_avg_daily_admissions = prev_year_metrics.get('avg_daily_admissions', 0)
+            yoy_admissions_change = avg_daily_admissions_val - prev_avg_daily_admissions
+            yoy_admissions_pct = (yoy_admissions_change / prev_avg_daily_admissions * 100) if prev_avg_daily_admissions > 0 else 0
+            yoy_admissions_color = "normal" if yoy_admissions_change >= 0 else "inverse"
+            
+            st.metric(
+                "📈 日平均新入院患者数",
+                f"{prev_avg_daily_admissions:.1f}人/日",
+                delta=f"{yoy_admissions_change:+.1f}人/日 ({yoy_admissions_pct:+.1f}%)",
+                delta_color=yoy_admissions_color,
+                help="昨年度同期間の日平均新入院患者数との比較"
+            )
+
+    # 詳細情報セクション
+    st.markdown("---")
+    with st.expander("📋 高度目標値設定詳細", expanded=False):
+        if advanced_targets:
+            detail_col1, detail_col2 = st.columns(2)
+            
+            with detail_col1:
+                st.markdown("**🎯 設定済み目標値**")
+                for indicator_type, target_info in advanced_targets.items():
+                    departments_str = ', '.join(target_info['departments'])
+                    st.write(f"• **{indicator_type}**: {target_info['value']:.1f}{target_info['unit']}")
+                    st.caption(f"　対象: {departments_str} ({target_info['period_type']})")
+            
+            with detail_col2:
+                st.markdown("**📊 達成状況サマリー**")
+                achievement_summary = []
+                
+                if '日平均在院患者数' in advanced_targets:
+                    target_val = advanced_targets['日平均在院患者数']['value']
+                    actual_val = avg_daily_census_val
+                    achievement = (actual_val / target_val * 100) if target_val > 0 else 0
+                    achievement_summary.append(f"日平均在院患者数: {achievement:.1f}%")
+                
+                if '日平均新入院患者数' in advanced_targets:
+                    target_val = advanced_targets['日平均新入院患者数']['value']
+                    actual_val = avg_daily_admissions_val
+                    achievement = (actual_val / target_val * 100) if target_val > 0 else 0
+                    achievement_summary.append(f"日平均新入院患者数: {achievement:.1f}%")
+                
+                for summary_item in achievement_summary:
+                    st.write(f"• {summary_item}")
+        else:
+            st.info("高度目標値が設定されていません。サイドバーの「高度目標値設定」からCSVファイルをアップロードしてください。")
+
+def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
+    """
+    高度目標値対応のKPIカード表示（メイン関数）
+    """
+    if df is None or df.empty:
+        st.warning("データが読み込まれていません。")
+        return
+    if calculate_kpis is None:
+        st.error("KPI計算関数が利用できません。")
+        return
+    
+    # 高度目標値データの読み込み
+    advanced_target_df = load_advanced_target_values_csv()
+    
+    # 現在期間のKPI計算
+    kpis_selected_period = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
+    if kpis_selected_period is None or kpis_selected_period.get("error"):
+        st.warning(f"選択された期間のKPI計算に失敗しました。理由: {kpis_selected_period.get('error', '不明') if kpis_selected_period else '不明'}")
+        return
+    
+    # メトリクス準備
+    period_df = df[(df['日付'] >= start_date) & (df['日付'] <= end_date)]
+    total_admissions = 0
+    if '入院患者数' in period_df.columns:
+        total_admissions = period_df['入院患者数'].sum()
+    
+    metrics_for_display = {
+        'avg_daily_census': kpis_selected_period.get('avg_daily_census'),
+        'bed_occupancy_rate': kpis_selected_period.get('bed_occupancy_rate'),
+        'avg_los': kpis_selected_period.get('alos'),
+        'estimated_revenue': kpis_selected_period.get('total_patient_days', 0) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE),
+        'total_patient_days': kpis_selected_period.get('total_patient_days'),
+        'avg_daily_admissions': kpis_selected_period.get('avg_daily_admissions'),
+        'period_days': kpis_selected_period.get('days_count'),
+        'total_beds': total_beds_setting,
+        'total_admissions': total_admissions,
+    }
+    
+    # フィルター設定取得と高度目標値取得
+    current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
+    advanced_targets = {}
+    
+    if not advanced_target_df.empty and current_filter_config:
+        # 分析期間の終了日を取得して期間区分判定に使用
+        analysis_end_date = end_date
+        advanced_targets = get_advanced_target_values(advanced_target_df, current_filter_config, analysis_end_date)
+        logger.info(f"取得された高度目標値: {len(advanced_targets)}種類")
+    
+    # 昨年度同期間データの計算
+    df_original = st.session_state.get('df')
+    prev_year_metrics = None
+    prev_year_period_info = None
+    
+    if df_original is not None and not df_original.empty:
+        try:
+            latest_date_in_current = end_date
+            prev_year_data, prev_start, prev_end, prev_period_desc = calculate_previous_year_same_period(
+                df_original, latest_date_in_current, current_filter_config
+            )
+            
+            if not prev_year_data.empty and prev_start and prev_end:
+                prev_year_kpis = calculate_kpis(prev_year_data, prev_start, prev_end, total_beds=total_beds_setting)
+                if prev_year_kpis and not prev_year_kpis.get("error"):
+                    prev_total_admissions = 0
+                    if '入院患者数' in prev_year_data.columns:
+                        prev_total_admissions = prev_year_data['入院患者数'].sum()
+                    
+                    prev_year_metrics = {
+                        'avg_daily_census': prev_year_kpis.get('avg_daily_census'),
+                        'bed_occupancy_rate': prev_year_kpis.get('bed_occupancy_rate'),
+                        'avg_los': prev_year_kpis.get('alos'),
+                        'avg_daily_admissions': prev_year_kpis.get('avg_daily_admissions'),
+                        'total_admissions': prev_total_admissions,
+                    }
+                    prev_year_period_info = prev_period_desc
+                    logger.info(f"昨年度同期間KPI計算完了: {prev_year_period_info}")
+        except Exception as e:
+            logger.error(f"昨年度同期間データ処理エラー: {e}", exc_info=True)
+    
+    period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
+    display_advanced_metrics_layout(
+        metrics_for_display, 
+        period_description, 
+        prev_year_metrics, 
+        prev_year_period_info,
+        advanced_targets
+    )
+
+# 既存の関数はそのまま維持（display_trend_graphs_only, display_insights）
+def display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
+    """既存のグラフ表示関数（変更なし）"""
+    if df is None or df.empty:
+        st.warning("データが読み込まれていません。")
+        return
+    if calculate_kpis is None: return
+    if not all([create_monthly_trend_chart, create_admissions_discharges_chart, create_occupancy_chart]):
+        st.warning("グラフ生成関数の一部が利用できません。")
+        return
+    kpi_data = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
+    if kpi_data is None or kpi_data.get("error"):
+        st.warning(f"グラフ表示用のKPIデータ計算に失敗しました。")
+        return
+    col1_chart, col2_chart = st.columns(2)
+    with col1_chart:
+        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
+        st.markdown("<div class='chart-title'>月別 平均在院日数と入退院患者数の推移</div>", unsafe_allow_html=True)
+        monthly_chart = create_monthly_trend_chart(kpi_data)
+        if monthly_chart:
+            st.plotly_chart(monthly_chart, use_container_width=True)
+        else:
+            st.info("月次トレンドチャート: データ不足のため表示できません。")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col2_chart:
+        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
+        st.markdown("<div class='chart-title'>週別 入退院バランス</div>", unsafe_allow_html=True)
+        balance_chart = create_admissions_discharges_chart(kpi_data)
+        if balance_chart:
+            st.plotly_chart(balance_chart, use_container_width=True)
+        else:
+            st.info("入退院バランスチャート: データ不足のため表示できません。")
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div class='chart-container full-width'>", unsafe_allow_html=True)
+    st.markdown(f"<div class='chart-title'>月別 病床利用率の推移 (総病床数: {total_beds_setting}床)</div>", unsafe_allow_html=True)
+    occupancy_chart_fig = create_occupancy_chart(kpi_data, total_beds_setting, target_occupancy_setting_percent)
+    if occupancy_chart_fig:
+        st.plotly_chart(occupancy_chart_fig, use_container_width=True)
     else:
-        st.info("「固定ファイル」をアップロードするか、以前処理したベースデータキャッシュを利用できる状態にしてください。または「追加ファイル」のみでも処理を開始できます。")
+        st.info("病床利用率チャート: データ不足または総病床数未設定のため表示できません。")
+    st.markdown("</div>", unsafe_allow_html=True)
+    display_insights(kpi_data, total_beds_setting)
+
+def display_insights(kpi_data, total_beds_setting):
+    """既存のインサイト表示関数（変更なし）"""
+    if analyze_kpi_insights and kpi_data:
+        insights = analyze_kpi_insights(kpi_data, total_beds_setting)
+        st.markdown("<div class='chart-container full-width'>", unsafe_allow_html=True)
+        st.markdown("<div class='chart-title'>分析インサイトと考慮事項</div>", unsafe_allow_html=True)
+        insight_col1, insight_col2 = st.columns(2)
+        with insight_col1:
+            if insights.get("alos"):
+                st.markdown("<div class='info-card'><h4>平均在院日数 (ALOS) に関する考察</h4>" + "".join([f"<p>- {i}</p>" for i in insights["alos"]]) + "</div>", unsafe_allow_html=True)
+            if insights.get("weekday_pattern"):
+                st.markdown("<div class='neutral-card'><h4>曜日別パターンの活用</h4>" + "".join([f"<p>- {i}</p>" for i in insights["weekday_pattern"]]) + "</div>", unsafe_allow_html=True)
+        with insight_col2:
+            if insights.get("occupancy"):
+                st.markdown("<div class='success-card'><h4>病床利用率と回転数</h4>" + "".join([f"<p>- {i}</p>" for i in insights["occupancy"]]) + "</div>", unsafe_allow_html=True)
+            if insights.get("general"):
+                st.markdown("<div class='warning-card'><h4>データ解釈上の注意点</h4>" + "".join([f"<p>- {i}</p>" for i in insights["general"]]) + "</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.info("インサイトを生成するためのデータまたは関数が不足しています。")
