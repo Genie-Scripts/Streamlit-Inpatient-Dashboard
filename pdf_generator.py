@@ -432,6 +432,7 @@ def validate_and_deduplicate_chart_buffers(chart_buffers_dict, chart_type_name, 
     if not chart_buffers_dict:
         return {}
     
+    print(f"🔎 VALIDATING ({chart_type_name}): Input keys: {list(chart_buffers_dict.keys())}, Allowed days: {allowed_days}") # 追加ログ
     validated_buffers = {}
     processed_days = set()
     
@@ -448,23 +449,78 @@ def validate_and_deduplicate_chart_buffers(chart_buffers_dict, chart_type_name, 
         
         # 重複チェック (同じ日数のキーが複数回処理されるのを防ぐ)
         if days_str in processed_days:
-            print(f"⚠️ {chart_type_name}: 重複する日数のキー '{days_str}' をスキップ")
+            print(f"  ⚠️ VALIDATE SKIP (Duplicate Day) ({chart_type_name}): Skipping duplicate day key '{days_str}'") # 詳細ログ
             continue
         
         # 許可された日数のチェック
         if allowed_days_set and days_str not in allowed_days_set:
-            print(f"⚠️ {chart_type_name}: 許可されていない日数 '{days_str}' をスキップ (許可リスト: {allowed_days_set})")
+            print(f"  ⚠️ VALIDATE SKIP (Not Allowed) ({chart_type_name}): Skipping day key '{days_str}' (Not in {allowed_days_set})") # 詳細ログ
             continue
         
         # バッファの有効性チェック
         if buffer_data and (isinstance(buffer_data, bytes) or hasattr(buffer_data, 'getvalue')):
             validated_buffers[days_str] = buffer_data # 有効なバッファを文字列キーで保存
             processed_days.add(days_str)
-            # print(f"✅ {chart_type_name}: 有効なバッファを追加 - {days_str}日") # ログが多いのでコメントアウトも検討
+            buffer_length = 'N/A'
+            if isinstance(buffer_data, bytes):
+                buffer_length = len(buffer_data)
+            elif hasattr(buffer_data, 'getvalue'):
+                try:
+                    # BytesIOの場合、getvalue()で内容を取得し長さを確認
+                    buffer_length = len(buffer_data.getvalue())
+                except Exception:
+                    pass # getvalue() が失敗する場合など（通常はないはず）
+            print(f"  ✅ VALIDATE OK ({chart_type_name}): Added buffer for day '{days_str}' (Size: {buffer_length})") # 詳細ログ
         else:
-            print(f"❌ {chart_type_name}: 無効なバッファをスキップ - {days_str}日 (データ型: {type(buffer_data)})")
+            print(f"  ❌ VALIDATE FAIL (Invalid Buffer) ({chart_type_name}): Invalid buffer for day '{days_str}' (Type: {type(buffer_data)})") # 詳細ログ
     
+    print(f"🏁 VALIDATED ({chart_type_name}): Output keys: {list(validated_buffers.keys())}") # 追加ログ
     return validated_buffers
+
+# Example usage (for context, not part of the function itself):
+if __name__ == '__main__':
+    # Dummy buffer data
+    dummy_buffer_90 = BytesIO(b"graph_data_90_days").getvalue() # Simulating bytes
+    dummy_buffer_180 = BytesIO(b"graph_data_180_days_longer").getvalue()
+    dummy_buffer_30_invalid = None
+    dummy_buffer_90_duplicate = BytesIO(b"graph_data_90_days_duplicate").getvalue()
+
+
+    print("--- Test Case 1: Basic 90 and 180 days ---")
+    test_buffers1 = {'90': dummy_buffer_90, '180': dummy_buffer_180}
+    allowed1 = ['90', '180']
+    validate_and_deduplicate_chart_buffers(test_buffers1, "ALOS_Test1", allowed1)
+    # Expected: Both 90 and 180 should be validated.
+
+    print("\n--- Test Case 2: Only 90 days allowed ---")
+    allowed2 = ['90']
+    validate_and_deduplicate_chart_buffers(test_buffers1, "ALOS_Test2", allowed2)
+    # Expected: Only 90 should be validated, 180 skipped.
+
+    print("\n--- Test Case 3: Invalid buffer and not allowed day ---")
+    test_buffers3 = {'90': dummy_buffer_90, '30': dummy_buffer_30_invalid, '180': dummy_buffer_180}
+    allowed3 = ['90', '180']
+    validate_and_deduplicate_chart_buffers(test_buffers3, "Patient_Test3", allowed3)
+    # Expected: 90 and 180 validated, 30 skipped (invalid buffer).
+
+    print("\n--- Test Case 4: Duplicate day key (though dicts inherently handle this by overwrite) ---")
+    # Python dicts don't allow true duplicate keys in literal, last one wins.
+    # This part of the function's logic (if days_str in processed_days:) is more for
+    # scenarios where keys might be generated in a loop and could accidentally repeat.
+    test_buffers4 = {}
+    test_buffers4['90'] = dummy_buffer_90
+    # If there was a way to force {'90':val1, '90':val2}, the logic would be tested.
+    # Instead, we simulate chart_buffers_dict being built in a way that might lead to this,
+    # but practically, the processed_days check ensures each unique day string is added once.
+    print("Simulating a scenario where '90' might appear multiple times before this function if keys were not unique.")
+    # This test case isn't perfect for dicts, but shows the processed_days logic.
+    # A more realistic test would be to call it with a dict that already has a key, then another call.
+    
+    print("\n--- Test Case 5: Integer keys in input dict ---")
+    test_buffers5 = {90: dummy_buffer_90, 180: dummy_buffer_180, '30': dummy_buffer_90} # Mix of int and str keys
+    allowed5 = ['90', '180'] # Allowed days are strings
+    validate_and_deduplicate_chart_buffers(test_buffers5, "DualAxis_Test5", allowed5)
+    # Expected: 90 and 180 (from int keys) should be validated and converted to string keys. '30' also validated.
 
 # --- PDF生成メイン関数 ---
 def create_pdf(
