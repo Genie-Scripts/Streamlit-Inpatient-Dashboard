@@ -617,7 +617,6 @@ def create_pdf(
 
     # グラフ描画ループ
     for graph_name, buffers_dict, title_template in all_graph_types_to_process:
-    for graph_name, buffers_dict, title_template in all_graph_types_to_process:
         print(f"📄 ADDING GRAPHS TO PDF ({title_prefix}): Processing graph type '{graph_name}'")
         print(f"  Buffers_dict for '{graph_name}': Keys = {list(buffers_dict.keys())}")
         
