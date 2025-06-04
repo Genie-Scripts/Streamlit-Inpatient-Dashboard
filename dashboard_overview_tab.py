@@ -1,4 +1,156 @@
-# dashboard_overview_tab.py (高度目標値管理対応版)
+def load_target_values_csv():
+    """
+    従来目標値CSVファイル読み込み機能（3列構造対応）
+    
+    Returns:
+        pd.DataFrame: 目標値データフレーム
+    """
+    if 'target_values_df' not in st.session_state:
+        st.session_state.target_values_df = pd.DataFrame()
+    
+    with st.sidebar.expander("🎯 従来目標値設定", expanded=False):
+        st.markdown("##### 従来目標値CSVファイル読み込み")
+        
+        # CSVファイルアップロード
+        uploaded_target_file = st.file_uploader(
+            "従来目標値CSVファイルを選択",
+            type=['csv'],
+            key="target_values_upload",
+            help="部門コード、目標値、区分が含まれるCSVファイルをアップロード"
+        )
+        
+        if uploaded_target_file is not None:
+            try:
+                target_df = pd.read_csv(uploaded_target_file, encoding='utf-8-sig')
+                
+                # 必要な列の確認
+                required_columns = ['部門コード', '目標値', '区分']
+                missing_columns = [col for col in required_columns if col not in target_df.columns]
+                
+                if missing_columns:
+                    st.error(f"❌ 必要な列が見つかりません: {', '.join(missing_columns)}")
+                    st.info("必要な列: 部門コード, 目標値, 区分")
+                    st.info(f"読み込まれた列: {', '.join(target_df.columns.tolist())}")
+                else:
+                    # データ型の変換とクリーニング
+                    target_df['部門コード'] = target_df['部門コード'].astype(str).str.strip()
+                    target_df['目標値'] = pd.to_numeric(target_df['目標値'], errors='coerce')
+                    target_df['区分'] = target_df['区分'].astype(str).str.strip()
+                    
+                    # 無効なデータの除去
+                    invalid_rows = target_df['目標値'].isna()
+                    if invalid_rows.any():
+                        st.warning(f"⚠️ 無効な目標値を持つ行を除外しました: {invalid_rows.sum()}行")
+                        target_df = target_df[~invalid_rows]
+                    
+                    st.session_state.target_values_df = target_df
+                    st.success(f"✅ 従来目標値データを読み込みました（{len(target_df)}行）")
+                    
+                    # データプレビュー
+                    st.markdown("**📋 従来目標値データプレビュー**")
+                    st.dataframe(target_df.head(10), use_container_width=True)
+                        
+            except Exception as e:
+                st.error(f"❌ CSVファイル読み込みエラー: {e}")
+                logger.error(f"従来目標値CSVファイル読み込みエラー: {e}", exc_info=True)
+        
+        # 現在の読み込み状況表示
+        if not st.session_state.target_values_df.empty:
+            current_df = st.session_state.target_values_df
+            st.info(f"📊 現在の従来目標値データ: {len(current_df)}行")
+            
+            # クリアボタン
+            if st.button("🗑️ 従来目標値データクリア", key="clear_target_values"):
+                st.session_state.target_values_df = pd.DataFrame()
+                st.success("従来目標値データをクリアしました")
+                st.rerun()
+        else:
+            st.info("従来目標値データが設定されていません")
+            
+            # サンプルCSVのダウンロードリンク
+            st.markdown("**📁 従来サンプルCSVファイル**")
+            
+            # 基本サンプル
+            sample_basic = """部門コード,目標値,区分
+内科,45.0,全日
+外科,35.0,全日
+ICU,12.5,全日
+A1病棟,30.0,全日"""
+            
+            st.download_button(
+                label="📄 従来サンプルCSVダウンロード",
+                data=sample_basic,
+                file_name="sample_targets_legacy.csv",
+                mime="text/csv",
+                help="従来の3列構造目標値設定のサンプル"
+            )
+    
+    return st.session_state.target_values_df
+
+def get_target_value_for_filter(target_df, filter_config, metric_type="日平均在院患者数"):
+    """
+    従来フィルター設定に基づいて目標値を取得
+    
+    Args:
+        target_df (pd.DataFrame): 従来目標値データフレーム
+        filter_config (dict): フィルター設定
+        metric_type (str): メトリクス種別
+        
+    Returns:
+        tuple: (目標値, 部門名, 達成対象期間)
+    """
+    if target_df.empty or not filter_config:
+        logger.info("従来目標値取得: 目標値データまたはフィルター設定が空です")
+        return None, None, None
+    
+    try:
+        filter_mode = filter_config.get('filter_mode', '全体')
+        logger.info(f"従来目標値取得: フィルターモード = {filter_mode}")
+        
+        if filter_mode == "特定診療科":
+            selected_depts = filter_config.get('selected_depts', [])
+            logger.info(f"選択された診療科: {selected_depts}")
+            
+            if selected_depts:
+                # 複数診療科選択時は合計目標値を計算
+                total_target = 0
+                matched_depts = []
+                
+                for dept in selected_depts:
+                    # 診療科の目標値を検索（区分も考慮）
+                    dept_targets = target_df[
+                        (target_df['部門コード'].astype(str).str.strip() == str(dept).strip()) & 
+                        (target_df['区分'].astype(str).str.strip() == '全日')
+                    ]
+                    logger.info(f"診療科 '{dept}' の従来目標値検索結果: {len(dept_targets)}件")
+                    
+                    if not dept_targets.empty:
+                        target_value = float(dept_targets['目標値'].iloc[0])
+                        total_target += target_value
+                        matched_depts.append(dept)
+                        logger.info(f"診療科 '{dept}' の従来目標値: {target_value}")
+                    else:
+                        logger.warning(f"診療科 '{dept}' の従来目標値が見つかりません")
+                
+                if matched_depts:
+                    dept_names = ', '.join(matched_depts)
+                    logger.info(f"従来合計目標値: {total_target}, 対象診療科: {dept_names}")
+                    return total_target, f"診療科: {dept_names}", "全日"
+                else:
+                    logger.warning("選択された診療科の従来目標値が1件も見つかりませんでした")
+        
+        elif filter_mode == "特定病棟":
+            selected_wards = filter_config.get('selected_wards', [])
+            logger.info(f"選択された病棟: {selected_wards}")
+            
+            if selected_wards:
+                # 複数病棟選択時は合計目標値を計算
+                total_target = 0
+                matched_wards = []
+                
+                for ward in selected_wards:
+                    # 病棟の目標値を検索（区分も考慮）
+                    war# dashboard_overview_tab.py (高度目標値管理対応版)
 # 既存のdashboard_overview_tab.pyと置き換えてください
 
 import streamlit as st
@@ -143,8 +295,9 @@ def load_advanced_target_values_csv():
                     st.session_state.advanced_target_values_df = target_df
                     st.success(f"✅ 高度目標値データを読み込みました（{len(target_df)}行）")
                     
-                    # データプレビューとデバッグ情報
-                    with st.expander("📋 高度目標値データプレビュー", expanded=False):
+                    # データプレビューとデバッグ情報（expanderを使わずに直接表示）
+                    st.markdown("**📋 高度目標値データプレビュー**")
+                    with st.container():
                         st.dataframe(target_df.head(10), use_container_width=True)
                         
                         # 統計情報表示
@@ -195,116 +348,56 @@ def load_advanced_target_values_csv():
             if current_filter_config:
                 filter_mode = current_filter_config.get('filter_mode', '全体')
                 
-                # デバッグ情報表示セクション
-                with st.expander("🔍 目標値マッチングデバッグ", expanded=False):
-                    st.markdown("**現在のフィルター設定**")
-                    st.write(f"フィルターモード: {filter_mode}")
-                    
-                    if filter_mode == "特定診療科":
-                        selected_depts = current_filter_config.get('selected_depts', [])
-                        st.write(f"選択された診療科: {selected_depts}")
-                        
-                        if selected_depts:
-                            st.markdown("**マッチング結果**")
-                            for dept in selected_depts:
-                                # 完全一致検索
-                                exact_matches = current_df[
-                                    ((current_df['部門コード'].astype(str).str.strip() == str(dept).strip()) | 
-                                     (current_df['部門名'].astype(str).str.strip() == str(dept).strip())) &
-                                    (current_df['部門種別'].astype(str).str.strip().isin(['診療科', '部門', '科']))
-                                ]
-                                
-                                if not exact_matches.empty:
-                                    st.success(f"✅ '{dept}' → {len(exact_matches)}件の目標値")
-                                    for _, row in exact_matches.iterrows():
-                                        st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
-                                else:
-                                    st.warning(f"❌ '{dept}' → マッチなし")
-                                    
-                                    # 部分一致の候補を表示
-                                    partial_matches = current_df[
-                                        (current_df['部門コード'].astype(str).str.contains(str(dept), case=False, na=False)) |
-                                        (current_df['部門名'].astype(str).str.contains(str(dept), case=False, na=False))
-                                    ]
-                                    
-                                    if not partial_matches.empty:
-                                        st.info(f"📋 部分一致候補:")
-                                        for _, row in partial_matches.head(3).iterrows():
-                                            st.caption(f"　　{row['部門コード']} / {row['部門名']} ({row['部門種別']})")
-                                    else:
-                                        st.caption("　　候補なし")
-                    
-                    elif filter_mode == "特定病棟":
-                        selected_wards = current_filter_config.get('selected_wards', [])
-                        st.write(f"選択された病棟: {selected_wards}")
-                        
-                        if selected_wards:
-                            st.markdown("**マッチング結果**")
-                            for ward in selected_wards:
-                                exact_matches = current_df[
-                                    ((current_df['部門コード'].astype(str).str.strip() == str(ward).strip()) | 
-                                     (current_df['部門名'].astype(str).str.strip() == str(ward).strip())) &
-                                    (current_df['部門種別'].astype(str).str.strip().isin(['病棟', '部門', '棟']))
-                                ]
-                                
-                                if not exact_matches.empty:
-                                    st.success(f"✅ '{ward}' → {len(exact_matches)}件の目標値")
-                                    for _, row in exact_matches.iterrows():
-                                        st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
-                                else:
-                                    st.warning(f"❌ '{ward}' → マッチなし")
-                    
-                    else:  # 全体
-                        st.write("全体フィルター選択中")
-                        hospital_targets = current_df[
-                            (current_df['部門種別'].astype(str).str.strip().isin(['全体', '病院全体', '病院', '全体'])) |
-                            (current_df['部門コード'].astype(str).str.strip().isin(['病院全体', '全体', 'HOSPITAL', 'ALL']))
-                        ]
-                        
-                        if not hospital_targets.empty:
-                            st.success(f"✅ 病院全体目標値: {len(hospital_targets)}件")
-                            for _, row in hospital_targets.iterrows():
-                                st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
-                        else:
-                            st.warning("❌ 病院全体の目標値が見つかりません")
+                # デバッグ情報表示セクション（メイン画面で表示するため、ここではシンプルに）
+                st.markdown("**🔍 マッチング確認**")
                 
                 if filter_mode == "特定診療科":
                     selected_depts = current_filter_config.get('selected_depts', [])
                     if selected_depts:
-                        # 診療科の目標値確認
-                        matched_targets = []
                         for dept in selected_depts:
-                            dept_targets = current_df[
-                                (current_df['部門コード'] == dept) | 
-                                (current_df['部門名'] == dept)
+                            # 完全一致検索
+                            exact_matches = current_df[
+                                ((current_df['部門コード'].astype(str).str.strip() == str(dept).strip()) | 
+                                 (current_df['部門名'].astype(str).str.strip() == str(dept).strip())) &
+                                (current_df['部門種別'].astype(str).str.strip().isin(['診療科', '部門', '科']))
                             ]
-                            if not dept_targets.empty:
-                                matched_targets.extend(dept_targets['指標タイプ'].unique())
-                        
-                        if matched_targets:
-                            st.success(f"🎯 診療科目標値: {len(set(matched_targets))}種類の指標")
-                            st.caption(f"対象指標: {', '.join(set(matched_targets))}")
-                        else:
-                            st.warning(f"⚠️ 選択診療科の目標値が見つかりません")
+                            
+                            if not exact_matches.empty:
+                                st.success(f"✅ '{dept}' → {len(exact_matches)}件の目標値")
+                                for _, row in exact_matches.iterrows():
+                                    st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
+                            else:
+                                st.warning(f"❌ '{dept}' → マッチなし")
                 
                 elif filter_mode == "特定病棟":
                     selected_wards = current_filter_config.get('selected_wards', [])
                     if selected_wards:
-                        # 病棟の目標値確認
-                        matched_targets = []
                         for ward in selected_wards:
-                            ward_targets = current_df[
-                                (current_df['部門コード'] == ward) | 
-                                (current_df['部門名'] == ward)
+                            exact_matches = current_df[
+                                ((current_df['部門コード'].astype(str).str.strip() == str(ward).strip()) | 
+                                 (current_df['部門名'].astype(str).str.strip() == str(ward).strip())) &
+                                (current_df['部門種別'].astype(str).str.strip().isin(['病棟', '部門', '棟']))
                             ]
-                            if not ward_targets.empty:
-                                matched_targets.extend(ward_targets['指標タイプ'].unique())
-                        
-                        if matched_targets:
-                            st.success(f"🎯 病棟目標値: {len(set(matched_targets))}種類の指標")
-                            st.caption(f"対象指標: {', '.join(set(matched_targets))}")
-                        else:
-                            st.warning(f"⚠️ 選択病棟の目標値が見つかりません")
+                            
+                            if not exact_matches.empty:
+                                st.success(f"✅ '{ward}' → {len(exact_matches)}件の目標値")
+                                for _, row in exact_matches.iterrows():
+                                    st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
+                            else:
+                                st.warning(f"❌ '{ward}' → マッチなし")
+                
+                else:  # 全体
+                    hospital_targets = current_df[
+                        (current_df['部門種別'].astype(str).str.strip().isin(['全体', '病院全体', '病院', '全体'])) |
+                        (current_df['部門コード'].astype(str).str.strip().isin(['病院全体', '全体', 'HOSPITAL', 'ALL']))
+                    ]
+                    
+                    if not hospital_targets.empty:
+                        st.success(f"✅ 病院全体目標値: {len(hospital_targets)}件")
+                        for _, row in hospital_targets.iterrows():
+                            st.caption(f"　　{row['指標タイプ']} ({row['期間区分']}): {row['目標値']}{row['単位']}")
+                    else:
+                        st.warning("❌ 病院全体の目標値が見つかりません")
             
             # クリアボタン
             if st.button("🗑️ 高度目標値データクリア", key="clear_advanced_target_values"):
@@ -828,9 +921,22 @@ def display_advanced_metrics_layout(metrics, selected_period_info, prev_year_met
                 help="昨年度同期間の日平均新入院患者数との比較"
             )
 
-    # 詳細情報セクション
+    # 詳細情報セクション（expanderの代わりにcollapseボタン付きコンテナを使用）
     st.markdown("---")
-    with st.expander("📋 高度目標値設定詳細", expanded=False):
+    
+    # セッション状態でexpanderの開閉を管理
+    if 'target_details_expanded' not in st.session_state:
+        st.session_state.target_details_expanded = False
+    
+    # 開閉ボタン
+    col_toggle, col_dummy = st.columns([3, 7])
+    with col_toggle:
+        if st.button("📋 高度目標値設定詳細" + (" ▼" if st.session_state.target_details_expanded else " ▶"), 
+                     key="toggle_target_details"):
+            st.session_state.target_details_expanded = not st.session_state.target_details_expanded
+    
+    # 詳細情報の表示/非表示
+    if st.session_state.target_details_expanded:
         if advanced_targets:
             detail_col1, detail_col2 = st.columns(2)
             
