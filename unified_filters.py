@@ -90,14 +90,13 @@ class UnifiedFilterManager:
             st.session_state[f"{self.session_prefix}period_mode"] = period_mode # radioの戻り値をセッションに反映
 
             if period_mode == "プリセット期間":
-                # 「先月」プリセットを追加
-                preset_options = ["直近1ヶ月", "先月", "直近3ヶ月", "直近6ヶ月", "直近12ヶ月", "今年度", "全期間"]
+                preset_options = ["直近1ヶ月", "直近3ヶ月", "直近6ヶ月", "直近12ヶ月", "今年度", "全期間"]
                 # セッションステートから現在のプリセット選択を取得
                 current_preset = st.session_state.get(f"{self.session_prefix}preset", "直近3ヶ月")
                 try:
                     preset_index = preset_options.index(current_preset)
                 except ValueError:
-                    preset_index = 2 # デフォルト "直近3ヶ月" (インデックスが変わったので2に変更)
+                    preset_index = 1 # デフォルト "直近3ヶ月"
 
                 preset_widget_key = f"{self.session_prefix}preset_widget"
                 preset = st.selectbox(
@@ -105,7 +104,7 @@ class UnifiedFilterManager:
                     preset_options,
                     index=preset_index, # セッションの値に基づいてindexを設定
                     key=preset_widget_key,
-                    help="よく使われる期間から選択（今年度は4月1日～直近データまで、先月は前月1日～前月末日）",
+                    help="よく使われる期間から選択（今年度は4月1日～直近データまで）",
                     on_change=self.update_session_from_widget,
                     args=(f"{self.session_prefix}preset", preset_widget_key)
                 )
@@ -307,35 +306,6 @@ class UnifiedFilterManager:
             logger.error(f"年度開始日の計算でエラー: {e}", exc_info=True)
             return None
 
-    def _get_last_month_dates(self, reference_date):
-        """
-        先月の開始日と終了日を取得
-        
-        Args:
-            reference_date (pd.Timestamp): 基準となる日付
-            
-        Returns:
-            tuple: (先月1日, 先月末日)
-        """
-        try:
-            # 先月の1日を計算
-            if reference_date.month == 1:
-                # 1月の場合は前年の12月
-                last_month_start = pd.Timestamp(year=reference_date.year - 1, month=12, day=1)
-            else:
-                # その他の月は単純に1ヶ月戻る
-                last_month_start = pd.Timestamp(year=reference_date.year, month=reference_date.month - 1, day=1)
-            
-            # 先月の末日を計算
-            # 今月の1日から1日戻ると先月末になる
-            this_month_start = pd.Timestamp(year=reference_date.year, month=reference_date.month, day=1)
-            last_month_end = this_month_start - pd.Timedelta(days=1)
-            
-            return last_month_start.normalize(), last_month_end.normalize()
-        except Exception as e:
-            logger.error(f"先月の日付計算でエラー: {e}", exc_info=True)
-            return None, None
-
     def _get_preset_dates(self, df, preset):
         """プリセット期間に基づく開始日・終了日の計算"""
         try:
@@ -347,18 +317,6 @@ class UnifiedFilterManager:
 
             if preset == "直近1ヶ月": 
                 start_date = max_date - pd.Timedelta(days=29) # 30日間なので29を引く
-            elif preset == "先月":
-                # 先月の1日～先月末日
-                last_month_start, last_month_end = self._get_last_month_dates(max_date)
-                if last_month_start is None or last_month_end is None:
-                    logger.error("先月の日付計算に失敗しました")
-                    start_date = min_date # フォールバック
-                    return start_date.normalize(), max_date.normalize()
-                else:
-                    # データ範囲内に調整
-                    start_date = max(last_month_start, min_date)
-                    end_date = min(last_month_end, max_date)
-                    return start_date.normalize(), end_date.normalize()
             elif preset == "直近3ヶ月": 
                 start_date = max_date - pd.Timedelta(days=89) # 90日間なので89を引く
             elif preset == "直近6ヶ月": 
