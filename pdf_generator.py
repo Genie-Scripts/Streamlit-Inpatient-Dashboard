@@ -617,13 +617,34 @@ def create_pdf(
 
     # グラフ描画ループ
     for graph_name, buffers_dict, title_template in all_graph_types_to_process:
-        # 日数でソートして描画順を固定 (例: 90日 -> 180日)
-        sorted_buffer_items = sorted(buffers_dict.items(), key=lambda item: int(item[0]))
+    for graph_name, buffers_dict, title_template in all_graph_types_to_process:
+        print(f"📄 ADDING GRAPHS TO PDF ({title_prefix}): Processing graph type '{graph_name}'")
+        print(f"  Buffers_dict for '{graph_name}': Keys = {list(buffers_dict.keys())}")
         
+        try:
+            valid_items_for_sorting = []
+            for k, v_buf in buffers_dict.items():
+                try:
+                    int(k) 
+                    valid_items_for_sorting.append((k,v_buf))
+                except ValueError:
+                    print(f"  ⚠️ SORTING WARNING ({title_prefix}, {graph_name}): Key '{k}' cannot be converted to int, skipping for sort.")
+            
+            if not valid_items_for_sorting:
+                print(f"  ⚠️ NO VALID ITEMS FOR SORTING ({title_prefix}, {graph_name})")
+                continue
+
+            sorted_buffer_items = sorted(valid_items_for_sorting, key=lambda item: int(item[0]))
+            print(f"  Sorted items for '{graph_name}': {[item[0] for item in sorted_buffer_items]}")
+        except Exception as e_sort:
+            print(f"  ❌ SORTING ERROR ({title_prefix}, {graph_name}): {e_sort}. Original keys: {list(buffers_dict.keys())}")
+            continue
+
         for days_val_str, chart_buffer_bytes in sorted_buffer_items:
+            print(f"    Attempting to add '{graph_name}' for '{days_val_str}' days.")
             if graphs_on_current_page >= max_graphs_per_page:
                 elements.append(PageBreak())
-                elements.append(Paragraph(report_title_text, ja_style)) # 新しいページにもタイトル
+                elements.append(Paragraph(report_title_text, ja_style))
                 elements.append(Spacer(1, 5*mm))
                 graphs_on_current_page = 0
                 
@@ -631,23 +652,40 @@ def create_pdf(
                 try:
                     if isinstance(chart_buffer_bytes, bytes):
                         img_buf = BytesIO(chart_buffer_bytes)
-                    elif hasattr(chart_buffer_bytes, 'getvalue'): # BytesIOオブジェクトの場合
-                        img_buf = chart_buffer_bytes
+                    elif hasattr(chart_buffer_bytes, 'getvalue'): 
+                        img_buf = chart_buffer_bytes 
                     else:
-                        print(f"❌ {graph_name}グラフ ({days_val_str}日) のバッファタイプが不正: {type(chart_buffer_bytes)}")
+                        print(f"    ❌ SKIPPING '{graph_name}' ('{days_val_str}' days): Invalid buffer type {type(chart_buffer_bytes)}")
                         continue
                     
-                    img_buf.seek(0)
+                    img_buf.seek(0) # BytesIOのポインタを先頭に
+                    
+                    # === ここからデバッグ用: 画像ファイル保存 ===
+                    # ファイル名にPIDを追加して、並列処理でもファイルが上書きされないようにする
+                    pid_for_filename = os.getpid() 
+                    safe_title_prefix = "".join(c if c.isalnum() else '_' for c in title_prefix) # ファイル名安全化
+                    debug_image_filename = f"debug_pid{pid_for_filename}_{safe_title_prefix}_{graph_name.replace('/', '_')}_{days_val_str}.png"
+                    try:
+                        with open(debug_image_filename, "wb") as f_debug_img:
+                            f_debug_img.write(img_buf.getvalue()) # getvalue()で全バイト取得
+                        print(f"    🖼️ DEBUG IMAGE SAVED: {debug_image_filename}")
+                    except Exception as e_debug_save:
+                        print(f"    ⚠️ DEBUG IMAGE SAVE FAILED for {debug_image_filename}: {e_debug_save}")
+                    img_buf.seek(0) # 保存後、再度ポインタを先頭に戻す (Imageで使われるため)
+                    # === デバッグ用ここまで ===
+
                     elements.append(Paragraph(title_template % days_val_str, ja_heading2))
                     elements.append(Spacer(1, 1.5*mm))
-                    elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)) # 高さを調整
+                    elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
                     elements.append(Spacer(1, 3*mm))
                     graphs_on_current_page += 1
-                    # print(f"✅ {graph_name}グラフ追加 ({title_prefix}): {days_val_str}日")
+                    print(f"    ✅ Added '{graph_name}' for '{days_val_str}' days successfully.")
                 except Exception as e:
-                    print(f"❌ {graph_name}グラフ追加エラー ({title_prefix}, {days_val_str}日): {e}")
+                    print(f"    ❌ ERROR adding '{graph_name}' for '{days_val_str}' days to PDF: {e}")
+                    import traceback
+                    print(traceback.format_exc()) # エラーの詳細を出力
             else:
-                print(f"ℹ️ {graph_name}グラフのバッファが空です ({title_prefix}, {days_val_str}日)")
+                print(f"    ℹ️ SKIPPING '{graph_name}' ('{days_val_str}' days): Buffer is empty/None.")
         
         # 最後のグラフセットの後で、次の要素がテーブルならページブレークを入れる判断を改善
         if graphs_on_current_page > 0 and graph_name != all_graph_types_to_process[-1][0] : # 最後のグラフタイプでなければ
