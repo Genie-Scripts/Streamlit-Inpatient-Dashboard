@@ -10,6 +10,9 @@ import tempfile
 import gc
 import psutil
 import re # re モジュールをインポート
+import psutil
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+import threading
 
 # forecast モジュールの関数
 from forecast import generate_filtered_summaries, create_forecast_dataframe
@@ -26,7 +29,296 @@ from pdf_generator import (
     get_chart_cache as get_pdf_gen_main_process_cache # メインプロセス用キャッシュ取得
 )
 # chart.py からはここでは直接インポートしない (pdf_generator経由で使用)
+# 既存のインポート文の後に追加
+OPTIMAL_CHUNK_SIZE = 3
+MAX_MEMORY_USAGE_PERCENT = 85
+GRAPH_THREAD_WORKERS = 4
 
+class SystemOptimizer:
+    """システムリソースを監視・最適化するクラス"""
+    
+    @staticmethod
+    def get_optimal_config():
+        """システム環境に基づく最適設定を計算"""
+        cpu_cores = multiprocessing.cpu_count()
+        memory_gb = psutil.virtual_memory().total / (1024**3)
+        
+        # 最適なワーカー数を計算
+        optimal_workers = min(
+            cpu_cores - 1,  # CPUコア数 - 1
+            int(memory_gb / 1.5),  # メモリGB / 1.5
+            8  # 最大8ワーカー
+        )
+        
+        # チャンクサイズの最適化
+        chunk_size = max(2, min(OPTIMAL_CHUNK_SIZE, optimal_workers))
+        
+        return {
+            'max_workers': max(1, optimal_workers),
+            'chunk_size': chunk_size,
+            'memory_limit': MAX_MEMORY_USAGE_PERCENT,
+            'cpu_cores': cpu_cores,
+            'memory_gb': memory_gb
+        }
+    
+    @staticmethod
+    def check_memory_usage():
+        """現在のメモリ使用率をチェック"""
+        return psutil.virtual_memory().percent
+    
+    @staticmethod
+    def force_cleanup():
+        """強制的なメモリクリーンアップ"""
+        gc.collect()
+
+class DataOptimizer:
+    """データ処理を最適化するクラス"""
+    
+    @staticmethod
+    def optimize_dataframe(df):
+        """データフレームのメモリ使用量を最適化"""
+        if df.empty:
+            return df
+        
+        try:
+            optimized_df = df.copy()
+            
+            # カテゴリカル変換
+            categorical_columns = ['診療科名', '病棟コード']
+            for col in categorical_columns:
+                if col in optimized_df.columns and optimized_df[col].dtype == 'object':
+                    optimized_df[col] = optimized_df[col].astype('category')
+            
+            # 数値型の最適化
+            numeric_cols = optimized_df.select_dtypes(include=['int64', 'float64']).columns
+            for col in numeric_cols:
+                if col != '日付':  # 日付列は除外
+                    if optimized_df[col].dtype == 'int64':
+                        col_min = optimized_df[col].min()
+                        col_max = optimized_df[col].max()
+                        
+                        if col_min >= 0 and col_max <= 4294967295:
+                            optimized_df[col] = optimized_df[col].astype('uint32')
+                        elif col_min >= -2147483648 and col_max <= 2147483647:
+                            optimized_df[col] = optimized_df[col].astype('int32')
+                    elif optimized_df[col].dtype == 'float64':
+                        optimized_df[col] = optimized_df[col].astype('float32')
+            
+            return optimized_df
+            
+        except Exception as e:
+            print(f"Data optimization failed: {e}")
+            return df
+
+def batch_generate_pdfs_hyper_optimized(
+    df_main, mode="all", landscape=False, target_data_main=None,
+    progress_callback=None, max_workers=None, fast_mode=True
+):
+    """ハイパー最適化されたPDF一括生成"""
+    start_time = time.time()
+    
+    if progress_callback:
+        progress_callback(0.01, "システム最適化中...")
+    
+    # システム設定の最適化
+    config = SystemOptimizer.get_optimal_config()
+    
+    if progress_callback:
+        progress_callback(0.03, f"データ最適化中... (CPU:{config['cpu_cores']}コア, RAM:{config['memory_gb']:.1f}GB)")
+    
+    # データの最適化
+    df_optimized = DataOptimizer.optimize_dataframe(df_main)
+    
+    # 一時ディレクトリの準備
+    temp_dir = tempfile.mkdtemp()
+    df_path = os.path.join(temp_dir, "hyper_optimized_data.feather")
+    df_optimized.reset_index(drop=True).to_feather(df_path)
+    
+    target_data_path = None
+    if target_data_main is not None and not target_data_main.empty:
+        target_data_path = os.path.join(temp_dir, "target_data.feather")
+        target_data_main.reset_index(drop=True).to_feather(target_data_path)
+    
+    try:
+        # 最新日付の取得
+        summaries = generate_filtered_summaries(df_optimized)
+        latest_date = summaries.get("latest_date", pd.Timestamp.now().normalize())
+        
+        if progress_callback:
+            progress_callback(0.08, "タスク最適化中...")
+        
+        # タスク定義作成（既存の関数を再利用）
+        task_definitions_list = []
+        
+        # 表示名マッピング準備（既存コードと同じロジック）
+        dept_display_map = {}
+        ward_display_map = {}
+        if target_data_main is not None and not target_data_main.empty and '部門コード' in target_data_main.columns and '部門名' in target_data_main.columns:
+            for _, row in target_data_main.iterrows():
+                if pd.notna(row['部門コード']) and pd.notna(row['部門名']):
+                    code_str = str(row['部門コード'])
+                    dept_display_map[code_str] = row['部門名']
+                    ward_display_map[code_str] = row['部門名']
+        
+        unique_wards = df_optimized["病棟コード"].astype(str).unique()
+        for ward in unique_wards:
+            if ward not in ward_display_map:
+                match = re.match(r'0*(\d+)([A-Za-z]*)', ward)
+                if match: ward_display_map[ward] = f"{match.group(1)}{match.group(2)}病棟"
+                else: ward_display_map[ward] = ward
+        
+        unique_depts = df_optimized["診療科名"].unique()
+        for dept in unique_depts:
+            if dept not in dept_display_map:
+                dept_display_map[dept] = dept
+
+        if mode == "all_only_filter":
+            task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体"})
+        else:
+            if mode == "all":
+                task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体"})
+            if mode == "all" or mode == "dept":
+                for dept_val in unique_depts:
+                    task_definitions_list.append({
+                        "type": "dept", "value": dept_val, 
+                        "display_name": dept_display_map.get(dept_val, dept_val)
+                    })
+            if mode == "all" or mode == "ward":
+                for ward_val in unique_wards:
+                    task_definitions_list.append({
+                        "type": "ward", "value": ward_val, 
+                        "display_name": ward_display_map.get(ward_val, ward_val)
+                    })
+
+        if not task_definitions_list:
+            return BytesIO()
+        
+        if progress_callback:
+            progress_callback(0.15, f"ハイパー並列処理開始 ({len(task_definitions_list)}タスク, {config['max_workers']}ワーカー)")
+        
+        # 最適なワーカー数の決定
+        if max_workers is None:
+            max_workers = config['max_workers']
+        
+        # ZIP作成とデータ収集
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zipf:
+            date_suffix = latest_date.strftime("%Y%m%d")
+            completed_count = 0
+            total_tasks = len(task_definitions_list)
+            
+            # チャンク単位で処理
+            chunk_size = config['chunk_size']
+            task_chunks = [task_definitions_list[i:i + chunk_size] for i in range(0, len(task_definitions_list), chunk_size)]
+            
+            # ProcessPoolExecutorでハイパー並列処理
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                # 全チャンクを並列でスケジューリング
+                future_to_chunk = {}
+                for chunk in task_chunks:
+                    future = executor.submit(
+                        process_chunk_hyper_optimized,
+                        chunk, df_path, landscape, target_data_path,
+                        fast_mode, latest_date.isoformat()
+                    )
+                    future_to_chunk[future] = chunk
+                
+                # 結果の並列収集とZIP書き込み
+                for future in as_completed(future_to_chunk):
+                    try:
+                        chunk_results = future.result(timeout=900)  # 15分タイムアウト
+                        
+                        for result in chunk_results:
+                            if result:
+                                title, pdf_content = result
+                                if pdf_content and hasattr(pdf_content, 'getbuffer') and pdf_content.getbuffer().nbytes > 0:
+                                    # 安全なファイル名生成
+                                    safe_title = "".join(
+                                        c if c.isalnum() or c in ['-', '_'] else '_'
+                                        for c in title
+                                    )
+                                    
+                                    # フォルダ構造
+                                    folder = ""
+                                    if "診療科別" in title:
+                                        folder = "診療科別/"
+                                    elif "病棟別" in title:
+                                        folder = "病棟別/"
+                                    
+                                    filename = f"{folder}入院患者数予測_{safe_title}_{date_suffix}.pdf"
+                                    zipf.writestr(filename, pdf_content.getvalue())
+                                    pdf_content.close()
+                                    completed_count += 1
+                        
+                        # リアルタイムプログレス更新
+                        if progress_callback and total_tasks > 0:
+                            progress = int(15 + (completed_count / total_tasks) * 80)
+                            progress_callback(
+                                min(95, progress) / 100.0,
+                                f"ハイパー処理中: {completed_count}/{total_tasks} 完了 (メモリ: {SystemOptimizer.check_memory_usage():.1f}%)"
+                            )
+                    
+                    except Exception as e:
+                        print(f"Hyper processing error for chunk: {e}")
+                        continue
+        
+        end_time = time.time()
+        duration = end_time - start_time
+        
+        if progress_callback:
+            rate = completed_count / duration if duration > 0 else 0
+            progress_callback(
+                1.0,
+                f"ハイパー処理完了! {completed_count}件のPDFを{duration:.1f}秒で生成 ({rate:.1f}件/秒)"
+            )
+        
+        zip_buffer.seek(0)
+        return zip_buffer
+        
+    except Exception as e:
+        print(f"Hyper optimized batch generation error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        if progress_callback:
+            progress_callback(1.0, f"エラー: {str(e)}")
+        return BytesIO()
+    
+    finally:
+        # 徹底的なクリーンアップ
+        try:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
+        SystemOptimizer.force_cleanup()
+
+def process_chunk_hyper_optimized(task_chunk, df_path, landscape, target_data_path, fast_mode, latest_date_str):
+    """ハイパー最適化されたチャンク処理"""
+    results = []
+    
+    try:
+        for task in task_chunk:
+            result = process_pdf_in_worker_revised(
+                df_path, task["type"], task["value"], task["display_name"],
+                latest_date_str, landscape, target_data_path, fast_mode,
+                None, None, None  # グラフバッファは後で最適化
+            )
+            
+            if result:
+                results.append(result)
+            
+            # メモリ使用量チェック
+            if SystemOptimizer.check_memory_usage() > MAX_MEMORY_USAGE_PERCENT:
+                SystemOptimizer.force_cleanup()
+        
+        return results
+        
+    except Exception as e:
+        print(f"Chunk processing error: {e}")
+        return []
+    finally:
+        gc.collect()
+        
 def process_pdf_in_worker_revised(
     df_path, filter_type, filter_value, display_name, latest_date_str, landscape,
     target_data_path=None, reduced_graphs=True,
@@ -327,18 +619,23 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
 
 def batch_generate_pdfs_full_optimized(
     df, mode="all", landscape=False, target_data=None, 
-    progress_callback=None, use_parallel=True, max_workers=None, fast_mode=True
+    progress_callback=None, use_parallel=True, max_workers=None, fast_mode=True,
+    use_hyper_optimization=False  # 新しいパラメータを追加
     ):
     if df is None or df.empty:
         if progress_callback: progress_callback(0, "データがありません。")
-        # st.warning("分析対象のデータフレームが空です。") # ここではUI要素は使わない
         print("batch_generate_pdfs_full_optimized: 分析対象のデータフレームが空です。")
         return BytesIO()
 
     if progress_callback: progress_callback(0, "処理開始...")
     
     if use_parallel:
-        return batch_generate_pdfs_mp_optimized(df, mode, landscape, target_data, progress_callback, max_workers, fast_mode)
+        if use_hyper_optimization:
+            # ハイパー最適化版を使用
+            return batch_generate_pdfs_hyper_optimized(df, mode, landscape, target_data, progress_callback, max_workers, fast_mode)
+        else:
+            # 既存の最適化版を使用
+            return batch_generate_pdfs_mp_optimized(df, mode, landscape, target_data, progress_callback, max_workers, fast_mode)
     else:
         # シングルプロセス版 (フォールバックまたはデバッグ用)
         print("Parallel processing disabled. Using sequential PDF generation.")

@@ -41,9 +41,19 @@ try:
     from dow_analysis_tab import display_dow_analysis_tab
     from individual_analysis_tab import display_individual_analysis_tab
     from analysis_tabs import create_individual_analysis_section
-
+    from optimization_config import (
+        OptimizationConfig, PerformanceMonitor, 
+        get_system_recommendations, estimate_processing_time
+    )
+    OPTIMIZATION_AVAILABLE = True
     FORECAST_AVAILABLE = True
 except ImportError as e:
+    print(f"最適化設定モジュールのインポートに失敗しました: {e}")
+    OPTIMIZATION_AVAILABLE = False
+    OptimizationConfig = None
+    PerformanceMonitor = None
+    get_system_recommendations = lambda: {"recommendations": ["最適化設定が利用できません"]}
+    estimate_processing_time = lambda *args, **kwargs: "時間計算不可"
     problematic_imports = e
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
     st.error(traceback.format_exc())
@@ -678,6 +688,46 @@ def create_sidebar():
     create_sidebar_target_file_status()
 
     return True
+
+    if OPTIMIZATION_AVAILABLE:
+        with st.sidebar.expander("🚀 システム最適化情報", expanded=False):
+            try:
+                system_info = get_system_recommendations()
+                
+                # システム情報表示
+                st.markdown("**💻 システム情報**")
+                sys_info = system_info['system_info']['system']
+                st.write(f"• CPUコア数: {sys_info['cpu_cores']}コア")
+                st.write(f"• 総メモリ: {sys_info['memory_gb']:.1f}GB")
+                st.write(f"• 利用可能メモリ: {sys_info['available_memory_gb']:.1f}GB")
+                
+                # 最適化設定表示
+                opt_info = system_info['system_info']['optimization']
+                st.markdown("**⚙️ 最適化設定**")
+                st.write(f"• 推奨ワーカー数: {opt_info['max_workers']}")
+                st.write(f"• チャンクサイズ: {opt_info['chunk_size']}")
+                st.write(f"• メモリ制限: {opt_info['memory_limit']}%")
+                
+                # 推奨事項表示
+                st.markdown("**💡 推奨事項**")
+                for rec in system_info['recommendations']:
+                    st.info(rec)
+                
+                # パフォーマンス予測例
+                if st.checkbox("📊 パフォーマンス予測を表示", key="show_performance_prediction"):
+                    test_tasks = st.slider("タスク数（予測用）", 1, 50, 10, key="perf_test_tasks")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        hyper_est = estimate_processing_time(test_tasks, use_hyper=True, fast_mode=True)
+                        st.success(f"🚀 {hyper_est}")
+                    
+                    with col2:
+                        standard_est = estimate_processing_time(test_tasks, use_hyper=False, fast_mode=True)
+                        st.info(f"📦 {standard_est}")
+                
+            except Exception as e:
+                st.error(f"システム情報の取得に失敗: {e}")
 
 def create_management_dashboard_tab():
     st.header("📊 主要指標")

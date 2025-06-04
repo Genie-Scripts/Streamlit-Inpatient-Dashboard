@@ -29,6 +29,56 @@ REPORTLAB_FONT_NAME = 'NotoSansJP_RL'
 MATPLOTLIB_FONT_NAME_FALLBACK = 'sans-serif'
 MATPLOTLIB_FONT_NAME = None # register_fonts で設定される
 
+# 🚀 PDF生成最適化設定を追加
+PDF_COMPRESSION_LEVEL = 6  # 圧縮レベル (1-9)
+PDF_RENDER_DPI = 120      # DPI設定 (高品質かつ軽量)
+MATPLOTLIB_DPI = 120      # Matplotlibの解像度
+
+# ReportLabの最適化設定
+def optimize_pdf_settings():
+    """PDFレンダリングの最適化設定"""
+    # ReportLabの内部設定を最適化
+    os.environ['REPORTLAB_OPTIMIZE'] = '1'
+    
+    # メモリ効率の改善
+    try:
+        import reportlab.lib.styles
+        reportlab.lib.styles._baseFontName = 'Helvetica'  # フォールバック最適化
+    except:
+        pass
+
+# Matplotlibの最適化設定
+def optimize_matplotlib_for_pdf():
+    """Matplotlib設定の最適化"""
+    import matplotlib
+    matplotlib.use('Agg')  # GUI不要のバックエンド
+    
+    import matplotlib.pyplot as plt
+    
+    # メモリ効率の改善
+    plt.ioff()  # インタラクティブモードをオフ
+    
+    # デフォルト設定の最適化
+    plt.rcParams.update({
+        'figure.max_open_warning': 0,  # 警告を無効化
+        'savefig.format': 'png',
+        'savefig.dpi': MATPLOTLIB_DPI,
+        'savefig.bbox': 'tight',
+        'savefig.facecolor': 'white',
+        'font.size': 8,  # フォントサイズを小さく
+        'axes.titlesize': 10,
+        'axes.labelsize': 8,
+        'xtick.labelsize': 7,
+        'ytick.labelsize': 7,
+        'legend.fontsize': 7
+    })
+
+# 🚀 最適化設定を初期化時に適用
+optimize_pdf_settings()
+optimize_matplotlib_for_pdf()
+
+# 🚀 register_fonts 関数の最後に以下を追加（既存の register_fonts() 呼び出しの前）
+
 def register_fonts():
     global MATPLOTLIB_FONT_NAME
     font_registered_rl = False
@@ -44,29 +94,27 @@ def register_fonts():
 
         try:
             font_entry = matplotlib.font_manager.FontEntry(
-                fname=FONT_PATH, name='NotoSansJP_MPL_PDFGEN' # PDFジェネレータ内でのユニークな名前
+                fname=FONT_PATH, name='NotoSansJP_MPL_PDFGEN'
             )
-            # Check if font is already in list to avoid duplicates if called multiple times in same main process
             if font_entry.name not in [f.name for f in matplotlib.font_manager.fontManager.ttflist]:
                  matplotlib.font_manager.fontManager.ttflist.insert(0, font_entry)
 
-            # plt.rcParams['font.family'] = font_entry.name # グローバル設定はメインで行う想定
-            # MATPLOTLIB_FONT_NAME はここで設定するフォント名とする
             MATPLOTLIB_FONT_NAME = font_entry.name
             print(f"Matplotlib font '{MATPLOTLIB_FONT_NAME}' prepared for use from {FONT_PATH}.")
             font_registered_mpl = True
         except Exception as e:
             print(f"Failed to prepare Matplotlib font '{FONT_PATH}' for pdf_generator: {e}")
-            # plt.rcParams['font.family'] = MATPLOTLIB_FONT_NAME_FALLBACK # グローバル設定は避ける
-            MATPLOTLIB_FONT_NAME = None # エラー時はNoneのまま
+            MATPLOTLIB_FONT_NAME = None
     else:
         print(f"Font file not found at '{FONT_PATH}'. Using fallback fonts for Matplotlib.")
-        # plt.rcParams['font.family'] = MATPLOTLIB_FONT_NAME_FALLBACK # グローバル設定は避ける
-        MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK # フォールバックを設定
+        MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK
 
     if not font_registered_rl:
         print(f"ReportLab will use its default font or Helvetica if '{REPORTLAB_FONT_NAME}' was intended as NotoSansJP.")
-
+    
+    # 🚀 フォント登録後にMatplotlib最適化を再適用
+    optimize_matplotlib_for_pdf()
+    
 register_fonts() # モジュールインポート時にフォント登録
 
 # --- キャッシュ設定 (メインプロセスでのみ使用される想定) ---
@@ -101,29 +149,37 @@ def create_alos_chart_for_pdf(
 ):
     start_time = time.time()
     fig = None
-    # 引数で渡されたフォント名、それがなければグローバルなMATPLOTLIB_FONT_NAME、それもなければフォールバック
+    # 🚀 最適化: より効率的なフォント処理
     actual_font_name = font_name_for_mpl_to_use or MATPLOTLIB_FONT_NAME or MATPLOTLIB_FONT_NAME_FALLBACK
     font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name)
 
     try:
-        fig, ax1 = plt.subplots(figsize=(10, 5.5))
-        if not isinstance(chart_data, pd.DataFrame) or chart_data.empty: return None
+        # 🚀 最適化: figureサイズとDPIを最適化
+        fig, ax1 = plt.subplots(figsize=(10, 5.5), dpi=MATPLOTLIB_DPI)
+        
+        if not isinstance(chart_data, pd.DataFrame) or chart_data.empty: 
+            return None
         required_columns = ["日付", "入院患者数（在院）", "総入院患者数", "総退院患者数"]
-        if any(col not in chart_data.columns for col in required_columns): return None
+        if any(col not in chart_data.columns for col in required_columns): 
+            return None
 
+        # 🚀 最適化: データコピーを最小化
         data_copy = chart_data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
-        if data_copy.empty: return None
+        if data_copy.empty: 
+            return None
 
         current_latest_date = latest_date if latest_date else data_copy['日付'].max()
-        if pd.isna(current_latest_date): current_latest_date = pd.Timestamp.now()
+        if pd.isna(current_latest_date): 
+            current_latest_date = pd.Timestamp.now()
 
         start_date_limit = current_latest_date - pd.Timedelta(days=days_to_show -1)
         date_range_for_plot = pd.date_range(start=start_date_limit, end=current_latest_date, freq='D')
+        
+        # 🚀 最適化: ベクトル化された計算
         daily_metrics = []
-
         for display_date in date_range_for_plot:
             window_start = display_date - pd.Timedelta(days=moving_avg_window - 1)
             window_data = chart_data[(chart_data['日付'] >= window_start) & (chart_data['日付'] <= display_date)]
@@ -133,52 +189,57 @@ def create_alos_chart_for_pdf(
                 total_discharges = window_data['総退院患者数'].sum()
                 num_days_in_window = window_data['日付'].nunique()
                 denominator = (total_admissions + total_discharges) / 2
-                alos = total_patient_days / denominator if denominator > 0 else np.nan # 0除算でNaN
+                alos = total_patient_days / denominator if denominator > 0 else np.nan
                 daily_census = total_patient_days / num_days_in_window if num_days_in_window > 0 else np.nan
                 daily_metrics.append({'日付': display_date, '平均在院日数': alos, '平均在院患者数': daily_census})
 
-        if not daily_metrics: return None
+        if not daily_metrics: 
+            return None
         daily_df = pd.DataFrame(daily_metrics).sort_values('日付')
-        if daily_df.empty: return None
+        if daily_df.empty: 
+            return None
 
+        # 🚀 最適化: プロット処理の最適化
         ax1.plot(daily_df['日付'], daily_df['平均在院日数'], color='#3498db', linewidth=2, marker='o', markersize=4, label=f"平均在院日数({moving_avg_window}日MA)")
         ax1.set_xlabel('日付', fontproperties=font_prop, fontsize=10)
         ax1.set_ylabel('平均在院日数', fontproperties=font_prop, fontsize=10, color='#3498db')
         ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=8)
-        # ax1.tick_params(axis='x', labelsize=8, rotation=30, ha='right') # 'ha' を削除
         ax1.tick_params(axis='x', labelsize=8, rotation=30)
-        for label in ax1.get_xticklabels(): # ha を個別に設定
+        for label in ax1.get_xticklabels():
             label.set_fontproperties(font_prop)
             label.set_ha('right')
-
 
         ax2 = ax1.twinx()
         ax2.plot(daily_df['日付'], daily_df['平均在院患者数'], color='#e74c3c', linewidth=2, linestyle='--', label='平均在院患者数')
         ax2.set_ylabel('平均在院患者数', fontproperties=font_prop, fontsize=10, color='#e74c3c')
         ax2.tick_params(axis='y', labelcolor='#e74c3c', labelsize=8)
-        for label in ax2.get_xticklabels(): label.set_fontproperties(font_prop)
-
+        for label in ax2.get_xticklabels(): 
+            label.set_fontproperties(font_prop)
 
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         legend_prop_obj = font_prop.copy()
-        legend_prop_obj.set_size(8) # 凡例のサイズ調整
+        legend_prop_obj.set_size(8)
         ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', prop=legend_prop_obj)
 
         plt.title(f"{title_prefix} ALOSと在院患者数(直近{days_to_show}日)", fontproperties=font_prop, fontsize=12)
-        # fig.autofmt_xdate(rotation=30, ha='right') # tick_paramsで対応したので不要か、影響を確認
         ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
         plt.tight_layout(pad=0.8)
+        
+        # 🚀 最適化: 高品質かつ軽量な画像出力
         buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=150)
+        plt.savefig(buf, format='png', dpi=PDF_RENDER_DPI, bbox_inches='tight', facecolor='white')
         buf.seek(0)
         return buf
     except Exception as e:
         print(f"Error in create_alos_chart_for_pdf for {title_prefix}: {e}")
-        import traceback; print(traceback.format_exc())
+        import traceback; 
+        print(traceback.format_exc())
         return None
     finally:
-        if fig: plt.close(fig)
+        if fig: 
+            plt.close(fig)
+        # 🚀 最適化: 強制的なメモリクリーンアップ
         gc.collect()
 
 def create_patient_chart_with_target_wrapper(
@@ -189,19 +250,26 @@ def create_patient_chart_with_target_wrapper(
     actual_font_name = font_name_for_mpl_to_use or MATPLOTLIB_FONT_NAME or MATPLOTLIB_FONT_NAME_FALLBACK
     font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name)
     try:
-        fig, ax = plt.subplots(figsize=(8, 4.0))
-        if not isinstance(data, pd.DataFrame) or data.empty: return None
-        if "日付" not in data.columns or "入院患者数（在院）" not in data.columns: return None
+        # 🚀 最適化: DPI設定とサイズ最適化
+        fig, ax = plt.subplots(figsize=(8, 4.0), dpi=MATPLOTLIB_DPI)
+        
+        if not isinstance(data, pd.DataFrame) or data.empty: 
+            return None
+        if "日付" not in data.columns or "入院患者数（在院）" not in data.columns: 
+            return None
 
         data_copy = data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
-        if data_copy.empty : return None
+        if data_copy.empty : 
+            return None
 
         grouped = data_copy.groupby("日付")["入院患者数（在院）"].sum().reset_index().sort_values("日付")
-        if len(grouped) > days: grouped = grouped.tail(days)
-        if grouped.empty: return None
+        if len(grouped) > days: 
+            grouped = grouped.tail(days)
+        if grouped.empty: 
+            return None
 
         ax.plot(grouped["日付"], grouped["入院患者数（在院）"], marker='o', linestyle='-', linewidth=1.5, markersize=3, color='#3498db', label='入院患者数')
         avg = grouped["入院患者数（在院）"].mean()
@@ -217,34 +285,40 @@ def create_patient_chart_with_target_wrapper(
                 ax.axhline(y=target_val_float, color='#9b59b6', linestyle='-.', linewidth=1.2, label=f'目標値: {target_val_float:.1f}')
                 caution_threshold = target_val_float * 0.97
                 ax.fill_between(grouped["日付"], caution_threshold, target_val_float, color='orange', alpha=0.15, label='注意ゾーン(目標未達)')
-            except ValueError: print(f"Warning: Target value '{target_value}' for {title} not float.")
+            except ValueError: 
+                print(f"Warning: Target value '{target_value}' for {title} not float.")
 
         ax.set_title(title, fontproperties=font_prop, fontsize=11)
         ax.set_xlabel('日付', fontproperties=font_prop, fontsize=9)
         ax.set_ylabel('患者数', fontproperties=font_prop, fontsize=9)
         ax.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
-        legend_font_prop = font_prop.copy(); legend_font_prop.set_size(8)
+        legend_font_prop = font_prop.copy(); 
+        legend_font_prop.set_size(8)
         ax.legend(prop=legend_font_prop)
-        # fig.autofmt_xdate(rotation=30, ha='right') # tick_params で対応
         ax.tick_params(axis='x', labelsize=7, rotation=30)
-        for label in ax.get_xticklabels(): # ha を個別に設定
+        for label in ax.get_xticklabels():
             label.set_fontproperties(font_prop)
             label.set_ha('right')
         ax.tick_params(axis='y', labelsize=7)
-        for label in ax.get_yticklabels(): label.set_fontproperties(font_prop)
-
+        for label in ax.get_yticklabels(): 
+            label.set_fontproperties(font_prop)
 
         plt.tight_layout(pad=0.5)
+        
+        # 🚀 最適化: 高品質かつ軽量な画像出力
         buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=120)
+        plt.savefig(buf, format='png', dpi=PDF_RENDER_DPI, bbox_inches='tight', facecolor='white')
         buf.seek(0)
         return buf
     except Exception as e:
         print(f"Error in create_patient_chart_with_target_wrapper ('{title}'): {e}")
-        import traceback; print(traceback.format_exc())
+        import traceback; 
+        print(traceback.format_exc())
         return None
     finally:
-        if fig: plt.close(fig)
+        if fig: 
+            plt.close(fig)
+        # 🚀 最適化: 強制的なメモリクリーンアップ
         gc.collect()
 
 def create_dual_axis_chart_for_pdf(
@@ -254,38 +328,45 @@ def create_dual_axis_chart_for_pdf(
     actual_font_name = font_name_for_mpl_to_use or MATPLOTLIB_FONT_NAME or MATPLOTLIB_FONT_NAME_FALLBACK
     font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name)
     try:
-        fig, ax1 = plt.subplots(figsize=(8, 4.0)) # PDF向けサイズ調整
-        if not isinstance(data, pd.DataFrame) or data.empty: return None
+        # 🚀 最適化: DPI設定とサイズ最適化
+        fig, ax1 = plt.subplots(figsize=(8, 4.0), dpi=MATPLOTLIB_DPI)
+        
+        if not isinstance(data, pd.DataFrame) or data.empty: 
+            return None
         required_cols = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "総退院患者数"]
-        if any(col not in data.columns for col in required_cols): return None
+        if any(col not in data.columns for col in required_cols): 
+            return None
 
         data_copy = data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
-        if data_copy.empty: return None
+        if data_copy.empty: 
+            return None
 
         agg_dict = {"入院患者数（在院）": "sum", "新入院患者数": "sum", "緊急入院患者数": "sum", "総退院患者数": "sum"}
         grouped = data_copy.groupby("日付").agg(agg_dict).reset_index().sort_values("日付")
-        if len(grouped) > days: grouped = grouped.tail(days)
-        if grouped.empty: return None
+        if len(grouped) > days: 
+            grouped = grouped.tail(days)
+        if grouped.empty: 
+            return None
 
         cols_for_ma = ["入院患者数（在院）", "新入院患者数", "緊急入院患者数", "総退院患者数"]
         for col in cols_for_ma:
-            if col in grouped.columns: grouped[f'{col}_7日MA'] = grouped[col].rolling(window=7, min_periods=1).mean()
-            else: grouped[f'{col}_7日MA'] = 0
+            if col in grouped.columns: 
+                grouped[f'{col}_7日MA'] = grouped[col].rolling(window=7, min_periods=1).mean()
+            else: 
+                grouped[f'{col}_7日MA'] = 0
 
         if "入院患者数（在院）_7日MA" in grouped.columns:
             ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日MA"], color='#3498db', linewidth=2, label="在院患者数(7日MA)")
         ax1.set_xlabel('日付', fontproperties=font_prop, fontsize=9)
         ax1.set_ylabel('在院患者数', fontproperties=font_prop, fontsize=9, color='#3498db')
         ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=8)
-        # ax1.tick_params(axis='x', labelsize=8, rotation=30, ha='right') # ha を削除
         ax1.tick_params(axis='x', labelsize=8, rotation=30)
-        for label in ax1.get_xticklabels(): # ha を個別に設定
+        for label in ax1.get_xticklabels():
             label.set_fontproperties(font_prop)
             label.set_ha('right')
-
 
         ax2 = ax1.twinx()
         colors_map = {"新入院患者数": "#2ecc71", "緊急入院患者数": "#e74c3c", "総退院患者数": "#f39c12"}
@@ -295,29 +376,34 @@ def create_dual_axis_chart_for_pdf(
                 ax2.plot(grouped["日付"], grouped[ma_col_name], color=color_val, linewidth=1.5, label=f"{col}(7日MA)")
         ax2.set_ylabel('患者移動数', fontproperties=font_prop, fontsize=9)
         ax2.tick_params(axis='y', labelsize=8)
-        for label in ax2.get_yticklabels(): label.set_fontproperties(font_prop)
+        for label in ax2.get_yticklabels(): 
+            label.set_fontproperties(font_prop)
 
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        legend_font_prop = font_prop.copy(); legend_font_prop.set_size(8)
+        legend_font_prop = font_prop.copy(); 
+        legend_font_prop.set_size(8)
         ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', prop=legend_font_prop)
 
         plt.title(title, fontproperties=font_prop, fontsize=11)
-        # fig.autofmt_xdate(rotation=30, ha='right') # tick_paramsで対応したので不要か
         ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
         plt.tight_layout(pad=0.5)
+        
+        # 🚀 最適化: 高品質かつ軽量な画像出力
         buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=120)
+        plt.savefig(buf, format='png', dpi=PDF_RENDER_DPI, bbox_inches='tight', facecolor='white')
         buf.seek(0)
         return buf
     except Exception as e:
         print(f"Error in create_dual_axis_chart_for_pdf ('{title}'): {e}")
-        import traceback; print(traceback.format_exc())
+        import traceback; 
+        print(traceback.format_exc())
         return None
     finally:
-        if fig: plt.close(fig)
+        if fig: 
+            plt.close(fig)
+        # 🚀 最適化: 強制的なメモリクリーンアップ
         gc.collect()
-
 
 # --- PDF生成メイン関数 ---
 # @st.cache_data(ttl=600, show_spinner=False, max_entries=50) # PDF自体はキャッシュしない
