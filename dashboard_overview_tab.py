@@ -309,14 +309,17 @@ HCU,15.0,全日
 整形外科,30.0,全日
 小児科,25.0,全日
 A1病棟,28.0,全日
-A2病棟,32.0,全日"""
+A2病棟,32.0,全日
+全体,560.0,全日
+病院全体,560.0,全日
+総合,560.0,全日"""
             
             st.download_button(
                 label="📄 基本サンプルCSVダウンロード",
                 data=sample_basic,
                 file_name="sample_targets_basic.csv",
                 mime="text/csv",
-                help="基本的な目標値設定のサンプル"
+                help="基本的な目標値設定のサンプル（全体目標値を含む）"
             )
             
             # 詳細サンプル（平日・休日別）
@@ -334,21 +337,25 @@ HCU,15.0,全日
 A1病棟,30.0,平日
 A1病棟,24.0,休日
 A2病棟,34.0,平日
-A2病棟,28.0,休日"""
+A2病棟,28.0,休日
+全体,580.0,平日
+全体,480.0,休日
+病院全体,580.0,平日
+病院全体,480.0,休日"""
             
             st.download_button(
                 label="📄 平日・休日別サンプルCSVダウンロード",
                 data=sample_detailed,
                 file_name="sample_targets_detailed.csv",
                 mime="text/csv",
-                help="平日・休日別目標値設定のサンプル"
+                help="平日・休日別目標値設定のサンプル（全体目標値を含む）"
             )
     
     return st.session_state.target_values_df
 
 def get_target_value_for_filter(target_df, filter_config, metric_type="日平均在院患者数"):
     """
-    フィルター設定に基づいて目標値を取得（修正版）
+    フィルター設定に基づいて目標値を取得（全体フィルター対応版）
     
     Args:
         target_df (pd.DataFrame): 目標値データフレーム
@@ -371,8 +378,35 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
         if not target_df.empty:
             logger.info(f"目標値データの部門コード: {target_df['部門コード'].unique().tolist()}")
         
-        # 新しい統一フィルター構造に対応
-        if filter_mode == "特定診療科":
+        # 全体フィルターの場合、全体目標値を探す（新機能）
+        if filter_mode == "全体":
+            # 全体目標値のキーワードリスト
+            overall_keywords = ['全体', '病院全体', '総合', '病院', '合計', 'ALL', 'TOTAL']
+            
+            for keyword in overall_keywords:
+                overall_targets = target_df[
+                    (target_df['部門コード'].astype(str).str.strip().str.contains(keyword, na=False, case=False)) & 
+                    (target_df['区分'].astype(str).str.strip() == '全日')
+                ]
+                logger.info(f"全体目標値検索 '{keyword}': {len(overall_targets)}件")
+                
+                if not overall_targets.empty:
+                    target_value = float(overall_targets['目標値'].iloc[0])
+                    logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword})")
+                    return target_value, f"全体 ({keyword})", "全日"
+            
+            # 全体目標値が見つからない場合、部門別目標値の合計を計算
+            all_dept_targets = target_df[target_df['区分'].astype(str).str.strip() == '全日']
+            if not all_dept_targets.empty:
+                total_target = all_dept_targets['目標値'].sum()
+                dept_count = len(all_dept_targets)
+                logger.info(f"部門別目標値の合計を全体目標値として使用: {total_target} ({dept_count}部門)")
+                return total_target, f"全体 (部門別合計: {dept_count}部門)", "全日"
+            
+            logger.warning("全体目標値が見つかりませんでした")
+        
+        # 特定診療科フィルターの場合
+        elif filter_mode == "特定診療科":
             selected_depts = filter_config.get('selected_depts', [])
             logger.info(f"選択された診療科: {selected_depts}")
             
@@ -411,6 +445,7 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 else:
                     logger.warning("選択された診療科の目標値が1件も見つかりませんでした")
         
+        # 特定病棟フィルターの場合
         elif filter_mode == "特定病棟":
             selected_wards = filter_config.get('selected_wards', [])
             logger.info(f"選択された病棟: {selected_wards}")
@@ -450,15 +485,13 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 else:
                     logger.warning("選択された病棟の目標値が1件も見つかりませんでした")
         
-        else:
-            logger.info("全体フィルターのため目標値は適用されません")
-        
         return None, None, None
         
     except Exception as e:
         logger.error(f"目標値取得エラー: {e}", exc_info=True)
         return None, None, None
 
+# 以下、その他の関数は元のコードと同じ
 def calculate_previous_year_same_period(df_original, current_end_date, current_filter_config):
     """
     昨年度同期間のデータを計算（統一フィルター適用）
@@ -789,6 +822,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
         **🎯 目標値設定**: CSVファイルで部門別目標値を設定可能
         - 部門コード、目標値、区分（全日/平日/休日）を含むCSVファイル
         - フィルター選択時に該当部門の目標値を自動参照
+        - 全体フィルター時は「全体」「病院全体」等のキーワードで全体目標値を検索
         - 達成率の自動計算・表示
         """)
 
@@ -931,7 +965,8 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                         1. **部門コードの完全一致**: 目標値CSVの「部門コード」は実データと完全一致する必要があります
                         2. **文字列のクリーニング**: スペースや改行文字を確認してください
                         3. **区分の確認**: 目標値CSVの「区分」列に「全日」が設定されているか確認してください
-                        4. **CSVの再作成**: サンプルCSVをダウンロードして参考にしてください
+                        4. **全体目標値**: 全体フィルター時は「全体」「病院全体」等のキーワードで検索されます
+                        5. **CSVの再作成**: サンプルCSVをダウンロードして参考にしてください
                         """)
         else:
             logger.info("目標値データが読み込まれていません")
@@ -984,6 +1019,7 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         target_info
     )
 
+# 以下、残りの関数は元のコードと同じ...
 def display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     """
     トレンドグラフ表示専用関数（既存）
