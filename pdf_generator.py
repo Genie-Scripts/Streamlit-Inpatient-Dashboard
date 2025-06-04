@@ -405,20 +405,54 @@ def create_dual_axis_chart_for_pdf(
         # 🚀 最適化: 強制的なメモリクリーンアップ
         gc.collect()
 
+# --- 🔧 グラフ重複検証関数を追加 ---
+def validate_and_deduplicate_chart_buffers(chart_buffers_dict, chart_type_name, allowed_days=None):
+    """グラフバッファの検証と重複除去"""
+    if not chart_buffers_dict:
+        return {}
+    
+    validated_buffers = {}
+    processed_days = set()
+    
+    # 許可された日数のチェック
+    if allowed_days:
+        allowed_days_set = set(str(d) for d in allowed_days)
+    else:
+        allowed_days_set = None
+    
+    for days_str, buffer_data in chart_buffers_dict.items():
+        days_str = str(days_str)
+        
+        # 重複チェック
+        if days_str in processed_days:
+            print(f"⚠️ {chart_type_name}: 重複する日数をスキップ - {days_str}日")
+            continue
+        
+        # 許可された日数のチェック
+        if allowed_days_set and days_str not in allowed_days_set:
+            print(f"⚠️ {chart_type_name}: 許可されていない日数をスキップ - {days_str}日")
+            continue
+        
+        # バッファの有効性チェック
+        if buffer_data and (isinstance(buffer_data, bytes) or hasattr(buffer_data, 'getvalue')):
+            validated_buffers[days_str] = buffer_data
+            processed_days.add(days_str)
+            print(f"✅ {chart_type_name}: 有効なバッファを追加 - {days_str}日")
+        else:
+            print(f"❌ {chart_type_name}: 無効なバッファをスキップ - {days_str}日")
+    
+    return validated_buffers
+
 # --- PDF生成メイン関数 ---
-# @st.cache_data(ttl=600, show_spinner=False, max_entries=50) # PDF自体はキャッシュしない
 def create_pdf(
     forecast_df, df_weekday, df_holiday, df_all_avg=None,
     chart_data=None, title_prefix="全体", latest_date=None,
     target_data=None, filter_code="全体", graph_days=None,
     alos_chart_buffers=None,
     patient_chart_buffers=None,
-    dual_axis_chart_buffers=None
+    dual_axis_chart_buffers=None,
+    allowed_graph_days=None  # 🔧 新パラメータ追加
 ):
-    # ... (既存のcreate_pdf関数の中身は、グラフ生成部分をバッファ使用に置き換える以外は変更なし) ...
-    # ... (ただし、内部で get_chart_cache や chart_cache.get/[] を使っている箇所があれば、それは削除するか、
-    #      メインプロセスでのみ機能することを理解した上で条件分岐する)
-    # 以下は、バッファ使用を前提とした修正後の構成例
     pdf_start_time = time.time()
     elements = []
     buffer = BytesIO()
@@ -447,51 +481,172 @@ def create_pdf(
     elements.append(Spacer(1, 5*mm))
     page_width = A4[0] - doc.leftMargin - doc.rightMargin
     graphs_on_current_page = 0
-    max_graphs_per_page = 2 # 縦向きの場合
+    max_graphs_per_page = 2
 
-    # ALOSグラフ (バッファから)
-    if alos_chart_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(alos_chart_buffers.items(), key=lambda item: int(item[0])):
-            if graphs_on_current_page >= max_graphs_per_page:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
-            if chart_buffer_bytes:
-                img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                elements.append(Paragraph(f"平均在院日数と平均在院患者数の推移（直近{days_val_str}日間）", ja_heading2))
-                elements.append(Spacer(1, 1.5*mm)); elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page += 1
-        if graphs_on_current_page > 0 and (patient_chart_buffers or dual_axis_chart_buffers): # 次にグラフが続くなら改ページ
-             elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
-
-    # 患者数推移グラフ (バッファから)
+    # 🔧 許可された日数の設定（デフォルトは90日のみ）
+    if allowed_graph_days is None:
+        allowed_graph_days = ["90"]  # デフォルトでFast Mode相当
+    allowed_graph_days = [str(d) for d in allowed_graph_days]
+    
+    print(f"🔧 PDF生成開始 - {title_prefix}")
+    print(f"🔧 許可されたグラフ日数: {allowed_graph_days}")
+    
+    # 🔧 グラフバッファの検証と重複除去
+    validated_alos_buffers = validate_and_deduplicate_chart_buffers(
+        alos_chart_buffers, "ALOSグラフ", allowed_graph_days
+    ) if alos_chart_buffers else {}
+    
+    validated_patient_buffers = {}
     if patient_chart_buffers:
-        type_name_map = {"all": "全日", "weekday": "平日", "holiday": "休日"}
-        for chart_type_key in ["all", "weekday", "holiday"]:
-            day_buffers_dict = patient_chart_buffers.get(chart_type_key, {})
-            if not day_buffers_dict: continue
-            display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
-            for days_val_str, chart_buffer_bytes in sorted(day_buffers_dict.items(), key=lambda item: int(item[0])):
-                if graphs_on_current_page >= max_graphs_per_page:
-                    elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
-                if chart_buffer_bytes:
-                    img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                    elements.append(Paragraph(f"{display_name} 入院患者数推移（直近{days_val_str}日間）", ja_heading2))
-                    elements.append(Spacer(1, 1.5*mm)); elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page += 1
-            if graphs_on_current_page > 0 and dual_axis_chart_buffers: # 次に二軸グラフが続くなら改ページ
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
-            elif graphs_on_current_page > 0 and not dual_axis_chart_buffers: # これでグラフ終わりならテーブル前に改ページ
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+        for chart_type, buffers in patient_chart_buffers.items():
+            validated_patient_buffers[chart_type] = validate_and_deduplicate_chart_buffers(
+                buffers, f"患者数推移グラフ({chart_type})", allowed_graph_days
+            )
+    
+    validated_dual_axis_buffers = validate_and_deduplicate_chart_buffers(
+        dual_axis_chart_buffers, "二軸グラフ", allowed_graph_days
+    ) if dual_axis_chart_buffers else {}
 
+    # 🔧 検証済みバッファの内容確認
+    print(f"🔧 検証済みALOSバッファ: {list(validated_alos_buffers.keys())}")
+    for chart_type, buffers in validated_patient_buffers.items():
+        if buffers:
+            print(f"🔧 検証済み患者数推移バッファ({chart_type}): {list(buffers.keys())}")
+    print(f"🔧 検証済み二軸バッファ: {list(validated_dual_axis_buffers.keys())}")
 
-    # 二軸グラフ (バッファから)
-    if dual_axis_chart_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(dual_axis_chart_buffers.items(), key=lambda item: int(item[0])):
+    # 🔧 ALOSグラフ (検証済みバッファから) - 重複チェック付き
+    if validated_alos_buffers:
+        # 🔧 ソートして一意性を確保
+        sorted_alos_items = sorted(validated_alos_buffers.items(), key=lambda item: int(item[0]))
+        added_alos_graphs = set()  # 追加済みのグラフを追跡
+        
+        for days_val_str, chart_buffer_bytes in sorted_alos_items:
+            if days_val_str in added_alos_graphs:
+                print(f"⚠️ 重複するALOSグラフをスキップ: {days_val_str}日")
+                continue
+                
             if graphs_on_current_page >= max_graphs_per_page:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Spacer(1, 5*mm))
+                graphs_on_current_page = 0
+                
             if chart_buffer_bytes:
-                img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                elements.append(Paragraph(f"患者移動と在院数の推移（直近{days_val_str}日間）", ja_heading2))
-                elements.append(Spacer(1, 1.5*mm)); elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page += 1
-        if graphs_on_current_page > 0: # これでグラフ終わりなのでテーブル前に改ページ
-            elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                try:
+                    if isinstance(chart_buffer_bytes, bytes):
+                        img_buf = BytesIO(chart_buffer_bytes)
+                    else:
+                        img_buf = chart_buffer_bytes
+                    img_buf.seek(0)
+                    elements.append(Paragraph(f"平均在院日数と平均在院患者数の推移（直近{days_val_str}日間）", ja_heading2))
+                    elements.append(Spacer(1, 1.5*mm))
+                    elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
+                    elements.append(Spacer(1, 3*mm))
+                    graphs_on_current_page += 1
+                    added_alos_graphs.add(days_val_str)
+                    print(f"✅ ALOSグラフ追加: {days_val_str}日")
+                except Exception as e:
+                    print(f"❌ ALOSグラフ追加エラー ({days_val_str}日): {e}")
+        
+        if graphs_on_current_page > 0 and (validated_patient_buffers or validated_dual_axis_buffers):
+             elements.append(PageBreak())
+             elements.append(Paragraph(report_title_text, ja_style))
+             elements.append(Spacer(1, 5*mm))
+             graphs_on_current_page = 0
+
+    # 🔧 患者数推移グラフ (検証済みバッファから) - 重複チェック付き
+    if validated_patient_buffers:
+        type_name_map = {"all": "全日", "weekday": "平日", "holiday": "休日"}
+        added_patient_graphs = set()  # 追加済みのグラフを追跡
+        
+        for chart_type_key in ["all", "weekday", "holiday"]:
+            day_buffers_dict = validated_patient_buffers.get(chart_type_key, {})
+            if not day_buffers_dict:
+                continue
+                
+            display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
+            # 🔧 ソートして一意性を確保
+            sorted_patient_items = sorted(day_buffers_dict.items(), key=lambda item: int(item[0]))
+            
+            for days_val_str, chart_buffer_bytes in sorted_patient_items:
+                graph_key = f"{chart_type_key}_{days_val_str}"
+                if graph_key in added_patient_graphs:
+                    print(f"⚠️ 重複する患者数推移グラフをスキップ: {chart_type_key} - {days_val_str}日")
+                    continue
+                    
+                if graphs_on_current_page >= max_graphs_per_page:
+                    elements.append(PageBreak())
+                    elements.append(Paragraph(report_title_text, ja_style))
+                    elements.append(Spacer(1, 5*mm))
+                    graphs_on_current_page = 0
+                    
+                if chart_buffer_bytes:
+                    try:
+                        if isinstance(chart_buffer_bytes, bytes):
+                            img_buf = BytesIO(chart_buffer_bytes)
+                        else:
+                            img_buf = chart_buffer_bytes
+                        img_buf.seek(0)
+                        elements.append(Paragraph(f"{display_name} 入院患者数推移（直近{days_val_str}日間）", ja_heading2))
+                        elements.append(Spacer(1, 1.5*mm))
+                        elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
+                        elements.append(Spacer(1, 3*mm))
+                        graphs_on_current_page += 1
+                        added_patient_graphs.add(graph_key)
+                        print(f"✅ 患者数推移グラフ追加: {chart_type_key} - {days_val_str}日")
+                    except Exception as e:
+                        print(f"❌ 患者数推移グラフ追加エラー ({chart_type_key} - {days_val_str}日): {e}")
+                    
+            if graphs_on_current_page > 0 and validated_dual_axis_buffers:
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Spacer(1, 5*mm))
+                graphs_on_current_page = 0
+            elif graphs_on_current_page > 0 and not validated_dual_axis_buffers:
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Spacer(1, 5*mm))
+                graphs_on_current_page = 0
+
+    # 🔧 二軸グラフ (検証済みバッファから) - 重複チェック付き
+    if validated_dual_axis_buffers:
+        # 🔧 ソートして一意性を確保
+        sorted_dual_items = sorted(validated_dual_axis_buffers.items(), key=lambda item: int(item[0]))
+        added_dual_graphs = set()  # 追加済みのグラフを追跡
+        
+        for days_val_str, chart_buffer_bytes in sorted_dual_items:
+            if days_val_str in added_dual_graphs:
+                print(f"⚠️ 重複する二軸グラフをスキップ: {days_val_str}日")
+                continue
+                
+            if graphs_on_current_page >= max_graphs_per_page:
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Spacer(1, 5*mm))
+                graphs_on_current_page = 0
+                
+            if chart_buffer_bytes:
+                try:
+                    if isinstance(chart_buffer_bytes, bytes):
+                        img_buf = BytesIO(chart_buffer_bytes)
+                    else:
+                        img_buf = chart_buffer_bytes
+                    img_buf.seek(0)
+                    elements.append(Paragraph(f"患者移動と在院数の推移（直近{days_val_str}日間）", ja_heading2))
+                    elements.append(Spacer(1, 1.5*mm))
+                    elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45))
+                    elements.append(Spacer(1, 3*mm))
+                    graphs_on_current_page += 1
+                    added_dual_graphs.add(days_val_str)
+                    print(f"✅ 二軸グラフ追加: {days_val_str}日")
+                except Exception as e:
+                    print(f"❌ 二軸グラフ追加エラー ({days_val_str}日): {e}")
+        
+        if graphs_on_current_page > 0:
+            elements.append(PageBreak())
+            elements.append(Paragraph(report_title_text, ja_style))
+            elements.append(Spacer(1, 5*mm))
+            graphs_on_current_page = 0
 
     # ... (以降のテーブル生成ロジックは変更なし) ...
     common_table_style_cmds = [
@@ -574,6 +729,8 @@ def create_pdf(
     doc.build(elements)
     buffer.seek(0)
     gc.collect()
+    
+    print(f"🔧 PDF生成完了 - {title_prefix} (所要時間: {time.time() - pdf_start_time:.2f}秒)")
     return buffer
 
 # create_landscape_pdf も同様に修正
@@ -583,9 +740,9 @@ def create_landscape_pdf(
     target_data=None, filter_code="全体", graph_days=None,
     alos_chart_buffers=None,
     patient_chart_buffers=None,
-    dual_axis_chart_buffers=None
+    dual_axis_chart_buffers=None,
+    allowed_graph_days=None  # 🔧 新パラメータ追加
 ):
-    # ... (create_pdf と同様のグラフバッファの利用方法、ページサイズとスタイルを横向き用に) ...
     pdf_start_time = time.time()
     elements = []
     buffer = BytesIO()
@@ -617,46 +774,94 @@ def create_landscape_pdf(
     graphs_on_current_page = 0
     max_graphs_per_page_land = 2
 
-    # ALOSグラフ (バッファから)
-    if alos_chart_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(alos_chart_buffers.items(), key=lambda item: int(item[0])):
+    # 🔧 許可された日数の設定（デフォルトは90日のみ）
+    if allowed_graph_days is None:
+        allowed_graph_days = ["90"]  # デフォルトでFast Mode相当
+    allowed_graph_days = [str(d) for d in allowed_graph_days]
+    
+    print(f"🔧 横向きPDF生成開始 - {title_prefix}")
+    print(f"🔧 許可されたグラフ日数: {allowed_graph_days}")
+    
+    # 🔧 グラフバッファの検証と重複除去
+    validated_alos_buffers = validate_and_deduplicate_chart_buffers(
+        alos_chart_buffers, "ALOSグラフ(横向き)", allowed_graph_days
+    ) if alos_chart_buffers else {}
+    
+    validated_patient_buffers = {}
+    if patient_chart_buffers:
+        for chart_type, buffers in patient_chart_buffers.items():
+            validated_patient_buffers[chart_type] = validate_and_deduplicate_chart_buffers(
+                buffers, f"患者数推移グラフ(横向き)({chart_type})", allowed_graph_days
+            )
+    
+    validated_dual_axis_buffers = validate_and_deduplicate_chart_buffers(
+        dual_axis_chart_buffers, "二軸グラフ(横向き)", allowed_graph_days
+    ) if dual_axis_chart_buffers else {}
+
+    # ALOSグラフ (検証済みバッファから)
+    if validated_alos_buffers:
+        for days_val_str, chart_buffer_bytes in sorted(validated_alos_buffers.items(), key=lambda item: int(item[0])):
             if graphs_on_current_page >= max_graphs_per_page_land:
                 elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
             if chart_buffer_bytes:
-                img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                elements.append(Paragraph(f"平均在院日数と平均在院患者数の推移（直近{days_val_str}日間）", ja_heading2_land))
-                elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
-        if graphs_on_current_page > 0 and (patient_chart_buffers or dual_axis_chart_buffers):
+                try:
+                    if isinstance(chart_buffer_bytes, bytes):
+                        img_buf = BytesIO(chart_buffer_bytes)
+                    else:
+                        img_buf = chart_buffer_bytes
+                    img_buf.seek(0)
+                    elements.append(Paragraph(f"平均在院日数と平均在院患者数の推移（直近{days_val_str}日間）", ja_heading2_land))
+                    elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
+                    print(f"✅ 横向きALOSグラフ追加: {days_val_str}日")
+                except Exception as e:
+                    print(f"❌ 横向きALOSグラフ追加エラー ({days_val_str}日): {e}")
+        if graphs_on_current_page > 0 and (validated_patient_buffers or validated_dual_axis_buffers):
             elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
 
-    # 患者数推移グラフ (バッファから)
-    if patient_chart_buffers:
+    # 患者数推移グラフ (検証済みバッファから)
+    if validated_patient_buffers:
         type_name_map = {"all": "全日", "weekday": "平日", "holiday": "休日"}
         for chart_type_key in ["all", "weekday", "holiday"]:
-            day_buffers_dict = patient_chart_buffers.get(chart_type_key, {})
+            day_buffers_dict = validated_patient_buffers.get(chart_type_key, {})
             if not day_buffers_dict: continue
             display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
             for days_val_str, chart_buffer_bytes in sorted(day_buffers_dict.items(), key=lambda item: int(item[0])):
                 if graphs_on_current_page >= max_graphs_per_page_land:
                     elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
                 if chart_buffer_bytes:
-                    img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                    elements.append(Paragraph(f"{display_name} 入院患者数推移（直近{days_val_str}日間）", ja_heading2_land))
-                    elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
-            if graphs_on_current_page > 0 and dual_axis_chart_buffers:
+                    try:
+                        if isinstance(chart_buffer_bytes, bytes):
+                            img_buf = BytesIO(chart_buffer_bytes)
+                        else:
+                            img_buf = chart_buffer_bytes
+                        img_buf.seek(0)
+                        elements.append(Paragraph(f"{display_name} 入院患者数推移（直近{days_val_str}日間）", ja_heading2_land))
+                        elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
+                        print(f"✅ 横向き患者数推移グラフ追加: {chart_type_key} - {days_val_str}日")
+                    except Exception as e:
+                        print(f"❌ 横向き患者数推移グラフ追加エラー ({chart_type_key} - {days_val_str}日): {e}")
+            if graphs_on_current_page > 0 and validated_dual_axis_buffers:
                 elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
-            elif graphs_on_current_page > 0 and not dual_axis_chart_buffers:
+            elif graphs_on_current_page > 0 and not validated_dual_axis_buffers:
                 elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
 
-    # 二軸グラフ (バッファから)
-    if dual_axis_chart_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(dual_axis_chart_buffers.items(), key=lambda item: int(item[0])):
+    # 二軸グラフ (検証済みバッファから)
+    if validated_dual_axis_buffers:
+        for days_val_str, chart_buffer_bytes in sorted(validated_dual_axis_buffers.items(), key=lambda item: int(item[0])):
             if graphs_on_current_page >= max_graphs_per_page_land:
                 elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
             if chart_buffer_bytes:
-                img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                elements.append(Paragraph(f"患者移動と在院数の推移（直近{days_val_str}日間）", ja_heading2_land))
-                elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
+                try:
+                    if isinstance(chart_buffer_bytes, bytes):
+                        img_buf = BytesIO(chart_buffer_bytes)
+                    else:
+                        img_buf = chart_buffer_bytes
+                    img_buf.seek(0)
+                    elements.append(Paragraph(f"患者移動と在院数の推移（直近{days_val_str}日間）", ja_heading2_land))
+                    elements.append(Spacer(1, 1*mm)); elements.append(Image(img_buf, width=content_width_land*0.9, height=(content_width_land*0.9)*0.4)); elements.append(Spacer(1, 2*mm)); graphs_on_current_page += 1
+                    print(f"✅ 横向き二軸グラフ追加: {days_val_str}日")
+                except Exception as e:
+                    print(f"❌ 横向き二軸グラフ追加エラー ({days_val_str}日): {e}")
         if graphs_on_current_page > 0:
             elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style_land)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page = 0
 
@@ -744,6 +949,8 @@ def create_landscape_pdf(
     doc.build(elements)
     buffer.seek(0)
     gc.collect()
+    
+    print(f"🔧 横向きPDF生成完了 - {title_prefix} (所要時間: {time.time() - pdf_start_time:.2f}秒)")
     return buffer
 
 
