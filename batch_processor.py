@@ -185,34 +185,73 @@ def create_display_mapping_with_new_target_format(target_data_main):
 
 def process_pdf_in_worker_revised(
     df_path, filter_type, filter_value, display_name, latest_date_str, landscape,
-    target_data_path=None, reduced_graphs=True,
+    target_data_path=None, reduced_graphs=True, # reduced_graphs は fast_mode と同義で使われている箇所あり
     alos_chart_buffers_payload=None,
     patient_chart_buffers_payload=None,
     dual_axis_chart_buffers_payload=None,
-    allowed_graph_days=None  # 🔧 新しいパラメータを追加
+    allowed_graph_days=None
     ):
-    """
-    ワーカープロセスでPDFを生成する (グラフバッファを受け取る)
-    """
     try:
         pid = os.getpid()
-        print(f"🔧 PID {pid}: Worker for '{display_name}' started")
-        
-        # 🔧 allowed_graph_daysのデフォルト設定
-        if allowed_graph_days is None:
-            allowed_graph_days = ["90"]  # デフォルトはFast Mode
-        
-        print(f"🔧 PID {pid}: 許可されたグラフ日数: {allowed_graph_days}")
-        
-        # 🔧 受信したグラフバッファの確認
+        # === ここからデバッグコードを追加 ===
+        print(f"🕵️ DEBUG WORKER (PID {pid}) FOR '{display_name}':")
+        print(f"  Landscape: {landscape}")
+        print(f"  Fast Mode (reduced_graphs): {reduced_graphs}")
+        print(f"  Received allowed_graph_days: {allowed_graph_days}")
+
         if alos_chart_buffers_payload:
-            print(f"🔧 PID {pid}: 受信したALOSバッファ: {list(alos_chart_buffers_payload.keys())}")
+            print(f"  Received ALOS buffers keys: {list(alos_chart_buffers_payload.keys())}")
+            # 必要であればバッファのサイズも確認 (コメントアウト)
+            # for day_key, buf in alos_chart_buffers_payload.items():
+            #     print(f"    ALOS '{day_key}' buffer size: {len(buf) if buf else 'None'}")
+        else:
+            print("  Received ALOS buffers: None")
+
         if patient_chart_buffers_payload:
+            print("  Received Patient buffers keys:")
             for chart_type, buffers in patient_chart_buffers_payload.items():
                 if buffers:
-                    print(f"🔧 PID {pid}: 受信した患者数推移バッファ({chart_type}): {list(buffers.keys())}")
+                    print(f"    {chart_type}: {list(buffers.keys())}")
+                    # 必要であればバッファのサイズも確認 (コメントアウト)
+                    # for day_key, buf in buffers.items():
+                    #     print(f"      Patient '{chart_type}' - '{day_key}' buffer size: {len(buf) if buf else 'None'}")
+                else:
+                    print(f"    {chart_type}: None")
+        else:
+            print("  Received Patient buffers: None")
+
         if dual_axis_chart_buffers_payload:
-            print(f"🔧 PID {pid}: 受信した二軸バッファ: {list(dual_axis_chart_buffers_payload.keys())}")
+            print(f"  Received Dual Axis buffers keys: {list(dual_axis_chart_buffers_payload.keys())}")
+            # 必要であればバッファのサイズも確認 (コメントアウト)
+            # for day_key, buf in dual_axis_chart_buffers_payload.items():
+            #     print(f"    Dual Axis '{day_key}' buffer size: {len(buf) if buf else 'None'}")
+        else:
+            print("  Received Dual Axis buffers: None")
+        # === ここまでデバッグコード ===
+        
+        print(f"🔧 PID {pid}: Worker for '{display_name}' started") #
+        
+        # 🔧 allowed_graph_daysのデフォルト設定と効果的な値の決定
+        # reduced_graphs (fast_mode と同義) と allowed_graph_days の両方を考慮
+        if allowed_graph_days is None:
+            # allowed_graph_days が指定されなかった場合、reduced_graphs (fast_mode) に基づいて決定
+            if reduced_graphs: # fast_mode = True
+                effective_allowed_graph_days = ["90"]
+            else: # fast_mode = False
+                effective_allowed_graph_days = ["90", "180"]
+            print(f"  WARNING (PID {pid}): allowed_graph_days was None, defaulted to {effective_allowed_graph_days} based on reduced_graphs={reduced_graphs}")
+        else:
+            # allowed_graph_days が指定された場合はそれを優先する
+            # ただし、fast_mode (reduced_graphs) が True の場合は、['90'] に強制するべきか検討
+            # 現状の呼び出し元 (batch_generate_pdfs_mp_optimizedなど)では、
+            # fast_mode=True の場合、allowed_graph_days自体が["90"]として渡されるため、以下のロジックで問題ないはず。
+            effective_allowed_graph_days = allowed_graph_days
+            if reduced_graphs and effective_allowed_graph_days != ["90"]:
+                 print(f"  INFO (PID {pid}): reduced_graphs is True, but received allowed_graph_days={effective_allowed_graph_days}. Using received value.")
+
+
+        print(f"🔧 PID {pid}: Effective allowed_graph_days for PDF generation: {effective_allowed_graph_days}")
+
 
         df_worker = pd.read_feather(df_path)
         latest_date_worker = pd.Timestamp(latest_date_str)
@@ -231,7 +270,7 @@ def process_pdf_in_worker_revised(
             title_prefix_for_pdf = f"診療科別 {display_name}"
         elif filter_type == "ward":
             current_data_for_tables_worker = df_worker[df_worker["病棟コード"] == filter_value].copy()
-            current_filter_code_worker = str(filter_value)
+            current_filter_code_worker = str(filter_value) # 病棟コードは文字列として扱うことが多い
             title_prefix_for_pdf = f"病棟別 {display_name}"
         
         if current_data_for_tables_worker.empty and filter_type != "all":
@@ -244,7 +283,7 @@ def process_pdf_in_worker_revised(
             filter_value if filter_type != "all" else None
         )
         
-        if not summaries_worker:
+        if not summaries_worker: # summaries_workerがNoneまたは空辞書の場合
             print(f"🔧 PID {pid}: Failed to generate summaries for {title_prefix_for_pdf}.")
             return None
 
@@ -256,9 +295,9 @@ def process_pdf_in_worker_revised(
         pdf_creation_func = create_landscape_pdf if landscape else create_pdf
         
         print(f"🔧 PID {pid}: PDF生成開始 - {title_prefix_for_pdf}")
-        print(f"🔧 PID {pid}: PDF生成関数に渡すallowed_graph_days: {allowed_graph_days}")
+        # PDF生成関数呼び出し時の引数を確認
+        print(f"🔧 PID {pid}: Calling PDF creation for '{display_name}' with allowed_graph_days: {effective_allowed_graph_days}")
         
-        # 🔧 allowed_graph_daysパラメータを追加
         pdf_bytes_io_result = pdf_creation_func(
             forecast_df=forecast_df_for_pdf,
             df_weekday=summaries_worker.get("weekday"),
@@ -272,7 +311,7 @@ def process_pdf_in_worker_revised(
             alos_chart_buffers=alos_chart_buffers_payload,
             patient_chart_buffers=patient_chart_buffers_payload,
             dual_axis_chart_buffers=dual_axis_chart_buffers_payload,
-            allowed_graph_days=allowed_graph_days  # 🔧 新しいパラメータを追加
+            allowed_graph_days=effective_allowed_graph_days # ここで渡す値が重要
         )
         
         if pdf_bytes_io_result:
@@ -287,7 +326,12 @@ def process_pdf_in_worker_revised(
         return (title_prefix_for_pdf, pdf_bytes_io_result) if pdf_bytes_io_result else None
 
     except Exception as e:
-        print(f"❌ PID {os.getpid()}: Error in worker for {filter_type} {filter_value} ('{display_name}'): {e}")
+        # エラー発生時にもPIDと対象名を出力
+        pid_err = os.getpid() if 'pid' not in locals() else pid
+        disp_name_err = display_name if 'display_name' in locals() else "Unknown Display Name"
+        ft_err = filter_type if 'filter_type' in locals() else "Unknown Filter Type"
+        fv_err = filter_value if 'filter_value' in locals() else "Unknown Filter Value"
+        print(f"❌ PID {pid_err}: Error in worker for {ft_err} {fv_err} ('{disp_name_err}'): {e}")
         import traceback
         print(traceback.format_exc())
         return None
