@@ -754,9 +754,12 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
         return [], [], []
 
     if not pd.api.types.is_datetime64_any_dtype(chart_data['日付']):
-        try: chart_data['日付'] = pd.to_datetime(chart_data['日付'])
-        except Exception: return [], [], []
-    if not isinstance(latest_date, pd.Timestamp): latest_date = pd.Timestamp(latest_date)
+        try: 
+            chart_data['日付'] = pd.to_datetime(chart_data['日付'])
+        except Exception: 
+            return [], [], []
+    if not isinstance(latest_date, pd.Timestamp): 
+        latest_date = pd.Timestamp(latest_date)
 
     current_year_start_month = 4
     if latest_date.month < current_year_start_month:
@@ -787,14 +790,6 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
 
     ward_codes_unique = sorted(chart_data["病棟コード"].astype(str).unique()) if "病棟コード" in chart_data.columns else []
     dept_names_original = sorted(chart_data["診療科名"].unique()) if "診療科名" in chart_data.columns else []
-    
-    show_all_depts = True; use_selected_depts = False; selected_depts_list = []
-    # ワーカープロセスでは st.session_state は使えないため、この部分は実質的に機能しない。
-    # この関数の呼び出し元(create_pdf/create_landscape_pdf)が、
-    # chart_data を適切にフィルタリングしてからこの関数に渡す必要がある。
-    # 現状では、create_pdf/create_landscape_pdf に渡される chart_data が既にフィルタリング済みであるか、
-    # あるいは filter_code を使ってこの関数内でフィルタリングする想定。
-    # ここでは、渡された chart_data をそのまま使う。
     dept_names_to_process = dept_names_original
     
     ward_display_names = {}
@@ -802,20 +797,26 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
         if target_data is not None and not target_data.empty and '部門コード' in target_data.columns and '部門名' in target_data.columns:
             target_row = target_data[target_data['部門コード'].astype(str) == ward_code]
             if not target_row.empty and pd.notna(target_row['部門名'].iloc[0]):
-                ward_display_names[ward_code] = target_row['部門名'].iloc[0]; continue
+                ward_display_names[ward_code] = target_row['部門名'].iloc[0]
+                continue
         match = re.match(r'0*(\d+)([A-Za-z]*)', ward_code)
-        if match: ward_display_names[ward_code] = f"{match.group(1)}{match.group(2)}病棟"
-        else: ward_display_names[ward_code] = ward_code
+        if match: 
+            ward_display_names[ward_code] = f"{match.group(1)}{match.group(2)}病棟"
+        else: 
+            ward_display_names[ward_code] = ward_code
 
     ward_metrics = {ward_code: {} for ward_code in ward_codes_unique}
     dept_metrics = {dept_name: {} for dept_name in dept_names_to_process}
 
     for period_label, (start_dt_period, end_dt_period) in period_definitions.items():
-        if start_dt_period > end_dt_period: continue
+        if start_dt_period > end_dt_period: 
+            continue
         period_data_df = chart_data[(chart_data["日付"] >= start_dt_period) & (chart_data["日付"] <= end_dt_period)]
-        if period_data_df.empty: continue
+        if period_data_df.empty: 
+            continue
         num_days_in_period_calc = period_data_df['日付'].nunique()
-        if num_days_in_period_calc == 0: continue
+        if num_days_in_period_calc == 0: 
+            continue
             
         for ward_code in ward_codes_unique:
             ward_data_df = period_data_df[period_data_df["病棟コード"].astype(str) == ward_code]
@@ -823,37 +824,85 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
                 total_patient_days_val = ward_data_df.groupby('日付')['入院患者数（在院）'].sum().sum()
                 avg_daily_census_val = total_patient_days_val / num_days_in_period_calc if num_days_in_period_calc > 0 else np.nan
                 ward_metrics[ward_code][period_label] = avg_daily_census_val
-            else: ward_metrics[ward_code][period_label] = np.nan
+            else: 
+                ward_metrics[ward_code][period_label] = np.nan
 
         for dept_name in dept_names_to_process:
             dept_data_df = period_data_df[period_data_df["診療科名"] == dept_name]
             if not dept_data_df.empty and '入院患者数（在院）' in dept_data_df.columns:
                 total_patient_days_val = dept_data_df.groupby('日付')['入院患者数（在院）'].sum().sum()
-                avg_daily_census_val = total_patient_days_val / num_days_in_period_calc if num_days_in_period_calc > 0 else np.nan
+                avg_daily_census_val = total_patient_days_val / num_days_in_period_calc if num_days_in_period_calc > 0 else 1
                 dept_metrics[dept_name][period_label] = avg_daily_census_val
-            else: dept_metrics[dept_name][period_label] = np.nan
+            else: 
+                dept_metrics[dept_name][period_label] = np.nan
     
+    # 🔧 新しい目標値ファイル構造に対応した目標値取得関数
     target_dict_cache_local = {}
-    def get_targets_achievements(items, metrics_dict, target_data_df, achievement_period=period_name_for_achievement):
-        targets = {}; achievements = {}
-        if target_data_df is not None and not target_data_df.empty and all(col in target_data_df.columns for col in ['部門コード', '区分', '目標値']):
-            target_data_df['部門コード'] = target_data_df['部門コード'].astype(str)
-            if 'all_targets' not in target_dict_cache_local:
-                all_targets_map_local = {str(row['部門コード']): float(row['目標値']) for _, row in target_data_df[target_data_df['区分'] == '全日'].iterrows() if pd.notna(row.get('部門コード')) and pd.notna(row.get('目標値'))}
-                target_dict_cache_local['all_targets'] = all_targets_map_local
-            all_targets_map_local = target_dict_cache_local.get('all_targets', {})
-            for item_id_val in items:
-                item_id_str_val = str(item_id_val)
-                target_value_val = all_targets_map_local.get(item_id_str_val)
-                if target_value_val is not None:
-                    targets[item_id_val] = target_value_val
-                    actual_value_val = metrics_dict.get(item_id_val, {}).get(achievement_period)
-                    if actual_value_val is not None and pd.notna(actual_value_val) and target_value_val > 0:
-                        achievements[item_id_val] = (actual_value_val / target_value_val) * 100
+    def get_targets_achievements_new_format(items, metrics_dict, target_data_df, achievement_period=period_name_for_achievement):
+        targets = {}
+        achievements = {}
+        
+        if target_data_df is not None and not target_data_df.empty:
+            # 🔧 新しいCSVファイル構造をチェック
+            required_cols_new = ['部門コード', '指標タイプ', '期間区分', '目標値']  # 新しい構造
+            required_cols_old = ['部門コード', '区分', '目標値']  # 古い構造
+            
+            if all(col in target_data_df.columns for col in required_cols_new):
+                # 🔧 新しい構造の処理
+                print("新しい目標値ファイル構造を検出しました")
+                
+                # 日平均在院患者数の目標値のみを取得
+                daily_census_targets = target_data_df[
+                    (target_data_df['指標タイプ'].str.contains('日平均在院患者数|在院患者数', case=False, na=False)) &
+                    (target_data_df['期間区分'] == '全日')  # 全日の目標値を使用
+                ].copy()
+                
+                if not daily_census_targets.empty:
+                    daily_census_targets['部門コード'] = daily_census_targets['部門コード'].astype(str)
+                    target_mapping = dict(zip(daily_census_targets['部門コード'], daily_census_targets['目標値']))
+                    
+                    print(f"取得した目標値: {target_mapping}")
+                    
+                    for item_id_val in items:
+                        item_id_str_val = str(item_id_val)
+                        target_value_val = target_mapping.get(item_id_str_val)
+                        
+                        if target_value_val is not None and pd.notna(target_value_val):
+                            targets[item_id_val] = float(target_value_val)
+                            actual_value_val = metrics_dict.get(item_id_val, {}).get(achievement_period)
+                            if actual_value_val is not None and pd.notna(actual_value_val) and target_value_val > 0:
+                                achievements[item_id_val] = (actual_value_val / target_value_val) * 100
+                
+            elif all(col in target_data_df.columns for col in required_cols_old):
+                # 🔧 古い構造の処理（既存コードと同じ）
+                print("古い目標値ファイル構造を検出しました")
+                target_data_df['部門コード'] = target_data_df['部門コード'].astype(str)
+                
+                if 'all_targets' not in target_dict_cache_local:
+                    all_targets_map_local = {
+                        str(row['部門コード']): float(row['目標値']) 
+                        for _, row in target_data_df[target_data_df['区分'] == '全日'].iterrows() 
+                        if pd.notna(row.get('部門コード')) and pd.notna(row.get('目標値'))
+                    }
+                    target_dict_cache_local['all_targets'] = all_targets_map_local
+                
+                all_targets_map_local = target_dict_cache_local.get('all_targets', {})
+                for item_id_val in items:
+                    item_id_str_val = str(item_id_val)
+                    target_value_val = all_targets_map_local.get(item_id_str_val)
+                    if target_value_val is not None:
+                        targets[item_id_val] = target_value_val
+                        actual_value_val = metrics_dict.get(item_id_val, {}).get(achievement_period)
+                        if actual_value_val is not None and pd.notna(actual_value_val) and target_value_val > 0:
+                            achievements[item_id_val] = (actual_value_val / target_value_val) * 100
+            else:
+                print(f"目標値ファイルの列構造が認識できません。利用可能な列: {list(target_data_df.columns)}")
+        
         return targets, achievements
 
-    ward_targets, ward_achievements = get_targets_achievements(ward_codes_unique, ward_metrics, target_data)
-    dept_targets, dept_achievements = get_targets_achievements(dept_names_to_process, dept_metrics, target_data)
+    # 🔧 新しい関数を使用して目標値と達成率を取得
+    ward_targets, ward_achievements = get_targets_achievements_new_format(ward_codes_unique, ward_metrics, target_data)
+    dept_targets, dept_achievements = get_targets_achievements_new_format(dept_names_to_process, dept_metrics, target_data)
     
     def sort_entities(entities_list, achievements_ref_dict, targets_ref_dict):
         entities_list_str = [str(e) for e in entities_list]
@@ -868,18 +917,25 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
     sorted_dept_names = sort_entities(dept_names_to_process, dept_achievements, dept_targets)
     
     header_items = [Paragraph("部門", para_style)] + period_labels_for_header + [Paragraph("目標値", para_style), Paragraph("達成率<br/>(%)", para_style)]
+    
     ward_table_data = [header_items]
     for ward_code_str in sorted_ward_codes:
         row_items = [Paragraph(ward_display_names.get(ward_code_str, ward_code_str), para_style)]
-        for period_label_val in period_labels_for_data: val = ward_metrics.get(ward_code_str, {}).get(period_label_val); row_items.append(f"{val:.1f}" if pd.notna(val) else "-")
+        for period_label_val in period_labels_for_data: 
+            val = ward_metrics.get(ward_code_str, {}).get(period_label_val)
+            row_items.append(f"{val:.1f}" if pd.notna(val) else "-")
         row_items.append(f"{ward_targets.get(ward_code_str):.1f}" if ward_code_str in ward_targets else "-")
         row_items.append(f"{ward_achievements.get(ward_code_str):.1f}" if ward_code_str in ward_achievements else "-")
         ward_table_data.append(row_items)
+    
     dept_table_data = [header_items]
     for dept_name_str in sorted_dept_names:
         row_items = [Paragraph(str(dept_name_str), para_style)]
-        for period_label_val in period_labels_for_data: val = dept_metrics.get(dept_name_str, {}).get(period_label_val); row_items.append(f"{val:.1f}" if pd.notna(val) else "-")
+        for period_label_val in period_labels_for_data: 
+            val = dept_metrics.get(dept_name_str, {}).get(period_label_val)
+            row_items.append(f"{val:.1f}" if pd.notna(val) else "-")
         row_items.append(f"{dept_targets.get(dept_name_str):.1f}" if dept_name_str in dept_targets else "-")
         row_items.append(f"{dept_achievements.get(dept_name_str):.1f}" if dept_name_str in dept_achievements else "-")
         dept_table_data.append(row_items)
+    
     return ward_table_data, dept_table_data, period_labels_for_data
