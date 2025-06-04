@@ -433,6 +433,28 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
         if not target_df.empty:
             logger.info(f"目標値データの列: {list(target_df.columns)}")
             
+            # 区分列の確認と正規化
+            period_column = None
+            if '区分' in target_df.columns:
+                period_column = '区分'
+            elif '期間区分' in target_df.columns:
+                # 期間区分列がある場合は区分列にマッピング
+                period_mapping = {
+                    '全日': '全日',
+                    '平日': '平日', 
+                    '休日': '休日',
+                    '月間': '全日',
+                    '年間': '全日'
+                }
+                target_df['区分'] = target_df['期間区分'].map(period_mapping).fillna('全日')
+                period_column = '区分'
+                logger.info("期間区分列を区分列にマッピングしました")
+            else:
+                # 区分列がない場合はデフォルトで作成
+                target_df['区分'] = '全日'
+                period_column = '区分'
+                logger.warning("区分列が見つからないため、全て「全日」として設定しました")
+            
             # 指標タイプの確認（高度形式対応）
             if '指標タイプ' in target_df.columns:
                 available_indicators = target_df['指標タイプ'].unique()
@@ -1083,7 +1105,15 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                         st.success(f"✅ '{keyword}' キーワードを含む部門コード: {len(matches)}件")
                         if '指標タイプ' in matches.columns:
                             st.write(f"  → 指標: {matches['指標タイプ'].unique()}")
-                        st.write(f"  → 目標値: {matches[['部門コード', '目標値', '区分']].to_dict('records')}")
+                        
+                        # 安全な列アクセス
+                        display_columns = ['部門コード', '目標値']
+                        if '区分' in matches.columns:
+                            display_columns.append('区分')
+                        elif '期間区分' in matches.columns:
+                            display_columns.append('期間区分')
+                        
+                        st.write(f"  → 目標値: {matches[display_columns].to_dict('records')}")
             
             if '部門名' in target_df.columns:
                 unique_names = target_df['部門名'].unique()
@@ -1097,7 +1127,27 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                         st.success(f"✅ '{keyword}' キーワードを含む部門名: {len(matches)}件")
                         if '指標タイプ' in matches.columns:
                             st.write(f"  → 指標: {matches['指標タイプ'].unique()}")
-                        st.write(f"  → 詳細: {matches[['部門名', '目標値', '区分']].to_dict('records')}")
+                        
+                        # 安全な列アクセス
+                        display_columns = ['部門名', '目標値']
+                        if '区分' in matches.columns:
+                            display_columns.append('区分')
+                        elif '期間区分' in matches.columns:
+                            display_columns.append('期間区分')
+                        
+                        st.write(f"  → 詳細: {matches[display_columns].to_dict('records')}")
+            
+            # 区分情報の表示
+            period_columns = ['区分', '期間区分']
+            period_column = None
+            for col in period_columns:
+                if col in target_df.columns:
+                    period_column = col
+                    break
+            
+            if period_column:
+                unique_periods = target_df[period_column].unique()
+                st.write(f"**{period_column}**: {list(unique_periods)}")
             
             st.dataframe(target_df.head(), use_container_width=True)
     
