@@ -1040,9 +1040,17 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.write(f"• 月間目標延べ日数: {format_number_with_config(monthly_target_days, '人日')}")
 
 # 以下、残りの関数は元のコードと同じ...
-def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
+def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent, show_debug=False):
     """
     KPIカード表示専用関数（レイアウト改善版）
+    
+    Args:
+        df: データフレーム
+        start_date: 開始日
+        end_date: 終了日
+        total_beds_setting: 総病床数
+        target_occupancy_setting_percent: 目標稼働率（パーセント）
+        show_debug: デバッグ情報を表示するかどうか（デフォルト: False）
     """
     if df is None or df.empty:
         st.warning("データが読み込まれていません。")
@@ -1067,8 +1075,8 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         target_df = st.session_state.target_values_df
         target_data_source = "サイドバー"
     else:
-        # サイドバーでの読み込み機能を静かに提供
-        target_df = load_target_values_csv(show_ui=False)
+        # サイドバーでの読み込み機能を制御（デバッグモード時のみUI表示）
+        target_df = load_target_values_csv(show_ui=show_debug)
         target_data_source = "新規読み込み"
     
     # KPI計算の実行
@@ -1100,7 +1108,7 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     target_info = (None, None, None)  # デフォルト値
     
     if current_filter_config and not target_df.empty:
-        target_info = get_target_value_for_filter(target_df, current_filter_config, show_debug=False)
+        target_info = get_target_value_for_filter(target_df, current_filter_config, show_debug=show_debug)
     
     # 昨年度同期間データの計算（エラー表示を抑制）
     df_original = st.session_state.get('df')
@@ -1184,7 +1192,7 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     # 4. 詳細情報・デバッグ情報（Expanderにまとめて下部に配置）
     # =================================================================
     
-    with st.expander("🔧 詳細設定・デバッグ情報", expanded=False):
+    with st.expander("🔧 詳細設定・デバッグ情報", expanded=show_debug):
         st.markdown("### 📊 分析条件詳細")
         
         # フィルター詳細
@@ -1329,6 +1337,7 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     # 設定変更への案内
     st.markdown("---")
     st.info("💡 **設定変更**: 期間変更は「分析フィルター」、病床数や目標値は「グローバル設定」から行えます")
+
 def display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     """
     トレンドグラフ表示専用関数（既存）
