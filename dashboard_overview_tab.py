@@ -168,7 +168,7 @@ def load_target_values_csv():
 
 def get_target_value_for_filter(target_df, filter_config, metric_type="日平均在院患者数"):
     """
-    フィルター設定に基づいて目標値を取得（UI表示コードを削除）
+    フィルター設定に基づいて目標値を取得（メッセージリスト付き）
     
     Args:
         target_df (pd.DataFrame): 目標値データフレーム
@@ -176,18 +176,23 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
         metric_type (str): メトリクス種別
         
     Returns:
-        tuple: (目標値, 部門名, 達成対象期間)
+        tuple: (目標値, 部門名, 達成対象期間, メッセージリスト)
     """
+    messages = []  # メッセージリストを初期化
+    
     if target_df.empty or not filter_config:
         logger.info("目標値取得: 目標値データまたはフィルター設定が空です")
-        return None, None, None
+        messages.append(("info", "目標値データまたはフィルター設定が空です"))
+        return None, None, None, messages
     
     try:
         filter_mode = filter_config.get('filter_mode', '全体')
         logger.info(f"目標値取得: フィルターモード = {filter_mode}")
+        messages.append(("info", f"フィルターモード: {filter_mode}"))
         
         # デバッグ用ログ
         logger.info(f"目標値データ件数: {len(target_df)}行, 列: {list(target_df.columns)}")
+        messages.append(("info", f"目標値データ: {len(target_df)}行, 列: {len(target_df.columns)}列"))
         
         # 区分列の確認と正規化
         if '区分' not in target_df.columns:
@@ -195,9 +200,11 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 period_mapping = {'全日': '全日', '平日': '平日', '休日': '休日', '月間': '全日', '年間': '全日'}
                 target_df['区分'] = target_df['期間区分'].map(period_mapping).fillna('全日')
                 logger.info("期間区分列を区分列にマッピングしました")
+                messages.append(("info", "期間区分列を区分列にマッピングしました"))
             else:
                 target_df['区分'] = '全日'
                 logger.warning("区分列が見つからないため、全て「全日」として設定しました")
+                messages.append(("warning", "区分列が見つからないため、全て「全日」として設定しました"))
         
         # 指標タイプの確認（高度形式対応）
         if '指標タイプ' in target_df.columns:
@@ -208,14 +215,16 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
             if matching_indicators:
                 target_df = target_df[target_df['指標タイプ'].isin(matching_indicators)]
                 logger.info(f"指標フィルタリング後: {len(target_df)}行, 使用指標: {matching_indicators}")
+                messages.append(("info", f"指標フィルタリング後: {len(target_df)}行"))
             else:
                 logger.warning("日平均在院患者数関連の指標が見つかりません。全ての指標を使用します。")
+                messages.append(("warning", "日平均在院患者数関連の指標が見つかりません"))
         
-        if filter_mode == "全体":
-            logger.info("🔍 全体フィルター用の目標値検索を開始...")
-    
         # 全体フィルターの場合
         if filter_mode == "全体":
+            logger.info("🔍 全体フィルター用の目標値検索を開始...")
+            messages.append(("info", "全体フィルター用の目標値検索を開始"))
+            
             overall_keywords = ['全体', '病院全体', '総合', '病院', '合計', 'ALL', 'TOTAL']
             
             for keyword in overall_keywords:
@@ -229,7 +238,8 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                         target_value = float(overall_targets['目標値'].iloc[0])
                         matched_code = overall_targets['部門コード'].iloc[0]
                         logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword}, 部門コード: {matched_code})")
-                        return target_value, f"全体 ({matched_code})", "全日"
+                        messages.append(("success", f"全体目標値を取得: {target_value} (キーワード: {keyword})"))
+                        return target_value, f"全体 ({matched_code})", "全日", messages
                     
                 # 部門名での検索
                 if '部門名' in target_df.columns:
@@ -241,9 +251,11 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                         target_value = float(overall_targets_by_name['目標値'].iloc[0])
                         matched_name = overall_targets_by_name['部門名'].iloc[0]
                         logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword}, 部門名: {matched_name})")
-                        return target_value, f"全体 ({matched_name})", "全日"
+                        messages.append(("success", f"全体目標値を取得: {target_value} (部門名: {matched_name})"))
+                        return target_value, f"全体 ({matched_name})", "全日", messages
             
             logger.warning("⚠️ 全体目標値が見つかりません。部門別目標値の合計を計算します...")
+            messages.append(("warning", "全体目標値が見つかりません。部門別目標値の合計を計算します"))
             
             # 全体目標値が見つからない場合、部門別目標値の合計を計算
             all_dept_targets = target_df[target_df['区分'].astype(str).str.strip() == '全日']
@@ -253,14 +265,17 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 if not dept_level_targets.empty:
                     all_dept_targets = dept_level_targets
                     logger.info("🏥 部門レベルの目標値のみで合計を計算")
+                    messages.append(("info", "部門レベルの目標値のみで合計を計算"))
             
             if not all_dept_targets.empty:
                 total_target = all_dept_targets['目標値'].sum()
                 dept_count = len(all_dept_targets)
                 logger.info(f"部門別目標値の合計を全体目標値として使用: {total_target} ({dept_count}部門)")
-                return total_target, f"全体 (部門別合計: {dept_count}部門)", "全日"
+                messages.append(("success", f"部門別目標値の合計を使用: {total_target} ({dept_count}部門)"))
+                return total_target, f"全体 (部門別合計: {dept_count}部門)", "全日", messages
             
             logger.warning("❌ 全体目標値が見つかりませんでした")
+            messages.append(("warning", "全体目標値が見つかりませんでした"))
         
         # 特定診療科・病棟フィルターの場合
         elif filter_mode in ["特定診療科", "特定病棟"]:
@@ -268,6 +283,7 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
             selected_items = filter_config.get('selected_depts' if is_dept else 'selected_wards', [])
             item_name = "診療科" if is_dept else "病棟"
             logger.info(f"選択された{item_name}: {selected_items}")
+            messages.append(("info", f"選択された{item_name}: {len(selected_items)}件"))
             
             if selected_items:
                 total_target, matched_items = 0, []
@@ -289,20 +305,23 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                             item_found = True
                     if not item_found:
                         logger.warning(f"{item_name} '{item}' の目標値が見つかりません")
+                        messages.append(("warning", f"{item_name} '{item}' の目標値が見つかりません"))
                 
                 if matched_items:
                     item_names_str = ', '.join(matched_items)
                     logger.info(f"合計目標値: {total_target}, 対象{item_name}: {item_names_str}")
-                    return total_target, f"{item_name}: {item_names_str}", "全日"
+                    messages.append(("success", f"合計目標値: {total_target}, 対象{item_name}: {len(matched_items)}件"))
+                    return total_target, f"{item_name}: {item_names_str}", "全日", messages
                 else:
                     logger.warning(f"選択された{item_name}の目標値が1件も見つかりませんでした")
+                    messages.append(("warning", f"選択された{item_name}の目標値が1件も見つかりませんでした"))
         
-        return None, None, None
+        return None, None, None, messages
         
     except Exception as e:
         logger.error(f"目標値取得エラー: {e}", exc_info=True)
-        # UIへのエラー表示は呼び出し元で行うため、ここではログ出力のみ
-        return None, None, None
+        messages.append(("error", f"目標値取得エラー: {e}"))
+        return None, None, None, messages
 
 def calculate_previous_year_same_period(df_original, current_end_date, current_filter_config):
     """
