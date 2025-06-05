@@ -711,6 +711,7 @@ def create_management_dashboard_tab():
     else:
         st.error("KPIカード表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
 
+
 def main():
     # セッション状態の初期化
     if 'app_initialized' not in st.session_state:
