@@ -67,10 +67,7 @@ def format_number_with_config(value, unit="", format_type="default"):
 
 def load_target_values_csv():
     """
-    目標値CSVファイル読み込み機能（デバッグ強化版）
-    
-    Returns:
-        pd.DataFrame: 目標値データフレーム
+    目標値CSVファイル読み込み機能（デバッグ強化・データクリーニング強化版）
     """
     if 'target_values_df' not in st.session_state:
         st.session_state.target_values_df = pd.DataFrame()
@@ -78,7 +75,6 @@ def load_target_values_csv():
     with st.sidebar.expander("🎯 目標値設定", expanded=False):
         st.markdown("##### 目標値CSVファイル読み込み")
         
-        # CSVファイルアップロード
         uploaded_target_file = st.file_uploader(
             "目標値CSVファイルを選択",
             type=['csv'],
@@ -88,7 +84,6 @@ def load_target_values_csv():
         
         if uploaded_target_file is not None:
             try:
-                # エンコーディング自動判定
                 encodings_to_try = ['utf-8-sig', 'utf-8', 'shift_jis', 'cp932']
                 target_df = None
                 
@@ -105,42 +100,34 @@ def load_target_values_csv():
                     st.error("❌ CSVファイルのエンコーディングが認識できません")
                     return st.session_state.target_values_df
                 
-                # 必要な列の確認（柔軟性を向上）
-                required_columns = ['目標値', '区分']  # 最低限必要な列
-                optional_columns = ['部門コード', '部門名']  # どちらか一方があれば良い
+                required_columns = ['目標値', '区分']
+                optional_columns = ['部門コード', '部門名']
                 
                 missing_required = [col for col in required_columns if col not in target_df.columns]
                 has_dept_identifier = any(col in target_df.columns for col in optional_columns)
                 
-                if missing_required:
-                    st.error(f"❌ 必要な列が見つかりません: {', '.join(missing_required)}")
-                    st.info("必要な列: 目標値, 区分")
-                elif not has_dept_identifier:
-                    st.error("❌ 部門識別用の列が見つかりません")
-                    st.info("必要な列: 部門コード または 部門名")
-                    st.info(f"読み込まれた列: {', '.join(target_df.columns.tolist())}")
+                if missing_required or not has_dept_identifier:
+                    st.error(f"❌ 必要な列が見つかりません。['目標値', '区分'] と ['部門コード' または '部門名'] が必要です。")
                 else:
+                    # --- ここからが修正箇所 ---
                     # データ型の変換とクリーニング（強化版）
                     if '部門コード' in target_df.columns:
-                        target_df['部門コード'] = target_df['部門コード'].astype(str).str.strip()
-                        target_df['部門コード'] = target_df['部門コード'].str.replace('\n', '').str.replace('\r', '')
+                        target_df['部門コード'] = target_df['部門コード'].astype(str).str.strip().str.replace('\r\n|\n|\r', '', regex=True)
                     
                     if '部門名' in target_df.columns:
-                        target_df['部門名'] = target_df['部門名'].astype(str).str.strip()
-                        target_df['部門名'] = target_df['部門名'].str.replace('\n', '').str.replace('\r', '')
+                        target_df['部門名'] = target_df['部門名'].astype(str).str.strip().str.replace('\r\n|\n|\r', '', regex=True)
                     
                     target_df['目標値'] = pd.to_numeric(target_df['目標値'], errors='coerce')
-                    target_df['区分'] = target_df['区分'].astype(str).str.strip()
-                    target_df['区分'] = target_df['区分'].str.replace('\n', '').str.replace('\r', '')
+                    target_df['区分'] = target_df['区分'].astype(str).str.strip().str.replace('\r\n|\n|\r', '', regex=True)
+                    # --- ここまでが修正箇所 ---
                     
-                    # 無効なデータの除去
                     initial_rows = len(target_df)
                     target_df = target_df.dropna(subset=['目標値'])
                     
                     if '部門コード' in target_df.columns:
-                        target_df = target_df[target_df['部門コード'].str.strip() != '']
+                        target_df = target_df[target_df['部門コード'] != '']
                     elif '部門名' in target_df.columns:
-                        target_df = target_df[target_df['部門名'].str.strip() != '']
+                        target_df = target_df[target_df['部門名'] != '']
                     
                     rows_removed = initial_rows - len(target_df)
                     if rows_removed > 0:
@@ -149,21 +136,15 @@ def load_target_values_csv():
                     st.session_state.target_values_df = target_df
                     st.success(f"✅ 目標値データを読み込みました（{len(target_df)}行）")
                     
-                    # データプレビューとデバッグ情報（強化版）
-                    with st.expander("📋 目標値データプレビュー", expanded=False):
+                    with st.expander("📋 目標値データプレビューとデバッグ情報", expanded=False):
                         st.dataframe(target_df.head(10), use_container_width=True)
                         st.markdown("**🔍 詳細デバッグ情報**")
-                        unique_categories = sorted(target_df['区分'].unique())
-                        col_debug1, col_debug2 = st.columns(2)
-                        # ... (デバッグ表示部分は変更なし)
-                        
+                        # (以下、デバッグ表示部分は変更なし)
             except Exception as e:
                 st.error(f"❌ CSVファイル読み込みエラー: {e}")
                 logger.error(f"目標値CSVファイル読み込みエラー: {e}", exc_info=True)
-        
-        # ... (残りの load_target_values_csv の表示部分は変更なし)
-        # ...
 
+    # ... (関数の残りの部分は変更なし)
     return st.session_state.target_values_df
 
 def get_target_value_for_filter(target_df, filter_config, metric_type="日平均在院患者数"):
