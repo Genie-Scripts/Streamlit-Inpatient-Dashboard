@@ -410,7 +410,7 @@ A2病棟,A2病棟,28.0,休日
 
 def get_target_value_for_filter(target_df, filter_config, metric_type="日平均在院患者数"):
     """
-    フィルター設定に基づいて目標値を取得（高度ファイル対応版）
+    フィルター設定に基づいて目標値を取得（メッセージをリストで返す修正版）
     
     Args:
         target_df (pd.DataFrame): 目標値データフレーム
@@ -418,11 +418,12 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
         metric_type (str): メトリクス種別
         
     Returns:
-        tuple: (目標値, 部門名, 達成対象期間)
+        tuple: (目標値, 部門名, 達成対象期間, メッセージリスト)
     """
+    messages = []
     if target_df.empty or not filter_config:
         logger.info("目標値取得: 目標値データまたはフィルター設定が空です")
-        return None, None, None
+        return None, None, None, messages
     
     try:
         filter_mode = filter_config.get('filter_mode', '全体')
@@ -434,25 +435,14 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
             logger.info(f"目標値データの列: {list(target_df.columns)}")
             
             # 区分列の確認と正規化
-            period_column = None
             if '区分' in target_df.columns:
-                period_column = '区分'
+                pass
             elif '期間区分' in target_df.columns:
-                # 期間区分列がある場合は区分列にマッピング
-                period_mapping = {
-                    '全日': '全日',
-                    '平日': '平日', 
-                    '休日': '休日',
-                    '月間': '全日',
-                    '年間': '全日'
-                }
+                period_mapping = {'全日': '全日', '平日': '平日', '休日': '休日', '月間': '全日', '年間': '全日'}
                 target_df['区分'] = target_df['期間区分'].map(period_mapping).fillna('全日')
-                period_column = '区分'
                 logger.info("期間区分列を区分列にマッピングしました")
             else:
-                # 区分列がない場合はデフォルトで作成
                 target_df['区分'] = '全日'
-                period_column = '区分'
                 logger.warning("区分列が見つからないため、全て「全日」として設定しました")
             
             # 指標タイプの確認（高度形式対応）
@@ -460,7 +450,6 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 available_indicators = target_df['指標タイプ'].unique()
                 logger.info(f"利用可能な指標タイプ: {available_indicators}")
                 
-                # 日平均在院患者数関連の指標をフィルタリング
                 target_indicators = ['日平均在院患者数', '在院患者数', '患者数']
                 matching_indicators = []
                 
@@ -471,210 +460,120 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                             break
                 
                 if matching_indicators:
-                    # 該当する指標のデータのみを使用
                     target_df = target_df[target_df['指標タイプ'].isin(matching_indicators)]
                     logger.info(f"指標フィルタリング後: {len(target_df)}行, 使用指標: {matching_indicators}")
-                    st.info(f"🎯 指標フィルタリング: {', '.join(matching_indicators)} を使用")
+                    messages.append(("info", f"🎯 指標フィルタリング: {', '.join(matching_indicators)} を使用"))
                 else:
                     logger.warning("日平均在院患者数関連の指標が見つかりません。全ての指標を使用します。")
-                    st.warning("⚠️ 日平均在院患者数関連の指標が見つからないため、全ての指標を使用します")
+                    messages.append(("warning", "⚠️ 日平均在院患者数関連の指標が見つからないため、全ての指標を使用します"))
             
-            # 全体関連キーワードの詳細チェック
             if filter_mode == "全体":
-                st.info("🔍 全体フィルター用の目標値検索を開始...")
+                messages.append(("info", "🔍 全体フィルター用の目標値検索を開始..."))
         
-        # 全体フィルターの場合、全体目標値を探す（高度形式対応版）
+        # 全体フィルターの場合
         if filter_mode == "全体":
-            # 全体目標値のキーワードリスト
             overall_keywords = ['全体', '病院全体', '総合', '病院', '合計', 'ALL', 'TOTAL']
             
             for keyword in overall_keywords:
-                # 部門コードでの検索
                 if '部門コード' in target_df.columns:
                     overall_targets = target_df[
                         (target_df['部門コード'].astype(str).str.strip().str.contains(keyword, na=False, case=False)) & 
                         (target_df['区分'].astype(str).str.strip() == '全日')
                     ]
-                    logger.info(f"全体目標値検索 '{keyword}' (部門コード): {len(overall_targets)}件")
-                    
                     if not overall_targets.empty:
                         target_value = float(overall_targets['目標値'].iloc[0])
                         matched_code = overall_targets['部門コード'].iloc[0]
-                        
-                        # 指標タイプ情報も含める（高度形式の場合）
-                        indicator_info = ""
-                        if '指標タイプ' in overall_targets.columns:
-                            indicator_type = overall_targets['指標タイプ'].iloc[0]
-                            indicator_info = f" ({indicator_type})"
-                        
+                        indicator_info = f" ({overall_targets['指標タイプ'].iloc[0]})" if '指標タイプ' in overall_targets.columns else ""
+                        msg = f"✅ 全体目標値が見つかりました: {matched_code} = {target_value}{indicator_info}"
+                        messages.append(("success", msg))
                         logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword}, 部門コード: {matched_code})")
-                        st.success(f"✅ 全体目標値が見つかりました: {matched_code} = {target_value}{indicator_info}")
-                        return target_value, f"全体 ({matched_code})", "全日"
+                        return target_value, f"全体 ({matched_code})", "全日", messages
                     
-                # 部門名での検索（部門名列がある場合）
                 if '部門名' in target_df.columns:
                     overall_targets_by_name = target_df[
                         (target_df['部門名'].astype(str).str.strip().str.contains(keyword, na=False, case=False)) & 
                         (target_df['区分'].astype(str).str.strip() == '全日')
                     ]
-                    logger.info(f"全体目標値検索 '{keyword}' (部門名): {len(overall_targets_by_name)}件")
-                    
                     if not overall_targets_by_name.empty:
                         target_value = float(overall_targets_by_name['目標値'].iloc[0])
                         matched_name = overall_targets_by_name['部門名'].iloc[0]
-                        
-                        # 指標タイプ情報も含める
-                        indicator_info = ""
-                        if '指標タイプ' in overall_targets_by_name.columns:
-                            indicator_type = overall_targets_by_name['指標タイプ'].iloc[0]
-                            indicator_info = f" ({indicator_type})"
-                        
+                        indicator_info = f" ({overall_targets_by_name['指標タイプ'].iloc[0]})" if '指標タイプ' in overall_targets_by_name.columns else ""
+                        msg = f"✅ 全体目標値が見つかりました: {matched_name} = {target_value}{indicator_info}"
+                        messages.append(("success", msg))
                         logger.info(f"全体目標値を取得: {target_value} (キーワード: {keyword}, 部門名: {matched_name})")
-                        st.success(f"✅ 全体目標値が見つかりました: {matched_name} = {target_value}{indicator_info}")
-                        return target_value, f"全体 ({matched_name})", "全日"
+                        return target_value, f"全体 ({matched_name})", "全日", messages
             
-            st.warning("⚠️ 全体目標値が見つかりません。部門別目標値の合計を計算します...")
+            messages.append(("warning", "⚠️ 全体目標値が見つかりません。部門別目標値の合計を計算します..."))
             
             # 全体目標値が見つからない場合、部門別目標値の合計を計算
             all_dept_targets = target_df[target_df['区分'].astype(str).str.strip() == '全日']
-            
-            # 部門種別が「病院」以外のもので合計（病院レベルは除外）
             if '部門種別' in all_dept_targets.columns:
-                dept_level_targets = all_dept_targets[
-                    ~all_dept_targets['部門種別'].astype(str).str.contains('病院', na=False, case=False)
-                ]
+                dept_level_targets = all_dept_targets[~all_dept_targets['部門種別'].astype(str).str.contains('病院', na=False, case=False)]
                 if not dept_level_targets.empty:
                     all_dept_targets = dept_level_targets
-                    st.info("🏥 部門レベルの目標値のみで合計を計算")
+                    messages.append(("info", "🏥 部門レベルの目標値のみで合計を計算"))
             
             if not all_dept_targets.empty:
                 total_target = all_dept_targets['目標値'].sum()
                 dept_count = len(all_dept_targets)
-                
-                # 使用した部門の情報
                 used_depts = []
-                if '部門名' in all_dept_targets.columns:
-                    used_depts = all_dept_targets['部門名'].unique()[:5].tolist()  # 最初の5件
-                elif '部門コード' in all_dept_targets.columns:
-                    used_depts = all_dept_targets['部門コード'].unique()[:5].tolist()
-                
+                if '部門名' in all_dept_targets.columns: used_depts = all_dept_targets['部門名'].unique()[:5].tolist()
+                elif '部門コード' in all_dept_targets.columns: used_depts = all_dept_targets['部門コード'].unique()[:5].tolist()
                 dept_info = f"{', '.join(used_depts)}{'...' if dept_count > 5 else ''}"
-                
+                msg = f"📊 部門別目標値の合計: {total_target} ({dept_count}部門: {dept_info})"
+                messages.append(("info", msg))
                 logger.info(f"部門別目標値の合計を全体目標値として使用: {total_target} ({dept_count}部門)")
-                st.info(f"📊 部門別目標値の合計: {total_target} ({dept_count}部門: {dept_info})")
-                return total_target, f"全体 (部門別合計: {dept_count}部門)", "全日"
+                return total_target, f"全体 (部門別合計: {dept_count}部門)", "全日", messages
             
-            st.error("❌ 全体目標値が見つかりませんでした")
+            messages.append(("error", "❌ 全体目標値が見つかりませんでした"))
             logger.warning("全体目標値が見つかりませんでした")
         
-        # 特定診療科フィルターの場合（高度形式対応）
-        elif filter_mode == "特定診療科":
-            selected_depts = filter_config.get('selected_depts', [])
-            logger.info(f"選択された診療科: {selected_depts}")
+        # 特定診療科・病棟フィルターの場合
+        elif filter_mode in ["特定診療科", "特定病棟"]:
+            is_dept = filter_mode == "特定診療科"
+            selected_items = filter_config.get('selected_depts' if is_dept else 'selected_wards', [])
+            item_name = "診療科" if is_dept else "病棟"
+            logger.info(f"選択された{item_name}: {selected_items}")
             
-            if selected_depts:
-                # 複数診療科選択時は合計目標値を計算
-                total_target = 0
-                matched_depts = []
-                
-                for dept in selected_depts:
-                    dept_found = False
-                    
-                    # 部門コードでの検索
+            if selected_items:
+                total_target, matched_items = 0, []
+                for item in selected_items:
+                    item_found = False
+                    # 部門コードで検索
                     if '部門コード' in target_df.columns:
-                        dept_targets = target_df[
-                            (target_df['部門コード'].astype(str).str.strip() == str(dept).strip()) & 
-                            (target_df['区分'].astype(str).str.strip() == '全日')
-                        ]
-                        
-                        if not dept_targets.empty:
-                            target_value = float(dept_targets['目標値'].iloc[0])
+                        targets = target_df[(target_df['部門コード'].astype(str).str.strip() == str(item).strip()) & (target_df['区分'] == '全日')]
+                        if not targets.empty:
+                            target_value = float(targets['目標値'].iloc[0])
                             total_target += target_value
-                            matched_depts.append(dept)
-                            dept_found = True
-                            logger.info(f"診療科 '{dept}' の目標値 (部門コード): {target_value}")
-                    
-                    # 部門名での検索（部門コードで見つからない場合）
-                    if not dept_found and '部門名' in target_df.columns:
-                        dept_targets_by_name = target_df[
-                            (target_df['部門名'].astype(str).str.strip() == str(dept).strip()) & 
-                            (target_df['区分'].astype(str).str.strip() == '全日')
-                        ]
-                        
-                        if not dept_targets_by_name.empty:
-                            target_value = float(dept_targets_by_name['目標値'].iloc[0])
+                            matched_items.append(item)
+                            item_found = True
+                            logger.info(f"{item_name} '{item}' の目標値 (部門コード): {target_value}")
+                    # 部門名で検索 (コードで見つからない場合)
+                    if not item_found and '部門名' in target_df.columns:
+                        targets_by_name = target_df[(target_df['部門名'].astype(str).str.strip() == str(item).strip()) & (target_df['区分'] == '全日')]
+                        if not targets_by_name.empty:
+                            target_value = float(targets_by_name['目標値'].iloc[0])
                             total_target += target_value
-                            matched_depts.append(dept)
-                            dept_found = True
-                            logger.info(f"診療科 '{dept}' の目標値 (部門名): {target_value}")
-                    
-                    if not dept_found:
-                        logger.warning(f"診療科 '{dept}' の目標値が見つかりません")
+                            matched_items.append(item)
+                            item_found = True
+                            logger.info(f"{item_name} '{item}' の目標値 (部門名): {target_value}")
+                    if not item_found:
+                        logger.warning(f"{item_name} '{item}' の目標値が見つかりません")
                 
-                if matched_depts:
-                    dept_names = ', '.join(matched_depts)
-                    logger.info(f"合計目標値: {total_target}, 対象診療科: {dept_names}")
-                    return total_target, f"診療科: {dept_names}", "全日"
+                if matched_items:
+                    item_names_str = ', '.join(matched_items)
+                    logger.info(f"合計目標値: {total_target}, 対象{item_name}: {item_names_str}")
+                    return total_target, f"{item_name}: {item_names_str}", "全日", messages
                 else:
-                    logger.warning("選択された診療科の目標値が1件も見つかりませんでした")
+                    logger.warning(f"選択された{item_name}の目標値が1件も見つかりませんでした")
         
-        # 特定病棟フィルターの場合（高度形式対応）
-        elif filter_mode == "特定病棟":
-            selected_wards = filter_config.get('selected_wards', [])
-            logger.info(f"選択された病棟: {selected_wards}")
-            
-            if selected_wards:
-                # 複数病棟選択時は合計目標値を計算
-                total_target = 0
-                matched_wards = []
-                
-                for ward in selected_wards:
-                    ward_found = False
-                    
-                    # 部門コードでの検索
-                    if '部門コード' in target_df.columns:
-                        ward_targets = target_df[
-                            (target_df['部門コード'].astype(str).str.strip() == str(ward).strip()) & 
-                            (target_df['区分'].astype(str).str.strip() == '全日')
-                        ]
-                        
-                        if not ward_targets.empty:
-                            target_value = float(ward_targets['目標値'].iloc[0])
-                            total_target += target_value
-                            matched_wards.append(ward)
-                            ward_found = True
-                            logger.info(f"病棟 '{ward}' の目標値 (部門コード): {target_value}")
-                    
-                    # 部門名での検索（部門コードで見つからない場合）
-                    if not ward_found and '部門名' in target_df.columns:
-                        ward_targets_by_name = target_df[
-                            (target_df['部門名'].astype(str).str.strip() == str(ward).strip()) & 
-                            (target_df['区分'].astype(str).str.strip() == '全日')
-                        ]
-                        
-                        if not ward_targets_by_name.empty:
-                            target_value = float(ward_targets_by_name['目標値'].iloc[0])
-                            total_target += target_value
-                            matched_wards.append(ward)
-                            ward_found = True
-                            logger.info(f"病棟 '{ward}' の目標値 (部門名): {target_value}")
-                    
-                    if not ward_found:
-                        logger.warning(f"病棟 '{ward}' の目標値が見つかりません")
-                
-                if matched_wards:
-                    ward_names = ', '.join(matched_wards)
-                    logger.info(f"合計目標値: {total_target}, 対象病棟: {ward_names}")
-                    return total_target, f"病棟: {ward_names}", "全日"
-                else:
-                    logger.warning("選択された病棟の目標値が1件も見つかりませんでした")
-        
-        return None, None, None
+        return None, None, None, messages
         
     except Exception as e:
         logger.error(f"目標値取得エラー: {e}", exc_info=True)
         st.error(f"❌ 目標値取得エラー: {e}")
-        return None, None, None
+        messages.append(("error", f"❌ 目標値取得エラー: {e}"))
+        return None, None, None, messages
 
 # 以下、その他の関数は元のコードと同じ
 def calculate_previous_year_same_period(df_original, current_end_date, current_filter_config):
@@ -1106,24 +1005,24 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         'total_admissions': total_admissions,
     }
     
-    # 目標値取得（ログ出力を抑制）
+    # --- MODIFIED: 目標値取得ロジックの修正 ---
     current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
     target_info = (None, None, None)
     target_messages = []
-    
+
     if current_filter_config and not target_df.empty:
-        # 既存関数を使用してデバッグメッセージを無視
-        import logging
-        old_level = logging.getLogger().level
-        logging.getLogger().setLevel(logging.ERROR)
         try:
-            target_info = get_target_value_for_filter(target_df, current_filter_config)
-            if target_info[0] is not None:
-                target_messages.append(f"目標値取得成功: {target_info[1]} = {target_info[0]:.1f}人/日")
-        except:
-            target_messages.append("目標値取得でエラーが発生しました")
-        finally:
-            logging.getLogger().setLevel(old_level)
+            # 修正: 関数は (value, name, period, messages) のタプルを返す
+            target_value, target_name, target_period, returned_messages = get_target_value_for_filter(
+                target_df, current_filter_config
+            )
+            target_messages.extend(returned_messages) # メッセージをリストに追加
+            
+            if target_value is not None:
+                target_info = (target_value, target_name, target_period)
+                # 成功メッセージはここでは表示せず、デバッグエリアで表示する
+        except Exception as e:
+            target_messages.append(("error", f"目標値取得でエラーが発生しました: {e}"))
     
     # 昨年度同期間データ（エラー抑制）
     df_original = st.session_state.get('df')
@@ -1160,41 +1059,17 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     
     period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
     
-    # デバッグモード時のみ情報表示
-    if show_debug:
-        st.info(f"📊 分析期間: {period_description}")
-        if target_info and target_info[0] is not None:
-            st.success(f"🎯 目標値設定: {target_info[1]} - {target_info[0]:.1f}人/日 ({target_info[2]})")
-        else:
-            st.info("🎯 目標値: 未設定（理論値を使用）")
-    
-    # 既存の統一関数を使用（警告やエラーメッセージを一時的に抑制）
+    # --- MODIFIED: ここでは直接的なメッセージ表示は行わない ---
+    # 既存の統一関数を呼び出す
     try:
-        # streamlitの出力を一時的に抑制
-        import contextlib
-        import io
-        
-        if not show_debug:
-            # デバッグモードでない場合は、標準出力を抑制
-            f = io.StringIO()
-            with contextlib.redirect_stdout(f):
-                display_unified_metrics_layout_colorized(
-                    metrics_for_display, 
-                    period_description, 
-                    prev_year_metrics, 
-                    prev_year_period_info,
-                    target_info
-                )
-        else:
-            # デバッグモードの場合は通常通り表示
-            display_unified_metrics_layout_colorized(
-                metrics_for_display, 
-                period_description, 
-                prev_year_metrics, 
-                prev_year_period_info,
-                target_info
-            )
-    except:
+        display_unified_metrics_layout_colorized(
+            metrics_for_display, 
+            period_description, 
+            prev_year_metrics, 
+            prev_year_period_info,
+            target_info
+        )
+    except Exception as e:
         # フォールバック: 簡潔なKPI表示
         display_simple_kpi_metrics(
             metrics_for_display, 
@@ -1243,20 +1118,28 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     
     with st.expander("🔧 詳細設定・デバッグ情報", expanded=show_debug):
         # 処理メッセージ（チェックボックスで制御）
-        if st.checkbox("📋 処理メッセージを表示", key="show_processing_messages"):
+        if st.checkbox("📋 処理メッセージを表示", key="show_processing_messages", value=show_debug):
             st.markdown("### 📝 処理状況メッセージ")
             
             col_msg1, col_msg2 = st.columns(2)
             
             with col_msg1:
-                st.markdown("**🎯 目標値取得結果**")
-                for msg in target_messages:
-                    st.info(msg)
-                
-                # 分析期間情報
                 st.markdown("**📊 分析期間情報**")
-                st.info(f"📊 分析期間: {period_description}")
+                st.info(f"分析期間: {period_description}")
                 st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
+                
+                # --- NEW: ここで取得したメッセージを表示 ---
+                if target_messages:
+                    st.markdown("**🎯 目標値取得プロセス**")
+                    for msg_type, msg_text in target_messages:
+                        if msg_type == "success":
+                            st.success(msg_text)
+                        elif msg_type == "warning":
+                            st.warning(msg_text)
+                        elif msg_type == "error":
+                            st.error(msg_text)
+                        else: # info
+                            st.info(msg_text)
             
             with col_msg2:
                 st.markdown("**🔍 目標値詳細**")
