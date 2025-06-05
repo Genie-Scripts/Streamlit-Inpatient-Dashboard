@@ -786,6 +786,7 @@ def create_management_dashboard_tab():
         with col_sys2:
             st.metric("目標病床稼働率", f"{target_occupancy_rate_percent:.1f}%")
 
+
 def main():
     # セッション状態の初期化
     if 'app_initialized' not in st.session_state:
