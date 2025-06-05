@@ -1075,8 +1075,13 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         target_df = st.session_state.target_values_df
         target_data_source = "サイドバー"
     else:
-        # サイドバーでの読み込み機能を制御（デバッグモード時のみUI表示）
-        target_df = load_target_values_csv(show_ui=show_debug)
+        # サイドバーでの読み込み機能（既存の関数を使用）
+        if show_debug:
+            # デバッグモード時のみサイドバーでの読み込みを実行
+            target_df = load_target_values_csv()
+        else:
+            # 通常時は既存のセッション状態のみ確認
+            target_df = st.session_state.get('target_values_df', pd.DataFrame())
         target_data_source = "新規読み込み"
     
     # KPI計算の実行
@@ -1108,7 +1113,7 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     target_info = (None, None, None)  # デフォルト値
     
     if current_filter_config and not target_df.empty:
-        target_info = get_target_value_for_filter(target_df, current_filter_config, show_debug=show_debug)
+        target_info = get_target_value_for_filter(target_df, current_filter_config)
     
     # 昨年度同期間データの計算（エラー表示を抑制）
     df_original = st.session_state.get('df')
@@ -1301,12 +1306,47 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
             if st.checkbox("🔍 目標値取得の詳細ログを表示", key="show_target_debug_log"):
                 st.markdown("**目標値取得の詳細処理:**")
                 if current_filter_config:
-                    # デバッグモードで目標値を再取得
-                    debug_target_info = get_target_value_for_filter(target_df, current_filter_config, show_debug=True)
+                    # 既存の関数を使用（デバッグ情報は元々表示される）
+                    st.info("目標値取得プロセスの詳細:")
+                    debug_target_info = get_target_value_for_filter(target_df, current_filter_config)
                     if debug_target_info[0] is not None:
                         st.success(f"詳細分析結果: {debug_target_info[1]} = {debug_target_info[0]:.1f}人/日")
                     else:
                         st.warning("詳細分析でも目標値を取得できませんでした")
+                        
+                        # 詳細なトラブルシューティング情報
+                        st.markdown("**トラブルシューティング情報:**")
+                        filter_mode = current_filter_config.get('filter_mode', '全体')
+                        st.write(f"• フィルターモード: {filter_mode}")
+                        
+                        if filter_mode == "特定診療科":
+                            selected_depts = current_filter_config.get('selected_depts', [])
+                            st.write(f"• 選択診療科: {selected_depts}")
+                            if '部門コード' in target_df.columns:
+                                available_codes = target_df['部門コード'].unique().tolist()
+                                st.write(f"• 目標値の部門コード: {available_codes}")
+                                matching = [dept for dept in selected_depts if dept in available_codes]
+                                st.write(f"• 一致する部門: {matching}")
+                        
+                        elif filter_mode == "特定病棟":
+                            selected_wards = current_filter_config.get('selected_wards', [])
+                            st.write(f"• 選択病棟: {selected_wards}")
+                            if '部門コード' in target_df.columns:
+                                available_codes = target_df['部門コード'].unique().tolist()
+                                st.write(f"• 目標値の部門コード: {available_codes}")
+                                matching = [ward for ward in selected_wards if ward in available_codes]
+                                st.write(f"• 一致する部門: {matching}")
+                        
+                        elif filter_mode == "全体":
+                            overall_keywords = ['全体', '病院全体', '総合', '病院', '合計']
+                            st.write(f"• 検索キーワード: {overall_keywords}")
+                            if '部門コード' in target_df.columns:
+                                matching_keywords = []
+                                for keyword in overall_keywords:
+                                    matches = target_df[target_df['部門コード'].astype(str).str.contains(keyword, na=False, case=False)]
+                                    if not matches.empty:
+                                        matching_keywords.append(f"{keyword}({len(matches)}件)")
+                                st.write(f"• 一致するキーワード: {matching_keywords}")
                 else:
                     st.write("フィルター設定がないため詳細分析できません")
         
