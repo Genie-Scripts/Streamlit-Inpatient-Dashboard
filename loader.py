@@ -1,83 +1,63 @@
+# loader.py (修正案 - ロギング強化・エラー伝達改善)
+
 from concurrent.futures import ThreadPoolExecutor
-import concurrent.futures  # 完全なモジュールもインポート
+import concurrent.futures
 import pandas as pd
-import streamlit as st
+import streamlit as st # 主に @st.cache_data のため
 import hashlib
 import os
 import tempfile
 from io import BytesIO
-import time  # time モジュールを追加
-import gc  # gc モジュールを追加
+import time
+import gc
+import logging # logging をインポート
+
+logger = logging.getLogger(__name__) # logger を設定
 
 def calculate_file_hash(file_content_bytes):
     """
     ファイルのハッシュ値を計算して一意の識別子を作成
-    
-    Parameters:
-    -----------
-    file_content_bytes: bytes
-        ファイルの内容をバイト列で表したもの
-        
-    Returns:
-    --------
-    str
-        MD5ハッシュ値の16進数文字列
     """
     try:
-        # ファイルサイズが大きすぎる場合、先頭部分のみを使用してハッシュ計算
         max_bytes = 10 * 1024 * 1024  # 10MB上限
         if len(file_content_bytes) > max_bytes:
-            # 先頭5MBと末尾5MBを組み合わせてハッシュ計算
-            head = file_content_bytes[:5 * 1024 * 1024]  # 先頭5MB
-            tail = file_content_bytes[-5 * 1024 * 1024:]  # 末尾5MB
+            head = file_content_bytes[:5 * 1024 * 1024]
+            tail = file_content_bytes[-5 * 1024 * 1024:]
             combined = head + tail
             return hashlib.md5(combined).hexdigest()
         else:
-            # 通常のハッシュ計算
             return hashlib.md5(file_content_bytes).hexdigest()
     except Exception as e:
-        print(f"ファイルハッシュ計算エラー: {str(e)}")
-        # エラー時にはファイルサイズとタイムスタンプの組み合わせを返す
-        import time
+        logger.error(f"ファイルハッシュ計算エラー: {str(e)}", exc_info=True) # loggerを使用し、スタックトレースも記録
         file_size = len(file_content_bytes)
         timestamp = int(time.time())
-        return f"size_{file_size}_time_{timestamp}"
+        return f"size_{file_size}_time_{timestamp}" # フォールバックは維持
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def read_excel_cached(file_content_bytes, sheet_name=0, usecols=None, dtype=None):
     """
     ファイル内容に基づいたキャッシュを使用してExcelを読み込む
     列名の柔軟な対応を追加
+    エラーハンドリングを強化
     """
     temp_path = None
     try:
-        # 一時ファイルを作成
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
             temp_file.write(file_content_bytes)
             temp_path = temp_file.name
 
-        # まず列名を確認するために1行だけ読み込む
+        # まず列名を確認するためにヘッダー行のみ読み込む
         try:
             df_header = pd.read_excel(temp_path, sheet_name=sheet_name, nrows=0, engine='openpyxl')
             available_columns = list(df_header.columns)
-            print(f"利用可能な列: {available_columns}")
-        except Exception as e:
-            print(f"ヘッダー読み込みエラー: {e}")
-            available_columns = []
+        except Exception as e_header:
+            logger.warning(f"Excelファイルのヘッダー読み込みに失敗しました (ファイルパス: {temp_path}, シート: {sheet_name}): {e_header}", exc_info=True)
+            available_columns = [] # 列情報が取得できない場合は空リスト
 
-        # 期待される列名がない場合は、そのファイルをスキップ
-        expected_columns = ['病棟コード', '診療科名', '日付', '在院患者数']
-        matching_columns = [col for col in expected_columns if col in available_columns]
-        
-        if len(matching_columns) < 2:  # 最低2列は必要
-            print(f"警告: ファイルの列名が期待される形式と大きく異なります。スキップします。")
-            print(f"期待列: {expected_columns}")
-            print(f"実際列: {available_columns}")
-            return None
+        logger.info(f"Excel読込試行: 利用可能な列: {available_columns}, usecols指定: {usecols}, dtype指定: {dtype}")
 
-        # 列名のマッピング辞書（柔軟な対応）
+        # 列名マッピングと使用列の決定ロジック
         column_mapping = {
-            # 標準名: [可能な列名のリスト]
             '日付': ['日付', 'Date', '年月日', 'DATE'],
             '病棟コード': ['病棟コード', '病棟', 'Ward Code', 'Ward', '病棟CD'],
             '診療科名': ['診療科名', '診療科', 'Department', 'Dept', '科名'],
@@ -87,263 +67,171 @@ def read_excel_cached(file_content_bytes, sheet_name=0, usecols=None, dtype=None
             '退院患者数': ['退院患者数', '退院', 'Discharges', '退院者数'],
             '死亡患者数': ['死亡患者数', '死亡', 'Deaths', '死亡者数']
         }
-
-        # 実際に使用する列名を決定
         final_usecols = []
         final_dtype = {}
         column_rename_map = {}
 
-        if usecols and available_columns:
-            for required_col in usecols:
-                matched_col = None
-                
-                # 完全一致をまず試す
-                if required_col in available_columns:
-                    matched_col = required_col
-                else:
-                    # マッピングから検索
-                    possible_names = column_mapping.get(required_col, [required_col])
-                    for possible_name in possible_names:
+        if usecols: # usecols が指定されている場合のみ列選択とリネームを行う
+            if not available_columns: # 列情報が取得できなかった場合はエラー
+                 raise ValueError(f"Excelファイルの列情報が読み取れず、指定された列 ({usecols}) の検証ができません。")
+
+            for required_col_standard_name in usecols: # usecols には標準名を期待
+                matched_actual_col = None
+                if required_col_standard_name in available_columns: # まず標準名で完全一致を探す
+                    matched_actual_col = required_col_standard_name
+                else: # 見つからなければマッピング候補を探す
+                    possible_names_in_file = column_mapping.get(required_col_standard_name, [required_col_standard_name])
+                    for possible_name in possible_names_in_file:
                         if possible_name in available_columns:
-                            matched_col = possible_name
+                            matched_actual_col = possible_name
                             break
                 
-                if matched_col:
-                    final_usecols.append(matched_col)
-                    if matched_col != required_col:
-                        column_rename_map[matched_col] = required_col
-                    
-                    # データ型も対応
-                    if dtype and required_col in dtype:
-                        final_dtype[matched_col] = dtype[required_col]
+                if matched_actual_col:
+                    final_usecols.append(matched_actual_col) # ファイルに存在する列名で指定
+                    if matched_actual_col != required_col_standard_name:
+                        column_rename_map[matched_actual_col] = required_col_standard_name # 変換後を標準名に
+                    if dtype and required_col_standard_name in dtype: # dtypeは標準名で指定されていると仮定
+                        final_dtype[matched_actual_col] = dtype[required_col_standard_name]
                 else:
-                    print(f"警告: 列 '{required_col}' が見つかりません")
-
-            print(f"最終使用列: {final_usecols}")
-            print(f"列名変換: {column_rename_map}")
+                    # 必須列が見つからない場合は警告ログを出し、エラーにはしない（呼び出し元で列の有無を最終判断）
+                    logger.warning(f"指定された必須列 '{required_col_standard_name}' (またはそのエイリアス) がファイルに見つかりませんでした。")
             
-            # 最終チェック：重要な列が見つからない場合はファイルをスキップ
-            essential_columns = ['病棟コード', '診療科名', '日付']
-            found_essential = [col for col in essential_columns if col in [column_rename_map.get(c, c) for c in final_usecols]]
-            
-            if len(found_essential) < 2:
-                print(f"重要な列が不足しているため、このファイルをスキップします。")
-                return None
-                
-        else:
-            # usecolsが指定されていない、または列名が取得できない場合は全て読み込む
+            if not final_usecols: # 読み込むべき列が一つも見つからなかった場合
+                raise ValueError(f"指定された列 ({usecols}) がExcelファイル中に一つも見つかりませんでした。利用可能な列: {available_columns}")
+            logger.info(f"最終的にExcelから読み込む列: {final_usecols}, 列名変換マップ: {column_rename_map}")
+        else: # usecolsが指定されていない場合は全ての列を読み込む
             final_usecols = None
-            final_dtype = dtype
+            final_dtype = dtype # 指定されていればそのまま使用
 
-        # Excelファイルの読み込み
         df = pd.read_excel(
-            temp_path, 
-            sheet_name=sheet_name, 
-            engine='openpyxl', 
-            usecols=final_usecols, 
-            dtype=final_dtype
+            temp_path,
+            sheet_name=sheet_name,
+            engine='openpyxl',
+            usecols=final_usecols, # Noneなら全列
+            dtype=final_dtype # Noneなら型推論
         )
-        
-        # 列名の変換
-        if column_rename_map:
+
+        if column_rename_map: # 列名リネーム処理
             df = df.rename(columns=column_rename_map)
-            print(f"列名を変換しました: {column_rename_map}")
-        
-        # 基本的な検証
+            logger.info(f"列名を標準名に変換しました: {list(column_rename_map.values())}")
+
         if df.empty:
-            print(f"警告: 読み込まれたExcelファイルが空です: sheet_name={sheet_name}")
-            return None
-            
-        print(f"Excel読込成功: {df.shape[0]}行 × {df.shape[1]}列")
+            logger.warning(f"読み込まれたExcelファイルが空です (シート名: {sheet_name})。")
+            # 空のDataFrameを返すのは妥当な場合もあるので、ここではエラーとしない
+
+        logger.info(f"Excel読込成功: {df.shape[0]}行 × {df.shape[1]}列 (ファイルパス: {temp_path})")
         return df
-        
+
+    except FileNotFoundError:
+        logger.error(f"一時ファイルが見つかりません: {temp_path}", exc_info=True)
+        raise # このエラーは呼び出し元で処理すべき
+    except ValueError as ve: # 重要な列不足などで発生させた例外
+        logger.error(f"Excelデータ検証エラー: {str(ve)} (ファイルパス: {temp_path})", exc_info=True)
+        raise
     except Exception as e:
-        # 詳細なエラーメッセージをログに出力
-        print(f"Excel読込エラー: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        return None
+        logger.error(f"Excel読込中に予期せぬエラーが発生しました: {str(e)} (ファイルパス: {temp_path})", exc_info=True)
+        raise # エラーを再発生させて呼び出し元に通知
     finally:
-        # 確実に一時ファイルを削除
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
-            except Exception as e:
-                print(f"一時ファイル削除エラー: {str(e)}")
+            except Exception as e_unlink:
+                logger.error(f"一時ファイル削除エラー: {str(e_unlink)} (ファイルパス: {temp_path})", exc_info=True)
 
-# data_processing_tab.py の EXCEL_USE_COLUMNS も柔軟にする
-EXCEL_USE_COLUMNS_FLEXIBLE = [
-    "病棟コード", "診療科名", "日付", "在院患者数",
-    "入院患者数", "緊急入院患者数", "退院患者数", "死亡患者数"
-]
-
-# より柔軟な列名リスト（オプション）
-EXCEL_OPTIONAL_COLUMNS = [
-    "転科入院患者数", "転科退院患者数", "平均在院日数"
-]
-
-def process_uploaded_file(uploaded_file):
-    """
-    アップロードされたファイルを処理する
-    
-    Parameters:
-    -----------
-    uploaded_file: StreamlitUploadedFile
-        Streamlitのファイルアップローダーからのファイルオブジェクト
-        
-    Returns:
-    --------
-    pd.DataFrame
-        読み込まれたデータフレーム
-    """
-    start_time = time.time()
-    
-    try:
-        # ファイルをバイトとして読み込む
-        uploaded_file.seek(0)
-        file_content = uploaded_file.read()
-        uploaded_file.seek(0)  # ファイルポインタを戻す
-        
-        file_size = len(file_content) / (1024 * 1024)  # MBに変換
-        print(f"ファイル読込開始: {uploaded_file.name} ({file_size:.2f} MB)")
-        
-        # ファイル拡張子の確認
-        file_extension = os.path.splitext(uploaded_file.name)[1].lower()
-        
-        if file_extension in ['.xlsx', '.xls']:
-            # Excel ファイルの読み込み
-            df = read_excel_cached(file_content)
-        elif file_extension == '.csv':
-            # CSV ファイルの読み込み
-            try:
-                # UTF-8 で試みる
-                df = pd.read_csv(BytesIO(file_content), encoding='utf-8')
-            except UnicodeDecodeError:
-                # Shift-JIS で試みる
-                df = pd.read_csv(BytesIO(file_content), encoding='shift-jis')
-        else:
-            print(f"サポートされていないファイル形式: {file_extension}")
-            return pd.DataFrame()
-        
-        if df is None or df.empty:
-            print(f"ファイル '{uploaded_file.name}' が空か読み込みに失敗しました")
-            return pd.DataFrame()
-        
-        end_time = time.time()
-        rows, cols = df.shape
-        print(f"ファイル '{uploaded_file.name}' の読込成功: {rows}行 × {cols}列, 処理時間: {end_time - start_time:.2f}秒")
-        
-        return df
-    
-    except Exception as e:
-        print(f"ファイル '{uploaded_file.name}' の処理エラー: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        return pd.DataFrame()
+# EXCEL_USE_COLUMNS_FLEXIBLE と EXCEL_OPTIONAL_COLUMNS は data_processing_tab.py で使用されるため、
+# loader.py 内での定義は不要かもしれません。呼び出し元で渡す usecols を制御します。
+# process_uploaded_file 関数は data_processing_tab.py に同様のロジックがあるため、
+# loader.py からは削除し、data_processing_tab.py 側のロジックを優先します。
 
 def load_files(base_file, new_files, usecols_excel=None, dtype_excel=None):
     """
     複数のExcelファイルを並列処理で読み込む。
-    
-    Parameters:
-    -----------
-    base_file: Streamlit UploadedFile object or None
-        基本ファイル（通常は過去データ）
-    new_files: list of Streamlit UploadedFile objects or None
-        追加のファイルリスト
-    usecols_excel: list or None
-        Excel読み込み時に指定する列のリスト
-    dtype_excel: dict or None
-        Excel読み込み時に指定するデータ型の辞書
-        
-    Returns:
-    --------
-    pandas.DataFrame
-        読み込まれたすべてのファイルを結合したデータフレーム
-        ファイルがないか読み込みに失敗した場合は空のデータフレーム
+    エラーハンドリングを強化し、処理結果を詳細に返す。
     """
     start_time = time.time()
-    
-    # ファイルリストの準備
-    df_list = []
-    files_to_process = []
+    all_dfs_list = [] # 読み込まれたDataFrameを格納するリスト
+    processed_files_info = [] # 各ファイルの処理結果情報を格納するリスト
 
-    # base_fileとnew_filesをファイルリストに追加
-    if base_file:  # base_fileがNoneでない場合
-        files_to_process.append(base_file)
-        print(f"基本ファイルを処理リストに追加: {base_file.name}")
-    
-    if new_files:  # new_filesがNoneでない、かつ空でない場合
-        files_to_process.extend(new_files)
-        print(f"追加ファイル{len(new_files)}件を処理リストに追加")
+    files_to_process_with_source = []
+    if base_file:
+        files_to_process_with_source.append({'file_obj': base_file, 'source_type': 'base'})
+    if new_files:
+        for f_new in new_files:
+            files_to_process_with_source.append({'file_obj': f_new, 'source_type': 'new'})
 
-    # 処理対象ファイルがない場合は空のデータフレームを返す
-    if not files_to_process:
-        print("処理対象ファイルがありません。")
-        return pd.DataFrame()
+    if not files_to_process_with_source:
+        logger.info("処理対象ファイルがありません。")
+        return pd.DataFrame(), [] # 空のDFと空の処理情報リスト
 
-    # ファイル内容をメモリに読み込む
-    file_contents = []
-    for file_obj in files_to_process:
+    file_byte_contents = []
+    for item in files_to_process_with_source:
+        file_obj = item['file_obj']
+        source_type = item['source_type']
         try:
             file_obj.seek(0)
-            file_content = file_obj.read()
-            file_contents.append((file_obj.name, file_content))
-            file_obj.seek(0)  # ファイルポインタを戻す
-            file_size = len(file_content) / (1024 * 1024)  # MBに変換
-            print(f"ファイル読込: {file_obj.name} ({file_size:.2f} MB)")
+            content = file_obj.read()
+            file_obj.seek(0)
+            file_byte_contents.append({'name': file_obj.name, 'content': content, 'source_type': source_type, 'status': 'pending'})
+            logger.debug(f"ファイル内容読み込み: {file_obj.name} ({len(content)/(1024*1024):.2f} MB)")
         except Exception as e:
-            print(f"ファイル読込エラー ({file_obj.name}): {str(e)}")
+            logger.error(f"ファイル内容のバイト列取得エラー ({file_obj.name}): {str(e)}", exc_info=True)
+            processed_files_info.append({'name': file_obj.name, 'status': 'error_reading_bytes', 'message': str(e), 'rows': 0, 'cols': 0})
 
-    # 並列処理の設定（最大ワーカー数を制限）
-    max_workers = min(4, len(file_contents)) if file_contents else 1
-    print(f"並列処理ワーカー数: {max_workers}")
-    
-    # 並列処理でExcelファイルを読み込む
+    if not file_byte_contents:
+        logger.warning("読み込み可能なファイル内容がありません。")
+        return pd.DataFrame(), processed_files_info
+
+    # 実際のCPUコア数に基づいてワーカー数を決定 (最大4まで)
+    num_available_cores = os.cpu_count() or 1
+    max_workers = min(4, num_available_cores, len(file_byte_contents))
+    logger.info(f"並列処理ワーカー数: {max_workers} (利用可能コア: {num_available_cores})")
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 各ファイルの読み込みタスクを登録
-        futures = {
-            executor.submit(read_excel_cached, content, 0, usecols_excel, dtype_excel): name
-            for name, content in file_contents
+        future_to_file_info = {
+            executor.submit(read_excel_cached, item['content'], 0, usecols_excel, dtype_excel): item
+            for item in file_byte_contents
         }
-
-        # 各タスクの結果を処理
-        successful_files = 0
-        for future in concurrent.futures.as_completed(futures):
-            file_name = futures[future]
+        for future in concurrent.futures.as_completed(future_to_file_info):
+            file_info_item = future_to_file_info[future]
+            file_name = file_info_item['name']
+            source_type = file_info_item['source_type']
             try:
-                df = future.result()
-                if df is not None and not df.empty:
-                    df_list.append(df)
-                    rows, cols = df.shape
-                    print(f"ファイル '{file_name}' の読込成功: {rows}行 × {cols}列")
-                    successful_files += 1
-                else:
-                    print(f"ファイル '{file_name}' の読込結果が空です")
+                df_single = future.result() # read_excel_cached が例外を発生させる可能性あり
+                if df_single is not None and not df_single.empty:
+                    df_single['_source_file_'] = file_name # どのファイル由来か追跡用列を追加
+                    df_single['_source_type_'] = source_type
+                    all_dfs_list.append(df_single)
+                    processed_files_info.append({'name': file_name, 'status': 'success', 'message': '読み込み成功', 'rows': df_single.shape[0], 'cols': df_single.shape[1]})
+                    logger.info(f"ファイル '{file_name}' の読込成功: {df_single.shape[0]}行 × {df_single.shape[1]}列")
+                elif df_single is None: # read_excel_cached が None を返した場合（例：列不足、致命的エラー）
+                    processed_files_info.append({'name': file_name, 'status': 'skipped_critical', 'message': '重要な列不足または読み込み不可', 'rows': 0, 'cols': 0})
+                    logger.warning(f"ファイル '{file_name}' は期待される形式ではないため、スキップされました（致命的）。")
+                else: # df_single is empty
+                    processed_files_info.append({'name': file_name, 'status': 'empty_content', 'message': 'ファイル内容は空でした', 'rows': 0, 'cols': 0})
+                    logger.warning(f"ファイル '{file_name}' の読込結果が空です。")
+            except ValueError as ve:
+                processed_files_info.append({'name': file_name, 'status': 'error_validation', 'message': str(ve), 'rows': 0, 'cols': 0})
+                logger.error(f"ファイル '{file_name}' の処理エラー（データ検証）: {str(ve)}")
             except Exception as e:
-                print(f"ファイル '{file_name}' の処理中にエラー: {str(e)}")
-                import traceback
-                print(traceback.format_exc())
+                processed_files_info.append({'name': file_name, 'status': 'error_processing', 'message': str(e), 'rows': 0, 'cols': 0})
+                logger.error(f"ファイル '{file_name}' の処理中に予期せぬエラー: {str(e)}", exc_info=True)
 
-    # 読み込み結果の確認
-    if not df_list:
-        print("読み込み可能なExcelデータがありません。")
-        return pd.DataFrame()
+    if not all_dfs_list:
+        logger.warning("読み込み可能なExcelデータがありませんでした。")
+        return pd.DataFrame(), processed_files_info # 処理情報リストは返す
 
-    # データフレームの結合
     try:
-        df_raw = pd.concat(df_list, ignore_index=True)
-        
-        # 効率的な重複チェック関数を使用
-        from integrated_preprocessing import efficient_duplicate_check
-        df_raw = efficient_duplicate_check(df_raw)
-        
-        # 結果の出力
+        df_combined_raw = pd.concat(all_dfs_list, ignore_index=True)
+        del all_dfs_list # メモリ解放
+        gc.collect()
         end_time = time.time()
-        rows, cols = df_raw.shape
-        print(f"データ読込完了: {successful_files}/{len(file_contents)}ファイル成功, {rows}行 × {cols}列, 処理時間: {end_time - start_time:.2f}秒")
-        
-        return df_raw
+        logger.info(
+            f"データ読込完了: {len(processed_files_info)}ファイル試行, "
+            f"結合後: {df_combined_raw.shape[0]}行 × {df_combined_raw.shape[1]}列 (ソース情報列含む), "
+            f"処理時間: {end_time - start_time:.2f}秒"
+        )
+        # _source_file_ と _source_type_ は data_processing_tab.py で重複チェック後に削除する
+        return df_combined_raw, processed_files_info
     except Exception as e:
-        print(f"データフレーム結合エラー: {str(e)}")
-        return pd.DataFrame()
+        logger.error(f"データフレーム結合エラー: {str(e)}", exc_info=True)
+        return pd.DataFrame(), processed_files_info # 処理情報リストは返す
