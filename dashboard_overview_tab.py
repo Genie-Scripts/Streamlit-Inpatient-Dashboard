@@ -83,34 +83,16 @@ def load_target_values_csv():
 
 def get_target_value_for_filter(target_df, filter_config, metric_type="日平均在院患者数"):
     """
-    フィルター設定に基づいて目標値を取得（UI表示コードを削除、デバッグ機能追加）
+    フィルター設定に基づいて目標値を取得 (デバッグコードを削除)
     """
-    # --- ここからが新しいデバッグ機能 ---
-    with st.sidebar.expander("[Debug] get_target_value_for_filter 実行情報", expanded=True):
-        st.markdown("##### 1. 受け取ったフィルター設定")
-        st.json(filter_config if filter_config else {"error": "フィルター設定がありません"})
-
-        st.markdown("##### 2. 検索対象の目標値データ")
-        if target_df is not None and not target_df.empty:
-            st.dataframe(target_df.head())
-            if '部門コード' in target_df.columns:
-                st.markdown("**CSV内のユニークな「部門コード」** (クリーニング後)")
-                st.json(target_df['部門コード'].unique().tolist())
-            if '部門名' in target_df.columns:
-                 st.markdown("**CSV内のユニークな「部門名」** (クリーニング後)")
-                 st.json(target_df['部門名'].unique().tolist())
-        else:
-            st.warning("目標値データフレームが空です。")
-    # --- ここまでが新しいデバッグ機能 ---
-
     if target_df.empty or not filter_config:
         return None, None, None
     
     try:
         filter_mode = filter_config.get('filter_mode', '全体')
-        logger.info(f"目標値取得: フィルターモード = {filter_mode}")
+        logger.info(f"目標値取得: フィルターモード = {filter_mode}, 選択: {filter_config.get('selected_depts') or filter_config.get('selected_wards')}")
         
-        # (この関数内の既存のロジックは変更なし)
+        # (この関数内のロジックは前回から変更なし、デバッグ表示だけ削除)
         if filter_mode == "特定診療科" or filter_mode == "特定病棟":
             is_dept = filter_mode == "特定診療科"
             selected_items = filter_config.get('selected_depts' if is_dept else 'selected_wards', [])
@@ -120,6 +102,7 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 total_target, matched_items = 0, []
                 for item in selected_items:
                     item_found = False
+                    # .values を使うことで高速な検索が可能
                     if '部門コード' in target_df.columns and item in target_df['部門コード'].values:
                         target_value = float(target_df.loc[target_df['部門コード'] == item, '目標値'].iloc[0])
                         total_target += target_value
@@ -137,7 +120,7 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
                 
                 if matched_items:
                     return total_target, f"{item_name}: {', '.join(matched_items)}", "全日"
-        
+
         elif filter_mode == "全体":
             overall_keywords = ['全体', '病院全体', '総合', '病院', '合計', 'ALL', 'TOTAL']
             for keyword in overall_keywords:
@@ -159,7 +142,6 @@ def get_target_value_for_filter(target_df, filter_config, metric_type="日平均
     except Exception as e:
         logger.error(f"目標値取得エラー: {e}", exc_info=True)
         return None, None, None
-
 
 def calculate_previous_year_same_period(df_original, current_end_date, current_filter_config):
     """
