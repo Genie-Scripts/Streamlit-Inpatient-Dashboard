@@ -1040,9 +1040,11 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.write(f"• 月間目標延べ日数: {format_number_with_config(monthly_target_days, '人日')}")
 
 # 以下、残りの関数は元のコードと同じ...
+# dashboard_overview_tab.py の display_kpi_cards_only 関数改善版（簡潔版）
+
 def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent, show_debug=False):
     """
-    KPIカード表示専用関数（レイアウト改善版）
+    KPIカード表示専用関数（レイアウト改善・簡潔版）
     
     Args:
         df: データフレーム
@@ -1060,14 +1062,13 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         return
     
     # =================================================================
-    # 1. KPI計算と基本データ準備（デバッグ情報なし）
+    # 1. データ準備
     # =================================================================
     
-    # 目標値データの取得（優先順位付き・シンプル版）
+    # 目標値データの取得
     target_df = pd.DataFrame()
     target_data_source = ""
     
-    # データ入力タブ > サイドバー の優先順位で目標値データを取得
     if st.session_state.get('target_data') is not None:
         target_df = st.session_state.get('target_data')
         target_data_source = "データ入力タブ"
@@ -1075,22 +1076,19 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         target_df = st.session_state.target_values_df
         target_data_source = "サイドバー"
     else:
-        # サイドバーでの読み込み機能（既存の関数を使用）
         if show_debug:
-            # デバッグモード時のみサイドバーでの読み込みを実行
             target_df = load_target_values_csv()
         else:
-            # 通常時は既存のセッション状態のみ確認
             target_df = st.session_state.get('target_values_df', pd.DataFrame())
-        target_data_source = "新規読み込み"
+        target_data_source = "読み込み待ち"
     
-    # KPI計算の実行
+    # KPI計算
     kpis_selected_period = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
     if kpis_selected_period is None or kpis_selected_period.get("error"):
-        st.warning(f"選択された期間のKPI計算に失敗しました。理由: {kpis_selected_period.get('error', '不明') if kpis_selected_period else '不明'}")
+        st.warning(f"選択された期間のKPI計算に失敗しました。")
         return
     
-    # 追加のメトリクス計算
+    # メトリクス準備
     period_df = df[(df['日付'] >= start_date) & (df['日付'] <= end_date)]
     total_admissions = 0
     if '入院患者数' in period_df.columns:
@@ -1108,33 +1106,34 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         'total_admissions': total_admissions,
     }
     
-    # フィルター設定に基づく目標値取得（メッセージ表示を制御）
+    # 目標値取得（ログ出力を抑制）
     current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
-    target_info = (None, None, None)  # デフォルト値
-    
-    # 目標値取得時のメッセージを収集するためのリスト
+    target_info = (None, None, None)
     target_messages = []
     
     if current_filter_config and not target_df.empty:
-        # 目標値取得を実行（メッセージは後で表示）
-        target_info = get_target_value_for_filter(target_df, current_filter_config)
-        
-        # 取得された目標値情報をメッセージとして記録
-        if target_info[0] is not None:
-            target_messages.append(f"✅ 全体目標値が見つかりました: {target_info[1]} = {target_info[0]:.1f}人/日")
-        else:
-            target_messages.append("⚠️ 目標値が見つかりませんでした（理論値を使用）")
+        # 既存関数を使用してデバッグメッセージを無視
+        import logging
+        old_level = logging.getLogger().level
+        logging.getLogger().setLevel(logging.ERROR)
+        try:
+            target_info = get_target_value_for_filter(target_df, current_filter_config)
+            if target_info[0] is not None:
+                target_messages.append(f"目標値取得成功: {target_info[1]} = {target_info[0]:.1f}人/日")
+        except:
+            target_messages.append("目標値取得でエラーが発生しました")
+        finally:
+            logging.getLogger().setLevel(old_level)
     
-    # 昨年度同期間データの計算（エラー表示を抑制）
+    # 昨年度同期間データ（エラー抑制）
     df_original = st.session_state.get('df')
     prev_year_metrics = None
     prev_year_period_info = None
     
     if df_original is not None and not df_original.empty:
         try:
-            latest_date_in_current = end_date
             prev_year_data, prev_start, prev_end, prev_period_desc = calculate_previous_year_same_period(
-                df_original, latest_date_in_current, current_filter_config
+                df_original, end_date, current_filter_config
             )
             
             if not prev_year_data.empty and prev_start and prev_end:
@@ -1152,24 +1151,58 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                         'total_admissions': prev_total_admissions,
                     }
                     prev_year_period_info = prev_period_desc
-        except Exception:
-            pass  # エラーは無視して昨年度比較なしで続行
+        except:
+            pass
     
     # =================================================================
-    # 2. KPIカードの表示（最優先・メッセージ制御版）
+    # 2. KPIカード表示（簡潔版）
     # =================================================================
     
     period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
     
-    # カスタムKPIカード表示（メッセージ制御版）
-    display_clean_kpi_metrics(
-        metrics_for_display, 
-        period_description, 
-        prev_year_metrics, 
-        prev_year_period_info,
-        target_info,
-        show_debug
-    )
+    # デバッグモード時のみ情報表示
+    if show_debug:
+        st.info(f"📊 分析期間: {period_description}")
+        if target_info and target_info[0] is not None:
+            st.success(f"🎯 目標値設定: {target_info[1]} - {target_info[0]:.1f}人/日 ({target_info[2]})")
+        else:
+            st.info("🎯 目標値: 未設定（理論値を使用）")
+    
+    # 既存の統一関数を使用（警告やエラーメッセージを一時的に抑制）
+    try:
+        # streamlitの出力を一時的に抑制
+        import contextlib
+        import io
+        
+        if not show_debug:
+            # デバッグモードでない場合は、標準出力を抑制
+            f = io.StringIO()
+            with contextlib.redirect_stdout(f):
+                display_unified_metrics_layout_colorized(
+                    metrics_for_display, 
+                    period_description, 
+                    prev_year_metrics, 
+                    prev_year_period_info,
+                    target_info
+                )
+        else:
+            # デバッグモードの場合は通常通り表示
+            display_unified_metrics_layout_colorized(
+                metrics_for_display, 
+                period_description, 
+                prev_year_metrics, 
+                prev_year_period_info,
+                target_info
+            )
+    except:
+        # フォールバック: 簡潔なKPI表示
+        display_simple_kpi_metrics(
+            metrics_for_display, 
+            period_description, 
+            prev_year_metrics, 
+            target_info,
+            show_debug
+        )
     
     # =================================================================
     # 3. 簡潔な分析条件表示
@@ -1179,7 +1212,7 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     col_summary1, col_summary2, col_summary3 = st.columns(3)
     
     with col_summary1:
-        # フィルター適用状況（簡潔版）
+        # フィルター適用状況
         filter_mode = current_filter_config.get('filter_mode', '全体') if current_filter_config else '全体'
         if filter_mode == "特定診療科":
             selected_depts = current_filter_config.get('selected_depts', [])
@@ -1193,24 +1226,24 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
             st.metric("🔍 フィルター", "全体", "全データ対象")
     
     with col_summary2:
-        # 目標値設定状況（簡潔版）
+        # 目標値設定状況
         if target_info and target_info[0] is not None:
             st.metric("🎯 目標値", f"{target_info[0]:.0f}人/日", f"設定済み ({target_data_source})")
         else:
             st.metric("🎯 目標値", "理論値使用", "CSVファイル未設定")
     
     with col_summary3:
-        # データ期間（簡潔版）
+        # データ期間
         date_range_days = (end_date - start_date).days + 1
         st.metric("📊 分析期間", f"{date_range_days}日間", f"レコード数: {len(df):,}件")
     
     # =================================================================
-    # 4. 詳細情報・デバッグ情報（Expanderにまとめて下部に配置）
+    # 4. 詳細情報（Expanderで制御）
     # =================================================================
     
     with st.expander("🔧 詳細設定・デバッグ情報", expanded=show_debug):
-        # 処理メッセージの表示（デバッグモード時または情報確認時）
-        if show_debug or st.checkbox("📋 処理メッセージを表示", key="show_processing_messages"):
+        # 処理メッセージ（チェックボックスで制御）
+        if st.checkbox("📋 処理メッセージを表示", key="show_processing_messages"):
             st.markdown("### 📝 処理状況メッセージ")
             
             col_msg1, col_msg2 = st.columns(2)
@@ -1231,21 +1264,12 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                     st.success(f"🎯 目標値設定: {target_info[1]} - {target_info[0]:.1f}人/日 ({target_info[2]})")
                 else:
                     st.info("🎯 目標値: 未設定（理論値を使用）")
-                
-                # 指標フィルタリング情報（もしあれば）
-                if not target_df.empty and '指標タイプ' in target_df.columns:
-                    unique_indicators = target_df['指標タイプ'].unique()
-                    target_indicators = ['日平均在院患者数', '在院患者数', '患者数']
-                    matching_indicators = [ind for ind in unique_indicators 
-                                         for target in target_indicators if target in str(ind)]
-                    if matching_indicators:
-                        st.info(f"🏷️ 指標フィルタリング: {', '.join(matching_indicators)} を使用")
             
             st.markdown("---")
         
+        # 分析条件詳細
         st.markdown("### 📊 分析条件詳細")
         
-        # フィルター詳細
         col_detail1, col_detail2 = st.columns(2)
         
         with col_detail1:
@@ -1258,9 +1282,6 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                 elif filter_mode == "特定病棟":
                     selected_wards = current_filter_config.get('selected_wards', [])
                     st.write(f"• 選択病棟: {', '.join(selected_wards[:3])}{'...' if len(selected_wards) > 3 else ''}")
-                
-                if current_filter_config.get('period_mode'):
-                    st.write(f"• 期間設定: {current_filter_config['period_mode']}")
             else:
                 st.write("• フィルター設定なし")
         
@@ -1272,20 +1293,11 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                 if '部門コード' in target_df.columns:
                     dept_count = target_df['部門コード'].nunique()
                     st.write(f"• 対象部門数: {dept_count}件")
-                if '区分' in target_df.columns:
-                    categories = ', '.join(target_df['区分'].unique())
-                    st.write(f"• 区分: {categories}")
-                
-                # 目標値取得結果
-                if target_info[0] is not None:
-                    st.success(f"✅ 目標値取得成功: {target_info[1]} = {target_info[0]:.1f}人/日")
-                else:
-                    st.warning("⚠️ 目標値取得できず（理論値を使用）")
             else:
                 st.write("• 目標値データなし")
                 st.write("• デフォルト計算値を使用")
         
-        # データ統計詳細
+        # データ統計
         st.markdown("---")
         st.markdown("### 📈 データ統計詳細")
         
@@ -1299,12 +1311,6 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
                 st.write(f"• フィルター後件数: {len(df):,}件")
                 filter_ratio = len(df) / len(original_df) * 100 if len(original_df) > 0 else 0
                 st.write(f"• フィルター適用率: {filter_ratio:.1f}%")
-            
-            if '日付' in df.columns and not df['日付'].empty:
-                min_date = df['日付'].min()
-                max_date = df['日付'].max()
-                actual_days = (max_date - min_date).days + 1
-                st.write(f"• 実データ期間: {actual_days}日間")
         
         with col_stat2:
             st.markdown("**🏥 設定値確認**")
@@ -1312,116 +1318,141 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
             st.write(f"• 目標稼働率: {target_occupancy_setting_percent:.1f}%")
             avg_admission_fee = st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE)
             st.write(f"• 平均入院料: {avg_admission_fee:,}円/日")
-            avg_los_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
-            st.write(f"• 目標平均在院日数: {avg_los_target:.1f}日")
         
         with col_stat3:
             st.markdown("**📅 期間比較情報**")
             if prev_year_metrics and prev_year_period_info:
                 st.write(f"• 昨年度同期間: 有り")
-                st.write(f"• 昨年度期間: {prev_year_period_info}")
                 prev_census = prev_year_metrics.get('avg_daily_census', 0)
                 current_census = metrics_for_display.get('avg_daily_census', 0)
                 yoy_change = current_census - prev_census
                 st.write(f"• 前年比変化: {yoy_change:+.1f}人/日")
             else:
                 st.write("• 昨年度同期間: なし")
-                st.write("• 前年比較: 利用不可")
-        
-        # 目標値ファイル詳細確認
-        if not target_df.empty:
-            st.markdown("---")
-            st.markdown("### 🎯 目標値ファイル詳細分析")
-            
-            if st.checkbox("📋 目標値データを表示", key="show_target_details_debug"):
-                st.dataframe(target_df.head(10), use_container_width=True)
-                st.caption(f"表示: 先頭10行 / 全{len(target_df)}行")
-                
-                # extracted_targets の情報
-                extracted_targets = st.session_state.get('extracted_targets')
-                if extracted_targets:
-                    st.markdown("**抽出された目標値:**")
-                    if extracted_targets.get('target_days'):
-                        st.write(f"• 延べ在院日数目標: {extracted_targets['target_days']:,.0f}人日")
-                    if extracted_targets.get('target_admissions'):
-                        st.write(f"• 新入院患者数目標: {extracted_targets['target_admissions']:,.0f}人")
-                    if extracted_targets.get('used_pattern'):
-                        st.write(f"• 検索条件: {extracted_targets['used_pattern']}")
-            
-            if st.checkbox("🔍 目標値取得の詳細ログを表示", key="show_target_debug_log"):
-                st.markdown("**目標値取得の詳細処理:**")
-                if current_filter_config:
-                    # 既存の関数を使用（デバッグ情報は元々表示される）
-                    st.info("目標値取得プロセスの詳細:")
-                    debug_target_info = get_target_value_for_filter(target_df, current_filter_config)
-                    if debug_target_info[0] is not None:
-                        st.success(f"詳細分析結果: {debug_target_info[1]} = {debug_target_info[0]:.1f}人/日")
-                    else:
-                        st.warning("詳細分析でも目標値を取得できませんでした")
-                        
-                        # 詳細なトラブルシューティング情報
-                        st.markdown("**トラブルシューティング情報:**")
-                        filter_mode = current_filter_config.get('filter_mode', '全体')
-                        st.write(f"• フィルターモード: {filter_mode}")
-                        
-                        if filter_mode == "特定診療科":
-                            selected_depts = current_filter_config.get('selected_depts', [])
-                            st.write(f"• 選択診療科: {selected_depts}")
-                            if '部門コード' in target_df.columns:
-                                available_codes = target_df['部門コード'].unique().tolist()
-                                st.write(f"• 目標値の部門コード: {available_codes}")
-                                matching = [dept for dept in selected_depts if dept in available_codes]
-                                st.write(f"• 一致する部門: {matching}")
-                        
-                        elif filter_mode == "特定病棟":
-                            selected_wards = current_filter_config.get('selected_wards', [])
-                            st.write(f"• 選択病棟: {selected_wards}")
-                            if '部門コード' in target_df.columns:
-                                available_codes = target_df['部門コード'].unique().tolist()
-                                st.write(f"• 目標値の部門コード: {available_codes}")
-                                matching = [ward for ward in selected_wards if ward in available_codes]
-                                st.write(f"• 一致する部門: {matching}")
-                        
-                        elif filter_mode == "全体":
-                            overall_keywords = ['全体', '病院全体', '総合', '病院', '合計']
-                            st.write(f"• 検索キーワード: {overall_keywords}")
-                            if '部門コード' in target_df.columns:
-                                matching_keywords = []
-                                for keyword in overall_keywords:
-                                    matches = target_df[target_df['部門コード'].astype(str).str.contains(keyword, na=False, case=False)]
-                                    if not matches.empty:
-                                        matching_keywords.append(f"{keyword}({len(matches)}件)")
-                                st.write(f"• 一致するキーワード: {matching_keywords}")
-                else:
-                    st.write("フィルター設定がないため詳細分析できません")
-        
-        # システム診断情報
-        st.markdown("---")
-        st.markdown("### 🔧 システム診断")
-        
-        col_diag1, col_diag2 = st.columns(2)
-        
-        with col_diag1:
-            st.markdown("**機能状況**")
-            functions_status = [
-                ("KPI計算", "✅" if calculate_kpis else "❌"),
-                ("フィルター", "✅" if get_unified_filter_config else "❌"),
-                ("目標値取得", "✅" if get_target_value_for_filter else "❌"),
-                ("昨年度比較", "✅" if prev_year_metrics else "⚠️")
-            ]
-            for func_name, status in functions_status:
-                st.write(f"• {func_name}: {status}")
-        
-        with col_diag2:
-            st.markdown("**データ状況**")
-            st.write(f"• メイン処理時間: {kpis_selected_period.get('processing_time', 0):.3f}秒")
-            st.write(f"• 病棟数: {kpis_selected_period.get('ward_count', 0)}件")
-            st.write(f"• 診療科数: {kpis_selected_period.get('dept_count', 0)}件")
-            st.write(f"• データ完整性: {'✅' if not df.empty else '❌'}")
     
     # 設定変更への案内
     st.markdown("---")
     st.info("💡 **設定変更**: 期間変更は「分析フィルター」、病床数や目標値は「グローバル設定」から行えます")
+
+
+def display_simple_kpi_metrics(metrics, period_description, prev_year_metrics=None, target_info=None, show_debug=False):
+    """
+    シンプルなKPI表示（フォールバック用）
+    """
+    if not metrics:
+        st.warning("表示するメトリクスデータがありません。")
+        return
+
+    # 設定値の取得
+    total_beds = st.session_state.get('total_beds', DEFAULT_TOTAL_BEDS)
+    target_occupancy_rate = st.session_state.get('bed_occupancy_rate', DEFAULT_OCCUPANCY_RATE)
+    avg_length_of_stay_target = st.session_state.get('avg_length_of_stay', DEFAULT_AVG_LENGTH_OF_STAY)
+    target_admissions_monthly = st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS)
+
+    # 主要指標を4つ横一列で表示
+    st.markdown("### 📊 主要指標")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        avg_daily_census_val = metrics.get('avg_daily_census', 0)
+        if target_info and target_info[0] is not None:
+            target_census = target_info[0]
+            delta_label = "目標比"
+        else:
+            target_census = total_beds * target_occupancy_rate
+            delta_label = "理論値比"
+        census_delta = avg_daily_census_val - target_census
+        
+        st.metric(
+            "👥 日平均在院患者数",
+            f"{avg_daily_census_val:.1f}人",
+            delta=f"{census_delta:+.1f}人 ({delta_label})"
+        )
+        st.caption(f"目標: {target_census:.1f}人")
+
+    with col2:
+        bed_occupancy_rate_val = metrics.get('bed_occupancy_rate', 0)
+        target_occupancy = target_occupancy_rate * 100
+        occupancy_delta = bed_occupancy_rate_val - target_occupancy
+        
+        st.metric(
+            "🏥 病床利用率",
+            f"{bed_occupancy_rate_val:.1f}%",
+            delta=f"{occupancy_delta:+.1f}% (目標比)"
+        )
+        st.caption(f"目標: {target_occupancy:.1f}%")
+
+    with col3:
+        avg_los_val = metrics.get('avg_los', 0)
+        alos_delta = avg_los_val - avg_length_of_stay_target
+        
+        st.metric(
+            "📅 平均在院日数",
+            f"{avg_los_val:.1f}日",
+            delta=f"{alos_delta:+.1f}日 (目標比)"
+        )
+        st.caption(f"目標: {avg_length_of_stay_target:.1f}日")
+
+    with col4:
+        avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
+        target_daily_admissions = target_admissions_monthly / 30
+        daily_delta = avg_daily_admissions_val - target_daily_admissions
+        
+        st.metric(
+            "📈 日平均新入院患者数",
+            f"{avg_daily_admissions_val:.1f}人/日",
+            delta=f"{daily_delta:+.1f}人/日 (目標比)"
+        )
+        st.caption(f"目標: {target_daily_admissions:.1f}人/日")
+
+    # 昨年度同期間比較（簡潔版）
+    if prev_year_metrics:
+        st.markdown("---")
+        st.markdown("### 📊 昨年度同期間比較")
+        
+        prev_col1, prev_col2, prev_col3, prev_col4 = st.columns(4)
+        
+        with prev_col1:
+            prev_avg_daily_census = prev_year_metrics.get('avg_daily_census', 0)
+            yoy_census_change = avg_daily_census_val - prev_avg_daily_census
+            yoy_census_pct = (yoy_census_change / prev_avg_daily_census * 100) if prev_avg_daily_census > 0 else 0
+            
+            st.metric(
+                "👥 日平均在院患者数",
+                f"{prev_avg_daily_census:.1f}人",
+                delta=f"{yoy_census_change:+.1f}人 ({yoy_census_pct:+.1f}%)"
+            )
+            
+        with prev_col2:
+            prev_bed_occupancy = prev_year_metrics.get('bed_occupancy_rate', 0)
+            yoy_occupancy_change = bed_occupancy_rate_val - prev_bed_occupancy
+            
+            st.metric(
+                "🏥 病床利用率",
+                f"{prev_bed_occupancy:.1f}%",
+                delta=f"{yoy_occupancy_change:+.1f}%"
+            )
+            
+        with prev_col3:
+            prev_avg_los = prev_year_metrics.get('avg_los', 0)
+            yoy_los_change = avg_los_val - prev_avg_los
+            
+            st.metric(
+                "📅 平均在院日数",
+                f"{prev_avg_los:.1f}日",
+                delta=f"{yoy_los_change:+.1f}日"
+            )
+            
+        with prev_col4:
+            prev_avg_daily_admissions = prev_year_metrics.get('avg_daily_admissions', 0)
+            yoy_admissions_change = avg_daily_admissions_val - prev_avg_daily_admissions
+            yoy_admissions_pct = (yoy_admissions_change / prev_avg_daily_admissions * 100) if prev_avg_daily_admissions > 0 else 0
+            
+            st.metric(
+                "📈 日平均新入院患者数",
+                f"{prev_avg_daily_admissions:.1f}人/日",
+                delta=f"{yoy_admissions_change:+.1f}人/日 ({yoy_admissions_pct:+.1f}%)"
+            )
 
 def display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     """
