@@ -703,88 +703,58 @@ def create_management_dashboard_tab():
     target_occupancy_rate_percent = st.session_state.get('bed_occupancy_rate', 0.85) * 100
     
     # ===========================================
-    # メインコンテンツ：KPIカードを最初に表示
+    # デバッグモード切り替え（右上に小さく配置）
+    # ===========================================
+    col_main, col_debug = st.columns([4, 1])
+    with col_debug:
+        debug_mode = st.checkbox(
+            "デバッグ情報", 
+            value=False, 
+            key="dashboard_debug_mode",
+            help="詳細な処理情報を表示"
+        )
+    
+    # ===========================================
+    # KPIカード表示（メイン）
     # ===========================================
     if display_kpi_cards_only:
-        display_kpi_cards_only(df_for_dashboard, start_date_ts, end_date_ts, total_beds, target_occupancy_rate_percent)
+        display_kpi_cards_only(
+            df_for_dashboard, start_date_ts, end_date_ts, 
+            total_beds, target_occupancy_rate_percent,
+            show_debug=debug_mode  # デバッグモードの制御
+        )
     else:
         st.error("KPIカード表示機能が利用できません。dashboard_overview_tab.pyを確認してください。")
     
     # ===========================================
-    # 分析条件の表示（簡潔に）
+    # 簡潔な分析条件表示（デバッグモード無効時のみ）
     # ===========================================
-    st.markdown("---")
-    
-    # 分析期間の表示（シンプルに）
-    col_period, col_records, col_target = st.columns(3)
-    
-    with col_period:
-        date_range_days = (end_date_ts - start_date_ts).days + 1
-        st.metric(
-            "📊 分析期間", 
-            f"{date_range_days}日間",
-            f"{start_date_ts.strftime('%Y/%m/%d')} ～ {end_date_ts.strftime('%Y/%m/%d')}"
-        )
-    
-    with col_records:
-        record_count = len(df_for_dashboard)
-        st.metric("📋 分析レコード数", f"{record_count:,}件")
-    
-    with col_target:
-        target_data = st.session_state.get('target_data')
-        if target_data is not None and not target_data.empty:
-            target_records = len(target_data)
-            st.metric("🎯 目標値データ", f"{target_records}行", "使用中")
-        else:
-            st.metric("🎯 目標値データ", "未設定", "")
-    
-    # ===========================================
-    # 詳細情報（expanderで格納）
-    # ===========================================
-    with st.expander("🔧 詳細設定・デバッグ情報", expanded=False):
+    if not debug_mode:
+        st.markdown("---")
+        
+        col_period, col_records, col_target = st.columns(3)
+        
+        with col_period:
+            date_range_days = (end_date_ts - start_date_ts).days + 1
+            st.metric(
+                "📊 分析期間", 
+                f"{date_range_days}日間",
+                f"{start_date_ts.strftime('%Y/%m/%d')} ～ {end_date_ts.strftime('%Y/%m/%d')}"
+            )
+        
+        with col_records:
+            record_count = len(df_for_dashboard)
+            st.metric("📋 分析レコード数", f"{record_count:,}件")
+        
+        with col_target:
+            target_data = st.session_state.get('target_data')
+            if target_data is not None and not target_data.empty:
+                target_records = len(target_data)
+                st.metric("🎯 目標値データ", f"{target_records}行", "使用中")
+            else:
+                st.metric("🎯 目標値データ", "未設定", "")
+        
         st.caption("※ 期間変更はサイドバーの「分析フィルター」で行えます")
-        
-        # フィルター適用状況
-        try:
-            from unified_filters import get_unified_filter_summary
-            filter_summary = get_unified_filter_summary()
-            st.info(f"🔍 適用中フィルター: {filter_summary}")
-        except ImportError:
-            st.info("🔍 フィルター情報を取得できません")
-        
-        # 目標値データの詳細
-        if target_data is not None and not target_data.empty:
-            st.markdown("**🎯 目標値データの詳細:**")
-            
-            # extracted_targets の情報
-            extracted_targets = st.session_state.get('extracted_targets')
-            if extracted_targets:
-                if extracted_targets.get('target_days') or extracted_targets.get('target_admissions'):
-                    col_t1, col_t2 = st.columns(2)
-                    with col_t1:
-                        if extracted_targets.get('target_days'):
-                            st.metric("延べ在院日数目標", f"{extracted_targets['target_days']:,.0f}人日")
-                    with col_t2:
-                        if extracted_targets.get('target_admissions'):
-                            st.metric("新入院患者数目標", f"{extracted_targets['target_admissions']:,.0f}人")
-                    
-                    if extracted_targets.get('used_pattern'):
-                        st.caption(f"検索条件: {extracted_targets['used_pattern']}")
-            
-            # 目標値ファイルの内容確認
-            if st.checkbox("📋 目標値ファイル内容を確認", key="show_target_details_dashboard"):
-                st.dataframe(target_data.head(10), use_container_width=True)
-                st.caption(f"表示: 先頭10行 / 全{len(target_data)}行")
-        else:
-            st.info("🎯 目標値データが設定されていません。「データ入力」タブで目標値ファイルをアップロードできます。")
-        
-        # システム情報
-        st.markdown("**⚙️ システム情報:**")
-        col_sys1, col_sys2 = st.columns(2)
-        with col_sys1:
-            st.metric("総病床数設定", f"{total_beds}床")
-        with col_sys2:
-            st.metric("目標病床稼働率", f"{target_occupancy_rate_percent:.1f}%")
 
 
 def main():
