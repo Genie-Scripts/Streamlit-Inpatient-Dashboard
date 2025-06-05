@@ -1040,6 +1040,163 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.write(f"• 月間目標延べ日数: {format_number_with_config(monthly_target_days, '人日')}")
 
 # 以下、残りの関数は元のコードと同じ...
+def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent, show_debug=False):
+    """
+    KPIカード表示専用関数（デバッグ情報制御対応版）
+    
+    Parameters:
+    -----------
+    df : DataFrame
+        分析対象データ
+    start_date : datetime
+        分析開始日
+    end_date : datetime  
+        分析終了日
+    total_beds_setting : int
+        総病床数設定
+    target_occupancy_setting_percent : float
+        目標病床稼働率（%）
+    show_debug : bool, default False
+        デバッグ情報を表示するかどうか
+    """
+    if df is None or df.empty:
+        st.warning("データが読み込まれていません。")
+        return
+    if calculate_kpis is None:
+        st.error("KPI計算関数が利用できません。")
+        return
+    
+    # 目標値データの取得（優先順位付き）
+    target_df = pd.DataFrame()
+    
+    # 1. データ入力タブで読み込まれた目標値データをチェック
+    if st.session_state.get('target_data') is not None:
+        target_df = st.session_state.get('target_data')
+        if show_debug:
+            st.info(f"🎯 目標値データを使用中（データ入力タブ経由: {len(target_df)}行）")
+    
+    # 2. サイドバーで読み込まれた目標値データをチェック
+    elif 'target_values_df' in st.session_state and not st.session_state.target_values_df.empty:
+        target_df = st.session_state.target_values_df
+        if show_debug:
+            st.info(f"🎯 目標値データを使用中（サイドバー経由: {len(target_df)}行）")
+    
+    # 3. どちらもない場合はサイドバーでの読み込みを促す
+    else:
+        if show_debug:
+            st.warning("🎯 目標値データが設定されていません")
+            # サイドバーでの目標値読み込み機能を提供
+            target_df = load_target_values_csv()
+    
+    # デバッグ: 目標値データの内容確認（show_debugで制御）
+    if not target_df.empty and show_debug:
+        with st.expander("🔍 目標値データ確認", expanded=False):
+            st.write(f"**データ形状**: {target_df.shape}")
+            st.write(f"**列名**: {list(target_df.columns)}")
+            st.dataframe(target_df.head(), use_container_width=True)
+    
+    # 現在期間のKPI計算
+    kpis_selected_period = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
+    if kpis_selected_period is None or kpis_selected_period.get("error"):
+        st.warning(f"選択された期間のKPI計算に失敗しました。理由: {kpis_selected_period.get('error', '不明') if kpis_selected_period else '不明'}")
+        return
+    
+    # 追加のメトリクス計算
+    period_df = df[(df['日付'] >= start_date) & (df['日付'] <= end_date)]
+    total_admissions = 0
+    if '入院患者数' in period_df.columns:
+        total_admissions = period_df['入院患者数'].sum()
+    
+    metrics_for_display = {
+        'avg_daily_census': kpis_selected_period.get('avg_daily_census'),
+        'bed_occupancy_rate': kpis_selected_period.get('bed_occupancy_rate'),
+        'avg_los': kpis_selected_period.get('alos'),
+        'estimated_revenue': kpis_selected_period.get('total_patient_days', 0) * st.session_state.get('avg_admission_fee', DEFAULT_ADMISSION_FEE),
+        'total_patient_days': kpis_selected_period.get('total_patient_days'),
+        'avg_daily_admissions': kpis_selected_period.get('avg_daily_admissions'),
+        'period_days': kpis_selected_period.get('days_count'),
+        'total_beds': total_beds_setting,
+        'total_admissions': total_admissions,
+    }
+    
+    # フィルター設定に基づく目標値取得
+    current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
+    target_info = (None, None, None)  # デフォルト値
+    
+    # デバッグ情報表示（show_debugで制御）
+    if show_debug and current_filter_config:
+        logger.info(f"現在のフィルター設定: {current_filter_config}")
+        st.info("🔍 全体フィルター用の目標値検索を開始...")
+        
+        # 目標値取得の試行
+        if not target_df.empty:
+            target_info = get_target_value_for_filter(target_df, current_filter_config)
+            logger.info(f"目標値取得結果: {target_info}")
+            
+            # 目標値が取得できた場合の表示
+            if target_info[0] is not None:
+                st.success(f"✅ 全体目標値が見つかりました: {target_info[1]} = {target_info[0]}")
+            else:
+                st.warning("⚠️ フィルター条件に一致する目標値が見つかりませんでした")
+        else:
+            st.warning("⚠️ 目標値データが空のため、目標値を取得できません")
+    elif current_filter_config and not target_df.empty:
+        # デバッグモードOFFでも目標値は取得する（表示はしない）
+        target_info = get_target_value_for_filter(target_df, current_filter_config)
+    
+    # 昨年度同期間データの計算
+    df_original = st.session_state.get('df')  # 元のフィルタリング前データ
+    
+    prev_year_metrics = None
+    prev_year_period_info = None
+    
+    if df_original is not None and not df_original.empty:
+        try:
+            latest_date_in_current = end_date
+            prev_year_data, prev_start, prev_end, prev_period_desc = calculate_previous_year_same_period(
+                df_original, latest_date_in_current, current_filter_config
+            )
+            
+            if not prev_year_data.empty and prev_start and prev_end:
+                prev_year_kpis = calculate_kpis(prev_year_data, prev_start, prev_end, total_beds=total_beds_setting)
+                if prev_year_kpis and not prev_year_kpis.get("error"):
+                    # 昨年度の追加メトリクス計算
+                    prev_total_admissions = 0
+                    if '入院患者数' in prev_year_data.columns:
+                        prev_total_admissions = prev_year_data['入院患者数'].sum()
+                    
+                    prev_year_metrics = {
+                        'avg_daily_census': prev_year_kpis.get('avg_daily_census'),
+                        'bed_occupancy_rate': prev_year_kpis.get('bed_occupancy_rate'),
+                        'avg_los': prev_year_kpis.get('alos'),
+                        'avg_daily_admissions': prev_year_kpis.get('avg_daily_admissions'),
+                        'total_admissions': prev_total_admissions,
+                    }
+                    prev_year_period_info = prev_period_desc
+                    logger.info(f"昨年度同期間KPI計算完了: {prev_year_period_info}")
+                else:
+                    if show_debug:
+                        st.warning("⚠️ 昨年度同期間のKPI計算に失敗しました。")
+                    logger.warning("昨年度同期間のKPI計算に失敗しました。")
+            else:
+                if show_debug:
+                    st.info("ℹ️ 昨年度同期間のデータが見つかりませんでした。")
+                logger.info("昨年度同期間のデータが見つかりませんでした。")
+        except Exception as e:
+            if show_debug:
+                st.error(f"❌ 昨年度同期間データ処理エラー: {e}")
+            logger.error(f"昨年度同期間データ処理エラー: {e}", exc_info=True)
+    
+    # メトリクス表示（統一レイアウト）
+    period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
+    display_unified_metrics_layout_colorized(
+        metrics_for_display, 
+        period_description, 
+        prev_year_metrics, 
+        prev_year_period_info,
+        target_info
+    )
+
 def display_trend_graphs_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent):
     """
     トレンドグラフ表示専用関数（既存）
