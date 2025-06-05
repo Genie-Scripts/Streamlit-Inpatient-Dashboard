@@ -1108,12 +1108,22 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         'total_admissions': total_admissions,
     }
     
-    # フィルター設定に基づく目標値取得（エラー表示を抑制）
+    # フィルター設定に基づく目標値取得（メッセージ表示を制御）
     current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
     target_info = (None, None, None)  # デフォルト値
     
+    # 目標値取得時のメッセージを収集するためのリスト
+    target_messages = []
+    
     if current_filter_config and not target_df.empty:
+        # 目標値取得を実行（メッセージは後で表示）
         target_info = get_target_value_for_filter(target_df, current_filter_config)
+        
+        # 取得された目標値情報をメッセージとして記録
+        if target_info[0] is not None:
+            target_messages.append(f"✅ 全体目標値が見つかりました: {target_info[1]} = {target_info[0]:.1f}人/日")
+        else:
+            target_messages.append("⚠️ 目標値が見つかりませんでした（理論値を使用）")
     
     # 昨年度同期間データの計算（エラー表示を抑制）
     df_original = st.session_state.get('df')
@@ -1146,18 +1156,19 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
             pass  # エラーは無視して昨年度比較なしで続行
     
     # =================================================================
-    # 2. KPIカードの表示（最優先）
+    # 2. KPIカードの表示（最優先・メッセージ制御版）
     # =================================================================
     
     period_description = f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}"
     
-    # KPIカード表示（メイン）
-    display_unified_metrics_layout_colorized(
+    # カスタムKPIカード表示（メッセージ制御版）
+    display_clean_kpi_metrics(
         metrics_for_display, 
         period_description, 
         prev_year_metrics, 
         prev_year_period_info,
-        target_info
+        target_info,
+        show_debug
     )
     
     # =================================================================
@@ -1198,6 +1209,40 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     # =================================================================
     
     with st.expander("🔧 詳細設定・デバッグ情報", expanded=show_debug):
+        # 処理メッセージの表示（デバッグモード時または情報確認時）
+        if show_debug or st.checkbox("📋 処理メッセージを表示", key="show_processing_messages"):
+            st.markdown("### 📝 処理状況メッセージ")
+            
+            col_msg1, col_msg2 = st.columns(2)
+            
+            with col_msg1:
+                st.markdown("**🎯 目標値取得結果**")
+                for msg in target_messages:
+                    st.info(msg)
+                
+                # 分析期間情報
+                st.markdown("**📊 分析期間情報**")
+                st.info(f"📊 分析期間: {period_description}")
+                st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
+            
+            with col_msg2:
+                st.markdown("**🔍 目標値詳細**")
+                if target_info and target_info[0] is not None:
+                    st.success(f"🎯 目標値設定: {target_info[1]} - {target_info[0]:.1f}人/日 ({target_info[2]})")
+                else:
+                    st.info("🎯 目標値: 未設定（理論値を使用）")
+                
+                # 指標フィルタリング情報（もしあれば）
+                if not target_df.empty and '指標タイプ' in target_df.columns:
+                    unique_indicators = target_df['指標タイプ'].unique()
+                    target_indicators = ['日平均在院患者数', '在院患者数', '患者数']
+                    matching_indicators = [ind for ind in unique_indicators 
+                                         for target in target_indicators if target in str(ind)]
+                    if matching_indicators:
+                        st.info(f"🏷️ 指標フィルタリング: {', '.join(matching_indicators)} を使用")
+            
+            st.markdown("---")
+        
         st.markdown("### 📊 分析条件詳細")
         
         # フィルター詳細
