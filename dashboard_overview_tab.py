@@ -563,13 +563,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
     st.info(f"📊 分析期間: {selected_period_info}")
     st.caption("※期間はサイドバーの「分析フィルター」で変更できます。")
 
-    # 目標値情報の表示（詳細版）
-    if target_info and target_info[0] is not None:
-        target_value, target_dept_name, target_period = target_info
-        st.success(f"🎯 目標値設定: {target_dept_name} - {target_value:.1f}人/日 ({target_period})")
-    else:
-        st.info("🎯 目標値: 未設定（理論値を使用）")
-
     # 主要指標を4つ横一列で表示
     st.markdown("### 📊 主要指標")
     col1, col2, col3, col4 = st.columns(4)
