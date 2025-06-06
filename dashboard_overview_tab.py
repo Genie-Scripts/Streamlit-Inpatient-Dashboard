@@ -65,6 +65,150 @@ def format_number_with_config(value, unit="", format_type="default"):
     else:
         return f"{value:,.1f}{unit}" if isinstance(value, float) else f"{value:,.0f}{unit}"
 
+def get_weekly_admission_target_for_filter(target_df, filter_config):
+    """
+    フィルター設定に基づいて週間新入院患者数目標値を取得し、日平均に変換
+    
+    Args:
+        target_df (pd.DataFrame): 目標値データフレーム
+        filter_config (dict): フィルター設定
+        
+    Returns:
+        tuple: (日平均目標値, 部門名, メッセージ)
+    """
+    if target_df.empty or not filter_config or '週間新入院患者数目標' not in target_df.columns:
+        return None, None, "週間新入院患者数目標列が見つかりません"
+    
+    try:
+        filter_mode = filter_config.get('filter_mode', '全体')
+        logger.info(f"新入院目標値取得: フィルターモード = {filter_mode}")
+        
+        # 全体フィルターの場合
+        if filter_mode == "全体":
+            # 全体目標値キーワードで検索
+            overall_keywords = ['全体', '病院全体', '総合', '病院', '合計', 'ALL', 'TOTAL']
+            
+            for keyword in overall_keywords:
+                if '部門コード' in target_df.columns:
+                    overall_targets = target_df[
+                        (target_df['部門コード'].astype(str).str.contains(keyword, na=False, case=False)) & 
+                        (target_df['区分'].astype(str).str.strip() == '全日') &
+                        (pd.notna(target_df['週間新入院患者数目標']))
+                    ]
+                    if not overall_targets.empty:
+                        weekly_target = float(overall_targets['週間新入院患者数目標'].iloc[0])
+                        daily_target = weekly_target / 7
+                        matched_name = overall_targets['部門名'].iloc[0] if '部門名' in overall_targets.columns else overall_targets['部門コード'].iloc[0]
+                        logger.info(f"全体新入院目標値を取得: 週間{weekly_target}人 → 日平均{daily_target:.1f}人")
+                        return daily_target, f"全体 ({matched_name})", f"週間目標{weekly_target}人から日平均{daily_target:.1f}人に変換"
+                
+                if '部門名' in target_df.columns:
+                    overall_targets_by_name = target_df[
+                        (target_df['部門名'].astype(str).str.contains(keyword, na=False, case=False)) & 
+                        (target_df['区分'].astype(str).str.strip() == '全日') &
+                        (pd.notna(target_df['週間新入院患者数目標']))
+                    ]
+                    if not overall_targets_by_name.empty:
+                        weekly_target = float(overall_targets_by_name['週間新入院患者数目標'].iloc[0])
+                        daily_target = weekly_target / 7
+                        matched_name = overall_targets_by_name['部門名'].iloc[0]
+                        logger.info(f"全体新入院目標値を取得: 週間{weekly_target}人 → 日平均{daily_target:.1f}人 (部門名: {matched_name})")
+                        return daily_target, f"全体 ({matched_name})", f"週間目標{weekly_target}人から日平均{daily_target:.1f}人に変換"
+            
+            # 全体目標値が見つからない場合、部門別目標値の合計を計算
+            logger.info("全体新入院目標値が見つかりません。部門別目標値の合計を計算します...")
+            all_dept_targets = target_df[
+                (target_df['区分'].astype(str).str.strip() == '全日') &
+                (pd.notna(target_df['週間新入院患者数目標']))
+            ]
+            
+            if not all_dept_targets.empty:
+                total_weekly_target = all_dept_targets['週間新入院患者数目標'].sum()
+                total_daily_target = total_weekly_target / 7
+                dept_count = len(all_dept_targets)
+                logger.info(f"部門別新入院目標値の合計: 週間{total_weekly_target}人 → 日平均{total_daily_target:.1f}人 ({dept_count}部門)")
+                return total_daily_target, f"全体 (部門別合計: {dept_count}部門)", f"週間合計{total_weekly_target}人から日平均{total_daily_target:.1f}人に変換"
+        
+        # 特定診療科フィルターの場合
+        elif filter_mode == "特定診療科":
+            selected_depts = filter_config.get('selected_depts', [])
+            if selected_depts:
+                total_weekly_target, matched_items = 0, []
+                for dept in selected_depts:
+                    # 部門コードで検索
+                    if '部門コード' in target_df.columns:
+                        targets = target_df[
+                            (target_df['部門コード'].astype(str).str.strip() == str(dept).strip()) & 
+                            (target_df['区分'] == '全日') &
+                            (pd.notna(target_df['週間新入院患者数目標']))
+                        ]
+                        if not targets.empty:
+                            weekly_target = float(targets['週間新入院患者数目標'].iloc[0])
+                            total_weekly_target += weekly_target
+                            matched_items.append(dept)
+                            continue
+                    
+                    # 部門名で検索
+                    if '部門名' in target_df.columns:
+                        targets_by_name = target_df[
+                            (target_df['部門名'].astype(str).str.strip() == str(dept).strip()) & 
+                            (target_df['区分'] == '全日') &
+                            (pd.notna(target_df['週間新入院患者数目標']))
+                        ]
+                        if not targets_by_name.empty:
+                            weekly_target = float(targets_by_name['週間新入院患者数目標'].iloc[0])
+                            total_weekly_target += weekly_target
+                            matched_items.append(dept)
+                
+                if matched_items:
+                    total_daily_target = total_weekly_target / 7
+                    item_names_str = ', '.join(matched_items)
+                    logger.info(f"診療科別新入院目標値: 週間{total_weekly_target}人 → 日平均{total_daily_target:.1f}人")
+                    return total_daily_target, f"診療科: {item_names_str}", f"週間合計{total_weekly_target}人から日平均{total_daily_target:.1f}人に変換"
+        
+        # 特定病棟フィルターの場合
+        elif filter_mode == "特定病棟":
+            selected_wards = filter_config.get('selected_wards', [])
+            if selected_wards:
+                total_weekly_target, matched_items = 0, []
+                for ward in selected_wards:
+                    # 部門コードで検索
+                    if '部門コード' in target_df.columns:
+                        targets = target_df[
+                            (target_df['部門コード'].astype(str).str.strip() == str(ward).strip()) & 
+                            (target_df['区分'] == '全日') &
+                            (pd.notna(target_df['週間新入院患者数目標']))
+                        ]
+                        if not targets.empty:
+                            weekly_target = float(targets['週間新入院患者数目標'].iloc[0])
+                            total_weekly_target += weekly_target
+                            matched_items.append(ward)
+                            continue
+                    
+                    # 部門名で検索
+                    if '部門名' in target_df.columns:
+                        targets_by_name = target_df[
+                            (target_df['部門名'].astype(str).str.strip() == str(ward).strip()) & 
+                            (target_df['区分'] == '全日') &
+                            (pd.notna(target_df['週間新入院患者数目標']))
+                        ]
+                        if not targets_by_name.empty:
+                            weekly_target = float(targets_by_name['週間新入院患者数目標'].iloc[0])
+                            total_weekly_target += weekly_target
+                            matched_items.append(ward)
+                
+                if matched_items:
+                    total_daily_target = total_weekly_target / 7
+                    item_names_str = ', '.join(matched_items)
+                    logger.info(f"病棟別新入院目標値: 週間{total_weekly_target}人 → 日平均{total_daily_target:.1f}人")
+                    return total_daily_target, f"病棟: {item_names_str}", f"週間合計{total_weekly_target}人から日平均{total_daily_target:.1f}人に変換"
+        
+        return None, None, "条件に一致する新入院目標値が見つかりませんでした"
+        
+    except Exception as e:
+        logger.error(f"新入院目標値取得エラー: {e}", exc_info=True)
+        return None, None, f"新入院目標値取得エラー: {e}"
+
 def load_target_values_csv():
     """
     目標値CSVファイル読み込み機能（デバッグ強化版）
@@ -496,113 +640,41 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.caption(f"総入院: {total_admissions:,.0f}人")
 
     with col4:
-        # ★★★ ここから一時的なデバッグ表示（問題解決後は削除） ★★★
-        target_df = st.session_state.get('target_values_df', pd.DataFrame())
-        
-        if not target_df.empty:
-            st.markdown("**🔧 デバッグ: 目標値CSV確認**")
-            st.write(f"読み込み済み行数: {len(target_df)}")
-            st.write(f"列数: {len(target_df.columns)}")
-            
-            # 列名を詳細確認
-            cols_list = list(target_df.columns)
-            st.write("**列名一覧:**")
-            for i, col in enumerate(cols_list):
-                # 文字コードも表示
-                col_repr = repr(col)  # 改行やスペースも見える形で表示
-                has_admission = '新入院' in col or '週間' in col
-                st.write(f"{i+1}. {col_repr} {'← 新入院関連' if has_admission else ''}")
-            
-            # 'P部門コード' 列の内容確認
-            if '部門コード' in target_df.columns:
-                dept_codes = target_df['部門コード'].unique()[:5]  # 最初の5件
-                st.write(f"**部門コード例:** {dept_codes}")
-                
-                # '全体'を含む行があるかチェック
-                overall_mask = target_df['部門コード'].astype(str).str.contains('全体|病院', na=False, case=False)
-                overall_count = overall_mask.sum()
-                st.write(f"**'全体'含む行数:** {overall_count}")
-                
-                if overall_count > 0:
-                    overall_data = target_df[overall_mask]
-                    st.write("**全体データ:**")
-                    st.dataframe(overall_data[['部門コード', '部門名', '区分']].head())
-            
-            # 週間新入院患者数目標列の確認
-            potential_cols = [col for col in cols_list if '新入院' in col or '週間' in col]
-            if potential_cols:
-                st.write(f"**新入院関連列:** {potential_cols}")
-                for col in potential_cols:
-                    if col in target_df.columns:
-                        non_null_count = target_df[col].notna().sum()
-                        st.write(f"  - {col}: {non_null_count}件の有効値")
-                        if non_null_count > 0:
-                            sample_values = target_df[col].dropna().head(3)
-                            st.write(f"    サンプル値: {sample_values.tolist()}")
-            else:
-                st.warning("新入院関連の列が見つかりません")
-        else:
-            st.warning("target_values_df が空です")
-        
-        st.markdown("---")
-        # ★★★ ここまで一時的なデバッグ表示（問題解決後は削除） ★★★
-
-        # 日平均新入院患者数（週間目標値対応版）
+        # 日平均新入院患者数（週間目標値対応版・修正版）
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
         
-        # ★★★ CSVから週間新入院患者数目標値を取得し、日平均に変換 ★★★
+        # CSVから週間新入院患者数目標値を取得し、日平均に変換
         target_df = st.session_state.get('target_values_df', pd.DataFrame())
         csv_daily_target = None
+        target_source = "設定値"
+        target_message = ""
         
-        if not target_df.empty and '週間新入院患者数目標' in target_df.columns:
+        if not target_df.empty:
             current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
             
             if current_filter_config:
-                filter_mode = current_filter_config.get('filter_mode', '全体')
-                
-                if filter_mode == "全体":
-                    # 全体目標値を検索
-                    overall_row = target_df[
-                        (target_df['部門コード'].astype(str).str.contains('全体|病院', na=False, case=False)) & 
-                        (target_df['区分'] == '全日')
-                    ]
-                    if not overall_row.empty and pd.notna(overall_row['週間新入院患者数目標'].iloc[0]):
-                        weekly_target = float(overall_row['週間新入院患者数目標'].iloc[0])
-                        csv_daily_target = weekly_target / 7  # 週間目標を日平均に変換
-                
-                elif filter_mode == "特定診療科":
-                    selected_depts = current_filter_config.get('selected_depts', [])
-                    if selected_depts:
-                        matching_rows = target_df[
-                            (target_df['部門コード'].isin(selected_depts)) & 
-                            (target_df['区分'] == '全日')
-                        ]
-                        if not matching_rows.empty:
-                            weekly_total = float(matching_rows['週間新入院患者数目標'].sum())
-                            csv_daily_target = weekly_total / 7  # 週間合計を日平均に変換
-                
-                elif filter_mode == "特定病棟":
-                    selected_wards = current_filter_config.get('selected_wards', [])
-                    if selected_wards:
-                        matching_rows = target_df[
-                            (target_df['部門コード'].isin(selected_wards)) & 
-                            (target_df['区分'] == '全日')
-                        ]
-                        if not matching_rows.empty:
-                            weekly_total = float(matching_rows['週間新入院患者数目標'].sum())
-                            csv_daily_target = weekly_total / 7  # 週間合計を日平均に変換
+                try:
+                    csv_daily_target, target_dept_name, conversion_message = get_weekly_admission_target_for_filter(
+                        target_df, current_filter_config
+                    )
+                    if csv_daily_target is not None:
+                        target_source = "CSV"
+                        target_message = conversion_message
+                        logger.info(f"新入院目標値取得成功: {csv_daily_target:.1f}人/日 ({target_dept_name})")
+                    else:
+                        logger.warning(f"新入院目標値取得失敗: {conversion_message}")
+                except Exception as e:
+                    logger.error(f"新入院目標値取得でエラー: {e}")
         
         # 目標値の決定（CSV優先、なければ設定値）
         if csv_daily_target is not None:
             target_daily_admissions = csv_daily_target
             delta_label = "目標比"
-            target_source = "CSV"
             weekly_target_for_display = csv_daily_target * 7
         else:
             target_admissions_monthly = st.session_state.get('monthly_target_admissions', DEFAULT_TARGET_ADMISSIONS)
             target_daily_admissions = target_admissions_monthly / 30
             delta_label = "設定値比"
-            target_source = "設定値"
             weekly_target_for_display = target_daily_admissions * 7
         
         daily_delta = avg_daily_admissions_val - target_daily_admissions
@@ -620,15 +692,19 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
         if csv_daily_target is not None:
             st.caption(f"目標: {target_daily_admissions:.1f}人/日 (週間: {weekly_target_for_display:.1f}人)")
             achievement_rate = (avg_daily_admissions_val / target_daily_admissions * 100) if target_daily_admissions > 0 else 0
-            st.caption(f"達成率: {achievement_rate:.1f}%")
+            st.caption(f"達成率: {achievement_rate:.1f}% (CSV目標値)")
+            if target_message:
+                st.caption(f"📋 {target_message}")
         else:
-            st.caption(f"目標: {target_daily_admissions:.1f}人/日 ({target_source})")
+            st.caption(f"目標: {target_daily_admissions:.1f}人/日 (週間: {weekly_target_for_display:.1f}人)")
+            st.caption(f"💡 CSV目標値が見つからないため設定値を使用")
         
-        # 期間計と週換算の表示
+        # 期間計の表示
         period_days_val = metrics.get('period_days', 0)
         if period_days_val > 0:
             total_period_admissions = avg_daily_admissions_val * period_days_val
-            st.caption(f"期間計: {total_period_admissions:.0f}人")
+            st.caption(f"期間計: {total_period_admissions:.0f}人 ({period_days_val}日間)")
+
 
     # 昨年度同期間との比較指標
     if prev_year_metrics and prev_year_period_info:
@@ -871,7 +947,44 @@ def display_admission_with_weekly_mode(avg_daily_admissions_val, csv_daily_targe
             if csv_daily_target is not None:
                 achievement_rate = (avg_daily_admissions_val / target_daily * 100) if target_daily > 0 else 0
                 st.caption(f"達成率: {achievement_rate:.1f}% (週間目標: {csv_daily_target * 7:.1f}人)")
-
+                
+def display_admission_target_debug_info():
+    """
+    新入院目標値のデバッグ情報を表示（デバッグ用）
+    """
+    target_df = st.session_state.get('target_values_df', pd.DataFrame())
+    
+    if not target_df.empty and '週間新入院患者数目標' in target_df.columns:
+        st.markdown("**🔧 新入院目標値デバッグ情報**")
+        
+        # 週間新入院患者数目標列の統計
+        weekly_targets = target_df['週間新入院患者数目標'].dropna()
+        st.write(f"週間新入院患者数目標: {len(weekly_targets)}件の有効値")
+        
+        if len(weekly_targets) > 0:
+            st.write(f"範囲: {weekly_targets.min():.1f} ～ {weekly_targets.max():.1f}人/週")
+            st.write(f"合計: {weekly_targets.sum():.1f}人/週 (日平均: {weekly_targets.sum()/7:.1f}人/日)")
+        
+        # 全体目標値の確認
+        overall_targets = target_df[
+            (target_df['部門コード'].astype(str).str.contains('全体|病院', na=False, case=False)) & 
+            (pd.notna(target_df['週間新入院患者数目標']))
+        ]
+        
+        if not overall_targets.empty:
+            overall_weekly = overall_targets['週間新入院患者数目標'].iloc[0]
+            st.success(f"全体目標値発見: {overall_weekly}人/週 (日平均: {overall_weekly/7:.1f}人/日)")
+        else:
+            st.warning("全体目標値が見つかりません。部門別合計で計算されます。")
+        
+        # サンプルデータの表示
+        sample_data = target_df[pd.notna(target_df['週間新入院患者数目標'])][
+            ['部門コード', '部門名', '区分', '週間新入院患者数目標']
+        ].head(5)
+        st.dataframe(sample_data)
+    else:
+        st.error("週間新入院患者数目標列が見つかりません")
+        
 def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_occupancy_setting_percent, show_debug=False):
     """
     KPIカード表示専用関数（レイアウト改善・簡潔版）
