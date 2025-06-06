@@ -640,7 +640,7 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.caption(f"総入院: {total_admissions:,.0f}人")
 
     with col4:
-        # 日平均新入院患者数（週間目標値対応版・修正版）
+        # 日平均新入院患者数（週間目標値対応版・デバッグ強化版）
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
         
         # CSVから週間新入院患者数目標値を取得し、日平均に変換
@@ -648,23 +648,56 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
         csv_daily_target = None
         target_source = "設定値"
         target_message = ""
+        debug_info = []
         
+        # ★★★ デバッグ情報収集 ★★★
+        debug_info.append(f"📊 target_df状況: {len(target_df)}行")
         if not target_df.empty:
-            current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
-            
-            if current_filter_config:
-                try:
-                    csv_daily_target, target_dept_name, conversion_message = get_weekly_admission_target_for_filter(
-                        target_df, current_filter_config
-                    )
-                    if csv_daily_target is not None:
-                        target_source = "CSV"
-                        target_message = conversion_message
-                        logger.info(f"新入院目標値取得成功: {csv_daily_target:.1f}人/日 ({target_dept_name})")
-                    else:
-                        logger.warning(f"新入院目標値取得失敗: {conversion_message}")
-                except Exception as e:
-                    logger.error(f"新入院目標値取得でエラー: {e}")
+            debug_info.append(f"📊 列: {list(target_df.columns)}")
+            if '週間新入院患者数目標' in target_df.columns:
+                valid_weekly_targets = target_df['週間新入院患者数目標'].dropna()
+                debug_info.append(f"📊 週間目標値: {len(valid_weekly_targets)}件の有効値")
+                if len(valid_weekly_targets) > 0:
+                    debug_info.append(f"📊 週間目標値範囲: {valid_weekly_targets.min():.1f}～{valid_weekly_targets.max():.1f}人")
+            else:
+                debug_info.append("❌ 週間新入院患者数目標列が見つからない")
+        
+        current_filter_config = get_unified_filter_config() if get_unified_filter_config else None
+        debug_info.append(f"🔍 フィルター設定: {current_filter_config}")
+        
+        if not target_df.empty and current_filter_config:
+            try:
+                # まず全体目標値を直接検索してみる
+                if '週間新入院患者数目標' in target_df.columns:
+                    overall_search_results = target_df[
+                        (target_df['部門コード'].astype(str).str.contains('全体|病院', na=False, case=False)) & 
+                        (pd.notna(target_df['週間新入院患者数目標']))
+                    ]
+                    debug_info.append(f"🔍 全体検索結果: {len(overall_search_results)}件")
+                    
+                    if not overall_search_results.empty:
+                        debug_info.append(f"🔍 該当レコード:")
+                        for idx, row in overall_search_results.iterrows():
+                            debug_info.append(f"  - 部門コード: {row['部門コード']}, 週間目標: {row['週間新入院患者数目標']}")
+                    
+                    # 区分別の確認
+                    kubun_counts = target_df['区分'].value_counts()
+                    debug_info.append(f"🔍 区分分布: {dict(kubun_counts)}")
+                
+                csv_daily_target, target_dept_name, conversion_message = get_weekly_admission_target_for_filter(
+                    target_df, current_filter_config
+                )
+                if csv_daily_target is not None:
+                    target_source = "CSV"
+                    target_message = conversion_message
+                    debug_info.append(f"✅ 新入院目標値取得成功: {csv_daily_target:.1f}人/日 ({target_dept_name})")
+                    logger.info(f"新入院目標値取得成功: {csv_daily_target:.1f}人/日 ({target_dept_name})")
+                else:
+                    debug_info.append(f"❌ 新入院目標値取得失敗: {conversion_message}")
+                    logger.warning(f"新入院目標値取得失敗: {conversion_message}")
+            except Exception as e:
+                debug_info.append(f"❌ エラー: {e}")
+                logger.error(f"新入院目標値取得でエラー: {e}")
         
         # 目標値の決定（CSV優先、なければ設定値）
         if csv_daily_target is not None:
@@ -699,13 +732,24 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.caption(f"目標: {target_daily_admissions:.1f}人/日 (週間: {weekly_target_for_display:.1f}人)")
             st.caption(f"💡 CSV目標値が見つからないため設定値を使用")
         
+        # ★★★ 一時的なデバッグ情報表示 ★★★
+        with st.expander("🔧 新入院目標値デバッグ情報", expanded=True):
+            for info in debug_info:
+                if "✅" in info:
+                    st.success(info)
+                elif "❌" in info:
+                    st.error(info)
+                elif "🔍" in info:
+                    st.info(info)
+                else:
+                    st.write(info)
+        
         # 期間計の表示
         period_days_val = metrics.get('period_days', 0)
         if period_days_val > 0:
             total_period_admissions = avg_daily_admissions_val * period_days_val
             st.caption(f"期間計: {total_period_admissions:.0f}人 ({period_days_val}日間)")
-
-
+            
     # 昨年度同期間との比較指標
     if prev_year_metrics and prev_year_period_info:
         st.markdown("---")
