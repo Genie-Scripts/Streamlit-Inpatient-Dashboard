@@ -496,6 +496,57 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.caption(f"総入院: {total_admissions:,.0f}人")
 
     with col4:
+        # ★★★ ここから一時的なデバッグ表示（問題解決後は削除） ★★★
+        target_df = st.session_state.get('target_values_df', pd.DataFrame())
+        
+        if not target_df.empty:
+            st.markdown("**🔧 デバッグ: 目標値CSV確認**")
+            st.write(f"読み込み済み行数: {len(target_df)}")
+            st.write(f"列数: {len(target_df.columns)}")
+            
+            # 列名を詳細確認
+            cols_list = list(target_df.columns)
+            st.write("**列名一覧:**")
+            for i, col in enumerate(cols_list):
+                # 文字コードも表示
+                col_repr = repr(col)  # 改行やスペースも見える形で表示
+                has_admission = '新入院' in col or '週間' in col
+                st.write(f"{i+1}. {col_repr} {'← 新入院関連' if has_admission else ''}")
+            
+            # 'P部門コード' 列の内容確認
+            if '部門コード' in target_df.columns:
+                dept_codes = target_df['部門コード'].unique()[:5]  # 最初の5件
+                st.write(f"**部門コード例:** {dept_codes}")
+                
+                # '全体'を含む行があるかチェック
+                overall_mask = target_df['部門コード'].astype(str).str.contains('全体|病院', na=False, case=False)
+                overall_count = overall_mask.sum()
+                st.write(f"**'全体'含む行数:** {overall_count}")
+                
+                if overall_count > 0:
+                    overall_data = target_df[overall_mask]
+                    st.write("**全体データ:**")
+                    st.dataframe(overall_data[['部門コード', '部門名', '区分']].head())
+            
+            # 週間新入院患者数目標列の確認
+            potential_cols = [col for col in cols_list if '新入院' in col or '週間' in col]
+            if potential_cols:
+                st.write(f"**新入院関連列:** {potential_cols}")
+                for col in potential_cols:
+                    if col in target_df.columns:
+                        non_null_count = target_df[col].notna().sum()
+                        st.write(f"  - {col}: {non_null_count}件の有効値")
+                        if non_null_count > 0:
+                            sample_values = target_df[col].dropna().head(3)
+                            st.write(f"    サンプル値: {sample_values.tolist()}")
+            else:
+                st.warning("新入院関連の列が見つかりません")
+        else:
+            st.warning("target_values_df が空です")
+        
+        st.markdown("---")
+        # ★★★ ここまで一時的なデバッグ表示（問題解決後は削除） ★★★
+
         # 日平均新入院患者数（週間目標値対応版）
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
         
