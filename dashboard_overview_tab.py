@@ -208,7 +208,7 @@ def get_weekly_admission_target_for_filter(target_df, filter_config):
     except Exception as e:
         logger.error(f"新入院目標値取得エラー: {e}", exc_info=True)
         return None, None, f"新入院目標値取得エラー: {e}"
-
+        
 def load_target_values_csv():
     """
     目標値CSVファイル読み込み機能（デバッグ強化版）
@@ -640,18 +640,32 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.caption(f"総入院: {total_admissions:,.0f}人")
 
     with col4:
+    with col4:
         # 日平均新入院患者数（週間目標値対応版・デバッグ強化版）
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
         
         # CSVから週間新入院患者数目標値を取得し、日平均に変換
-        target_df = st.session_state.get('target_values_df', pd.DataFrame())
+        # ★★★ 修正: 在院患者数目標値と同じtarget_df取得ロジックを使用 ★★★
+        target_df = pd.DataFrame()
+        target_data_source = ""
+        
+        if st.session_state.get('target_data') is not None:
+            target_df = st.session_state.get('target_data')
+            target_data_source = "データ入力タブ"
+        elif 'target_values_df' in st.session_state and not st.session_state.target_values_df.empty:
+            target_df = st.session_state.target_values_df
+            target_data_source = "サイドバー"
+        else:
+            target_df = st.session_state.get('target_values_df', pd.DataFrame())
+            target_data_source = "読み込み待ち"
+        
         csv_daily_target = None
         target_source = "設定値"
         target_message = ""
         debug_info = []
         
         # ★★★ デバッグ情報収集 ★★★
-        debug_info.append(f"📊 target_df状況: {len(target_df)}行")
+        debug_info.append(f"📊 target_df状況: {len(target_df)}行 (ソース: {target_data_source})")
         if not target_df.empty:
             debug_info.append(f"📊 列: {list(target_df.columns)}")
             if '週間新入院患者数目標' in target_df.columns:
