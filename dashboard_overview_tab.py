@@ -640,7 +640,6 @@ def display_unified_metrics_layout_colorized(metrics, selected_period_info, prev
             st.caption(f"総入院: {total_admissions:,.0f}人")
 
     with col4:
-    with col4:
         # 日平均新入院患者数（週間目標値対応版・デバッグ強化版）
         avg_daily_admissions_val = metrics.get('avg_daily_admissions', 0)
         
