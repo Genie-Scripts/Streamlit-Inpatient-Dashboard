@@ -416,9 +416,16 @@ def display_department_performance_dashboard():
     """
     st.header("🏥 診療科別パフォーマンスダッシュボード")
     
-    # ========== 追加: CSS注入 ==========
-    if inject_department_performance_css:
-        inject_department_performance_css()
+    # ========== CSS注入（修正版：エラーハンドリング付き） ==========
+    try:
+        if inject_department_performance_css:
+            inject_department_performance_css()
+            # デバッグ用（本番では削除可能）
+            # st.success("✅ CSS注入完了")
+        else:
+            st.warning("⚠️ 強化版CSSが利用できません。基本表示を使用します。")
+    except Exception as e:
+        st.error(f"CSS注入エラー: {e}")
     
     # データの確認
     if not st.session_state.get('data_processed', False):
@@ -584,34 +591,162 @@ def display_department_performance_dashboard():
             avg_alos = np.mean([kpi.get('alos', 0) for kpi in dept_kpis])
             st.metric("平均在院日数", f"{avg_alos:.1f}日")
     
-    # カード表示
+    # ========== 修正版：カード表示部分 ==========
     st.markdown("### 📋 診療科別詳細")
     
-    # ========== 修正: 強化版グリッド表示 ==========
-    if inject_department_performance_css:
-        # 強化版CSS使用時のグリッド表示
-        st.markdown(f'<div class="dept-performance-grid grid-{columns_count}-col">', unsafe_allow_html=True)
+    # デバッグ用の表示方式選択（本番環境では削除可能）
+    display_mode = st.radio(
+        "🎨 表示方式（デバッグ用）",
+        ["Streamlitネイティブ", "HTML強化版", "HTMLデバッグ"],
+        index=0,
+        key="display_mode_debug",
+        horizontal=True,
+        help="HTML問題のデバッグ用。通常は「Streamlitネイティブ」を選択"
+    )
+    
+    if display_mode == "HTMLデバッグ":
+        # HTMLレンダリングのデバッグ
+        st.markdown("#### 🔍 HTMLレンダリングデバッグ")
         
-        for kpi_data in dept_kpis:
-            card_html = create_enhanced_department_card(kpi_data)
-            st.markdown(card_html, unsafe_allow_html=True)
+        # テスト用HTML
+        test_html = """
+        <div style="
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+            padding: 20px;
+            margin: 15px;
+            border-left: 5px solid #007bff;
+        ">
+            <h3 style="color: #2c3e50;">テスト診療科</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 0.9em; font-weight: 600; color: #495057; margin-bottom: 8px;">日平均在院患者数</div>
+                    <div style="font-size: 2.2em; font-weight: 700; color: #2c3e50;">15.5</div>
+                    <div style="font-size: 0.85em; color: #6c757d;">直近週 16.2人/日</div>
+                    <div style="background-color: #d4edda; color: #155724; padding: 4px 12px; border-radius: 20px; font-size: 0.85em; margin-top: 8px; display: inline-block;">達成率 102.5%</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 0.9em; font-weight: 600; color: #495057; margin-bottom: 8px;">週合計新入院患者数</div>
+                    <div style="font-size: 2.2em; font-weight: 700; color: #2c3e50;">8</div>
+                    <div style="font-size: 0.85em; color: #6c757d;">直近週 7人/週</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 0.9em; font-weight: 600; color: #495057; margin-bottom: 8px;">平均在院日数</div>
+                    <div style="font-size: 2.2em; font-weight: 700; color: #2c3e50;">12.3</div>
+                    <div style="font-size: 0.85em; color: #6c757d;">直近週 11.8日</div>
+                </div>
+            </div>
+        </div>
+        """
         
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        # フォールバック: 基本版グリッド表示
-        cards_html = ""
-        for i, kpi_data in enumerate(dept_kpis):
-            if i % columns_count == 0:
-                if i > 0:
-                    cards_html += "</div>"
-                cards_html += f'<div style="display: grid; grid-template-columns: repeat({columns_count}, 1fr); gap: 10px; margin-bottom: 20px;">'
-            
-            cards_html += create_basic_department_card(kpi_data)
+        st.markdown("**HTML表示テスト:**")
+        st.markdown(test_html, unsafe_allow_html=True)
         
+        # 実際のカードデータでのテスト
         if dept_kpis:
-            cards_html += "</div>"
-        
-        st.markdown(cards_html, unsafe_allow_html=True)
+            st.markdown("**実際データでのHTMLテスト:**")
+            first_kpi = dept_kpis[0]
+            test_card_html = create_enhanced_department_card(first_kpi)
+            st.markdown(test_card_html, unsafe_allow_html=True)
+    
+    elif display_mode == "HTML強化版":
+        # 強化版CSS使用時のグリッド表示（修正版）
+        try:
+            if inject_department_performance_css:
+                # グリッドコンテナの開始
+                st.markdown(
+                    f'<div class="dept-performance-grid grid-{columns_count}-col">', 
+                    unsafe_allow_html=True
+                )
+                
+                # 各カードの表示（修正版）
+                for kpi_data in dept_kpis:
+                    card_html = create_enhanced_department_card(kpi_data)
+                    # 🔧 重要：unsafe_allow_html=True を明示的に設定
+                    st.markdown(card_html, unsafe_allow_html=True)
+                
+                # グリッドコンテナの終了
+                st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.error("CSS関数が利用できません。Streamlitネイティブ表示に切り替えてください。")
+        except Exception as e:
+            st.error(f"HTML表示エラー: {e}")
+            st.info("Streamlitネイティブ表示に自動切り替えします。")
+            display_mode = "Streamlitネイティブ"
+    
+    if display_mode == "Streamlitネイティブ":
+        # 🚀 安全なStreamlitネイティブ表示（推奨）
+        for i in range(0, len(dept_kpis), columns_count):
+            cols = st.columns(columns_count)
+            for j in range(columns_count):
+                if i + j < len(dept_kpis):
+                    with cols[j]:
+                        kpi_data = dept_kpis[i + j]
+                        
+                        # カード風コンテナ（Streamlitネイティブ）
+                        with st.container():
+                            # 診療科名のヘッダー
+                            st.markdown(f"#### 🏥 {kpi_data['dept_name']}")
+                            
+                            # データ期間情報を小さく表示
+                            st.caption(f"📊 {kpi_data['total_days']}日間 | {kpi_data['data_count']}件")
+                            
+                            # 3つのメトリクスを縦に配置
+                            
+                            # 1. 日平均在院患者数
+                            st.metric(
+                                "📋 日平均在院患者数",
+                                f"{kpi_data['avg_daily_census']:.1f}人",
+                                f"直近週 {kpi_data['latest_week_census']:.1f}人/日"
+                            )
+                            
+                            # 達成率表示（日平均在院患者数）
+                            if kpi_data.get('target_daily_census') and kpi_data.get('census_achievement'):
+                                achievement = kpi_data['census_achievement']
+                                target = kpi_data['target_daily_census']
+                                st.caption(f"🎯 目標: {target:.1f}人")
+                                
+                                if achievement >= 100:
+                                    st.success(f"✅ 達成率: {achievement:.1f}%")
+                                elif achievement >= 90:
+                                    st.warning(f"⚠️ 達成率: {achievement:.1f}%")
+                                else:
+                                    st.error(f"❌ 達成率: {achievement:.1f}%")
+                            
+                            st.markdown("---")
+                            
+                            # 2. 週合計新入院患者数
+                            st.metric(
+                                "🔄 週合計新入院患者数",
+                                f"{kpi_data['weekly_admissions']:.0f}人",
+                                f"直近週 {kpi_data['latest_week_admissions']:.0f}人/週"
+                            )
+                            
+                            # 達成率表示（週新入院患者数）
+                            if kpi_data.get('target_weekly_admissions') and kpi_data.get('admissions_achievement'):
+                                achievement = kpi_data['admissions_achievement']
+                                target = kpi_data['target_weekly_admissions']
+                                st.caption(f"🎯 目標: {target:.1f}人")
+                                
+                                if achievement >= 100:
+                                    st.success(f"✅ 達成率: {achievement:.1f}%")
+                                elif achievement >= 90:
+                                    st.warning(f"⚠️ 達成率: {achievement:.1f}%")
+                                else:
+                                    st.error(f"❌ 達成率: {achievement:.1f}%")
+                            
+                            st.markdown("---")
+                            
+                            # 3. 平均在院日数
+                            st.metric(
+                                "⏱️ 平均在院日数",
+                                f"{kpi_data['alos']:.1f}日",
+                                f"直近週 {kpi_data['latest_week_alos']:.1f}日"
+                            )
+                            
+                            # カード間の区切り
+                            st.markdown("---")
     
     # エクスポート機能
     st.markdown("---")
