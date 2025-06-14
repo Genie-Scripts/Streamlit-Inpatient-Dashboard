@@ -231,7 +231,7 @@ def display_department_performance_dashboard():
     st.header("🏥 診療科別パフォーマンスダッシュボード")
     
     # カスタムCSSを注入
-    inject_custom_css()
+    # inject_custom_css()
 
     if not st.session_state.get('data_processed', False):
         st.warning("データを読み込み後に利用可能になります。")
