@@ -318,3 +318,6 @@ def display_department_performance_dashboard():
     with col1:
         st.metric("対象診療科数", f"{total_depts}科")
     with col2:
+        st.metric("平均日在院患者数", f"{avg_daily_census:.1f}人")
+    with col3:
+        st.metric("平均週新入院患者数", f"{avg_weekly_admissions:.1f}人")
