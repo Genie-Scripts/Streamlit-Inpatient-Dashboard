@@ -55,37 +55,28 @@ def get_period_dates(df, period_type):
 
 
 def get_target_values_for_dept(target_data, dept_name):
-    """目標値ファイルから診療科の目標値を取得"""
     targets = {
         'daily_census_target': None,
         'weekly_admissions_target': None,
         'avg_los_target': None
     }
-    
     if target_data is None or target_data.empty:
         return targets
-    
     try:
         dept_targets = target_data[target_data['部門名'] == dept_name]
-        
         for _, row in dept_targets.iterrows():
-            indicator_type = row.get('指標タイプ', '')
+            indicator_type = str(row.get('指標タイプ', ''))
             target_value = row.get('目標値', None)
-            
             if '日平均在院' in indicator_type or '在院患者数' in indicator_type:
                 targets['daily_census_target'] = target_value
-            elif '新入院' in indicator_type or '入院患者数' in indicator_type:
-                # 月間目標を週間に変換（月間÷4.33）
-                if target_value:
-                    targets['weekly_admissions_target'] = target_value / 4.33
+            elif '新入院' in indicator_type:
+                # すでに週目標なのでそのままセット
+                targets['weekly_admissions_target'] = target_value
             elif '平均在院日数' in indicator_type:
                 targets['avg_los_target'] = target_value
-                
     except Exception as e:
         logger.error(f"目標値取得エラー ({dept_name}): {e}")
-    
     return targets
-
 
 def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, dept_col):
     """各診療科のKPIを計算して辞書で返す"""
