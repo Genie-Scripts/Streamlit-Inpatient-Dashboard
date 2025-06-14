@@ -174,7 +174,8 @@ def create_department_card_html(kpi_data):
             </div>
         </div>
     """
-    return textwrap.dedent(html)
+    # インデントと先頭空白を除去して行頭からHTMLレンダリングされるようにする
+    return textwrap.dedent(html).lstrip()
 
 
 def render_performance_cards(dept_kpis, columns_count):
