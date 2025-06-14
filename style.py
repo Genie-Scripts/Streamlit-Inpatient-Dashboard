@@ -167,3 +167,316 @@ def inject_global_css(font_scale=1.0):
     # """, unsafe_allow_html=True)
 
 # ダークモード関連の関数は削除しました
+
+def inject_department_performance_css():
+    """
+    診療科別パフォーマンスダッシュボード用CSS
+    department_performance_tab.py から呼び出される専用スタイル
+    """
+    st.markdown("""
+    <style>
+    /* ===== 診療科別パフォーマンスダッシュボード専用CSS ===== */
+    
+    /* 基本カードスタイル */
+    .dept-performance-card {
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        padding: 20px;
+        margin: 15px;
+        border-left: 5px solid #007bff;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .dept-performance-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    }
+
+    .dept-performance-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, #007bff, #28a745, #ffc107);
+    }
+
+    /* 達成状態による色分け */
+    .dept-card-excellent {
+        border-left-color: #28a745;
+        background: linear-gradient(135deg, #f8fff9 0%, #e8f5e8 100%);
+    }
+
+    .dept-card-good {
+        border-left-color: #17a2b8;
+        background: linear-gradient(135deg, #f0fcff 0%, #e1f7fa 100%);
+    }
+
+    .dept-card-warning {
+        border-left-color: #ffc107;
+        background: linear-gradient(135deg, #fffdf0 0%, #fff3cd 100%);
+    }
+
+    .dept-card-danger {
+        border-left-color: #dc3545;
+        background: linear-gradient(135deg, #fff5f5 0%, #f8d7da 100%);
+    }
+
+    /* メトリクス表示スタイル */
+    .metric-value {
+        font-size: 2.2em;
+        font-weight: 700;
+        color: #2c3e50;
+        line-height: 1.2;
+        margin: 8px 0;
+    }
+
+    .metric-label {
+        font-size: 0.9em;
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .metric-detail {
+        font-size: 0.85em;
+        color: #6c757d;
+        margin: 4px 0;
+    }
+
+    /* 達成率バッジスタイル */
+    .achievement-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85em;
+        font-weight: 600;
+        margin-top: 8px;
+        text-align: center;
+        min-width: 80px;
+    }
+
+    .achievement-excellent {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
+    .achievement-good {
+        background-color: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+
+    .achievement-warning {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+    }
+
+    .achievement-danger {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+
+    /* レスポンシブグリッドレイアウト */
+    .dept-performance-grid {
+        display: grid;
+        gap: 20px;
+        margin: 20px 0;
+    }
+
+    .grid-1-col { grid-template-columns: 1fr; }
+    .grid-2-col { grid-template-columns: repeat(2, 1fr); }
+    .grid-3-col { grid-template-columns: repeat(3, 1fr); }
+    .grid-4-col { grid-template-columns: repeat(4, 1fr); }
+
+    /* レスポンシブ対応 */
+    @media (max-width: 1200px) {
+        .grid-4-col { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 900px) {
+        .grid-3-col, .grid-4-col { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 600px) {
+        .grid-2-col, .grid-3-col, .grid-4-col { grid-template-columns: 1fr; }
+        .dept-performance-card { 
+            margin: 10px 5px; 
+            padding: 15px; 
+        }
+        .metric-value { 
+            font-size: 1.8em; 
+        }
+    }
+
+    /* サマリーカードスタイル */
+    .summary-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 10px 0 20px 0;
+        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+    }
+
+    .summary-card .metric-value {
+        color: white;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+
+    .summary-card .metric-label {
+        color: rgba(255,255,255,0.9);
+    }
+
+    /* アニメーション効果 */
+    @keyframes slideInUp {
+        from {
+            opacity: 0;
+            transform: translateY(30px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .dept-performance-card {
+        animation: slideInUp 0.5s ease-out;
+    }
+
+    /* ツールチップスタイル */
+    .tooltip {
+        position: relative;
+        cursor: help;
+    }
+
+    .tooltip::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: #333;
+        color: white;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 0.8em;
+        white-space: nowrap;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+        z-index: 1000;
+    }
+
+    .tooltip:hover::after {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    /* 印刷用スタイル */
+    @media print {
+        .dept-performance-card {
+            break-inside: avoid;
+            box-shadow: none;
+            border: 1px solid #ddd;
+            margin: 10px 0;
+        }
+        
+        .dept-performance-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+        }
+        
+        .dept-performance-card::before {
+            display: none;
+        }
+    }
+    
+    /* ダークモード対応（オプション） */
+    @media (prefers-color-scheme: dark) {
+        .dept-performance-card {
+            background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+            color: #e2e8f0;
+        }
+        
+        .metric-value {
+            color: #e2e8f0;
+        }
+        
+        .metric-label {
+            color: #a0aec0;
+        }
+        
+        .metric-detail {
+            color: #718096;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+def inject_enhanced_global_css(font_scale=1.0):
+    """
+    既存のグローバルCSSを拡張した版
+    既存の inject_global_css を置き換える場合に使用
+    """
+    # 既存のグローバルCSS
+    inject_global_css(font_scale)
+    
+    # 診療科別パフォーマンス用CSS
+    inject_department_performance_css()
+
+# ============================================
+# ユーティリティ関数（オプション）
+# ============================================
+
+def get_achievement_color_class(achievement_rate):
+    """
+    達成率に基づくCSSクラス名を返す
+    
+    Args:
+        achievement_rate: 達成率（％）
+    
+    Returns:
+        str: CSSクラス名
+    """
+    if achievement_rate is None:
+        return "achievement-good"
+    elif achievement_rate >= 100:
+        return "achievement-excellent"
+    elif achievement_rate >= 95:
+        return "achievement-good"
+    elif achievement_rate >= 85:
+        return "achievement-warning"
+    else:
+        return "achievement-danger"
+
+def get_card_class(census_achievement, admissions_achievement):
+    """
+    KPI達成率に基づくカードCSSクラス名を返す
+    
+    Args:
+        census_achievement: 日平均在院患者数達成率
+        admissions_achievement: 週新入院患者数達成率
+    
+    Returns:
+        str: カードCSSクラス名
+    """
+    census_rate = census_achievement or 0
+    admissions_rate = admissions_achievement or 0
+    
+    if census_rate >= 100 and admissions_rate >= 100:
+        return "dept-card-excellent"
+    elif census_rate >= 95 or admissions_rate >= 95:
+        return "dept-card-good"
+    elif census_rate >= 85 or admissions_rate >= 85:
+        return "dept-card-warning"
+    else:
+        return "dept-card-danger"

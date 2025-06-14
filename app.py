@@ -65,6 +65,14 @@ except ImportError as e:
     display_individual_analysis_tab = lambda df_filtered_main: st.error("個別分析機能は利用できません。")
     create_individual_analysis_section = lambda df_filtered, filter_config_from_caller: st.error("個別分析セクション機能は利用できません。")
 
+try:
+    from department_performance_tab import create_department_performance_tab
+    DEPT_PERFORMANCE_AVAILABLE = True
+except ImportError as e:
+    st.error(f"診療科別パフォーマンスタブのインポートに失敗しました: {e}")
+    DEPT_PERFORMANCE_AVAILABLE = False
+    create_department_performance_tab = lambda: st.error("診療科別パフォーマンス機能は利用できません。")
+
 inject_global_css(FONT_SCALE)
 
 
@@ -807,7 +815,7 @@ def main():
     create_sidebar()
 
     # タブの作成と処理
-    tab_titles = ["📊 主要指標", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
+    tab_titles = ["📊 主要指標", "🏥 診療科別パフォーマンス", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
     if FORECAST_AVAILABLE:
         tab_titles.append("🔮 予測分析")
     tab_titles.extend(["📤 データ出力", "📥 データ入力"])
@@ -837,6 +845,16 @@ def main():
                 create_management_dashboard_tab()
             except Exception as e: 
                 st.error(f"主要指標でエラー: {str(e)}\n{traceback.format_exc()}")
+
+        # 新しいタブ: 診療科別パフォーマンス
+        with tabs[tab_titles.index("🏥 診療科別パフォーマンス")]:
+            try:
+                if DEPT_PERFORMANCE_AVAILABLE:
+                    create_department_performance_tab()
+                else:
+                    st.error("診療科別パフォーマンス機能が利用できません。")
+            except Exception as e:
+                st.error(f"診療科別パフォーマンスでエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[tab_titles.index("🗓️ 平均在院日数分析")]:
             try:
