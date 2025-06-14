@@ -265,6 +265,8 @@ def display_department_performance_dashboard():
     render_performance_cards(dept_kpis, columns_count)
 
 # --- app.pyから呼び出されるメイン関数 ---
+
+# --- app.pyから呼び出されるメイン関数 ---
 def create_department_performance_tab():
     """このモジュールのエントリーポイント"""
     display_department_performance_dashboard()
