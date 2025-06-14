@@ -106,36 +106,36 @@ def get_color(val):
         return "#d53a3a"
 
 def render_metric_card(label, period_avg, recent, target, achievement, unit, card_color):
-    # achievement: float
-    ach_str = f"{achievement:.1f}%" if achievement else "--"
+    ach_str = f"{achievement:.1f}%" if achievement or achievement == 0 else "--"
     ach_label = "達成率:"
+    target_color = "#b3b9b3" if not target or target == '--' else "#7b8a7a"
     return f"""
     <div style="
-        background: {card_color}14;
-        border-radius: 13px;
+        background: {card_color}0E;
+        border-radius: 11px;
         border-left: 6px solid {card_color};
-        margin-bottom: 20px;
-        padding: 18px 22px 10px 22px;
-        min-height: 156px;
+        margin-bottom: 12px;
+        padding: 12px 16px 7px 16px;
+        min-height: 1px;
         ">
-        <div style="font-size:1.4em; font-weight:700; margin-bottom:10px; color:#27382b;">{label}</div>
-        <table style="width:100%; font-size:1.13em; margin-bottom:10px;">
-          <tr>
-            <td>期間平均:</td>
-            <td style="text-align:right; font-weight:bold;">{period_avg} {unit}</td>
-          </tr>
-          <tr>
-            <td>直近週実績:</td>
-            <td style="text-align:right; font-weight:bold;">{recent} {unit}</td>
-          </tr>
-          <tr>
-            <td>目標:</td>
-            <td style="text-align:right; color:#7d7e80;">{target if target else '--'} {unit}</td>
-          </tr>
-        </table>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-weight:bold; font-size:1.11em; color:{card_color};">{ach_label}</div>
-          <div style="font-weight:bold; font-size:1.33em; color:{card_color};">{ach_str}</div>
+        <div style="font-size:1.13em; font-weight:700; margin-bottom:7px; color:#293a27;">{label}</div>
+        <div style="display:flex; flex-direction:column; gap:2px;">
+            <div style="display:flex; justify-content:space-between;">
+                <span style="font-size:0.93em; color:#7b8a7a;">期間平均:</span>
+                <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{period_avg} {unit}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+                <span style="font-size:0.93em; color:#7b8a7a;">直近週実績:</span>
+                <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{recent} {unit}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+                <span style="font-size:0.93em; color:#7b8a7a;">目標:</span>
+                <span style="font-size:1.07em; font-weight:700; color:{target_color};">{target if target else '--'} {unit}</span>
+            </div>
+        </div>
+        <div style="margin-top:7px; display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-weight:700; font-size:1.03em; color:{card_color};">{ach_label}</div>
+          <div style="font-weight:700; font-size:1.20em; color:{card_color};">{ach_str}</div>
         </div>
     </div>
     """
