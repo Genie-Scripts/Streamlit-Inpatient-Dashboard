@@ -167,7 +167,25 @@ def create_department_card_html(kpi_data):
     </div>
     """
 
-def render_performance_cards(dept_kpis, columns_count):
+def 
+    # ✅ デバッグ出力の挿入
+    st.subheader("🛠 デバッグ：フィルター後のデータ件数")
+    st.write("🔹 フィルター後の DataFrame 件数:", len(df_filtered))
+    st.write("🔹 フィルター後の日付範囲:", start_date, "〜", end_date)
+
+    st.subheader("🛠 デバッグ：診療科一覧・KPI計算")
+    st.write("🔹 診療科一覧（sort後）:", departments)
+    st.write("🔹 KPIデータ件数:", len(dept_kpis))
+    if dept_kpis:
+        st.write("🔹 最初のKPIサンプル:", dept_kpis[0])
+
+    st.subheader("🛠 デバッグ：HTMLカード表示内容")
+    for i, kpi_data in enumerate(dept_kpis[:3]):
+        card_html = create_department_card_html(kpi_data)
+        st.markdown(card_html, unsafe_allow_html=True)
+        st.code(card_html, language='html')
+
+    render_performance_cards(dept_kpis, columns_count):
     """
     生成されたHTMLをst.columnsとst.markdownを使って画面に表示（レンダリング）する。
     """
@@ -226,6 +244,24 @@ def display_department_performance_dashboard():
     dept_kpis.sort(key=lambda x: x.get(sort_key, 0) or -1, reverse=reverse)
     
     st.markdown("### 📋 診療科別詳細")
+    
+    # ✅ デバッグ出力の挿入
+    st.subheader("🛠 デバッグ：フィルター後のデータ件数")
+    st.write("🔹 フィルター後の DataFrame 件数:", len(df_filtered))
+    st.write("🔹 フィルター後の日付範囲:", start_date, "〜", end_date)
+
+    st.subheader("🛠 デバッグ：診療科一覧・KPI計算")
+    st.write("🔹 診療科一覧（sort後）:", departments)
+    st.write("🔹 KPIデータ件数:", len(dept_kpis))
+    if dept_kpis:
+        st.write("🔹 最初のKPIサンプル:", dept_kpis[0])
+
+    st.subheader("🛠 デバッグ：HTMLカード表示内容")
+    for i, kpi_data in enumerate(dept_kpis[:3]):
+        card_html = create_department_card_html(kpi_data)
+        st.markdown(card_html, unsafe_allow_html=True)
+        st.code(card_html, language='html')
+
     render_performance_cards(dept_kpis, columns_count)
 
 
