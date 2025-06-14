@@ -167,7 +167,6 @@ def create_department_card_html(kpi_data):
     </div>
     """
 
-def 
     # ✅ デバッグ出力の挿入
     st.subheader("🛠 デバッグ：フィルター後のデータ件数")
     st.write("🔹 フィルター後の DataFrame 件数:", len(df_filtered))
@@ -185,9 +184,7 @@ def
         st.markdown(card_html, unsafe_allow_html=True)
         st.code(card_html, language='html')
 
-    render_performance_cards(dept_kpis, columns_count):
-    """
-    生成されたHTMLをst.columnsとst.markdownを使って画面に表示（レンダリング）する。
+    render_performance_cards(dept_kpis, columns_count)
     """
     for i in range(0, len(dept_kpis), columns_count):
         cols = st.columns(columns_count)
