@@ -163,93 +163,134 @@ def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, 
         return None
 
 
-def create_department_card(kpi_data):
-    """Streamlitのネイティブコンポーネントを使用してカードを作成"""
+def create_department_card_styled(kpi_data):
+    """よりスタイリッシュなカード表示（JPG画像に近い）"""
     
-    # 達成率に基づく色の設定
-    def get_color_by_achievement(achievement):
-        if achievement >= 100:
-            return "#28a745"  # 緑
-        elif achievement >= 95:
-            return "#17a2b8"  # 青
-        elif achievement >= 85:
-            return "#ffc107"  # 黄
+    # カード全体のコンテナ
+    with st.container():
+        # カードの背景色を設定（達成率に基づく）
+        avg_achievement = (kpi_data.get('daily_census_achievement', 0) + 
+                          kpi_data.get('weekly_admissions_achievement', 0)) / 2
+        
+        if avg_achievement >= 100:
+            border_color = "#28a745"  # 緑
+            bg_color = "#f8fff9"
+        elif avg_achievement >= 95:
+            border_color = "#17a2b8"  # 青
+            bg_color = "#f0fcff"
+        elif avg_achievement >= 85:
+            border_color = "#ffc107"  # 黄
+            bg_color = "#fffdf0"
         else:
-            return "#dc3545"  # 赤
-    
-    # メインのカラムで診療科名を表示
-    st.markdown(f"### {kpi_data['dept_name']}")
-    
-    # 3つの指標を横並びで表示
-    col1, col2, col3 = st.columns(3)
-    
-    # 日平均在院患者数
-    with col1:
-        st.markdown("**日平均在院患者数**")
-        st.metric(
-            label="週平均",
-            value=f"{kpi_data.get('daily_avg_census', 0):.1f} 件/週",
-            delta=None
-        )
-        st.caption(f"直近週: {kpi_data.get('recent_week_daily_census', 0):.0f} 件")
-        st.caption(f"目標: {kpi_data.get('daily_census_target', 0):.1f} 件/週" if kpi_data.get('daily_census_target') else "目標: 未設定")
+            border_color = "#dc3545"  # 赤
+            bg_color = "#fff5f5"
         
-        achievement = kpi_data.get('daily_census_achievement', 0)
-        color = get_color_by_achievement(achievement)
+        # カスタムスタイルのコンテナ
         st.markdown(
-            f'<div style="background-color: {color}; color: white; padding: 5px; border-radius: 5px; text-align: center; font-weight: bold;">'
-            f'達成率: {achievement:.1f}%'
-            '</div>',
+            f"""
+            <div style="
+                background-color: {bg_color};
+                border-left: 5px solid {border_color};
+                border-radius: 10px;
+                padding: 20px;
+                margin: 10px 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            ">
+                <h3 style="text-align: center; margin-bottom: 20px; color: #333;">
+                    {kpi_data['dept_name']}
+                </h3>
+            </div>
+            """,
             unsafe_allow_html=True
         )
-    
-    # 週合計新入院患者数
-    with col2:
-        st.markdown("**新規外科**")
-        st.metric(
-            label="週平均",
-            value=f"{kpi_data.get('weekly_avg_admissions', 0):.1f} 件/週",
-            delta=None
-        )
-        st.caption(f"直近週: {kpi_data.get('recent_week_admissions', 0):.0f} 件")
-        st.caption(f"目標: {kpi_data.get('weekly_admissions_target', 0):.1f} 件/週" if kpi_data.get('weekly_admissions_target') else "目標: 未設定")
         
-        achievement = kpi_data.get('weekly_admissions_achievement', 0)
-        color = get_color_by_achievement(achievement)
-        st.markdown(
-            f'<div style="background-color: {color}; color: white; padding: 5px; border-radius: 5px; text-align: center; font-weight: bold;">'
-            f'達成率: {achievement:.1f}%'
-            '</div>',
-            unsafe_allow_html=True
-        )
-    
-    # 平均在院日数
-    with col3:
-        st.markdown("**病床利用率**")
-        st.metric(
-            label="週平均",
-            value=f"{kpi_data.get('avg_length_of_stay', 0):.1f} 件/週",
-            delta=None
-        )
-        st.caption(f"直近週: {kpi_data.get('recent_week_avg_los', 0):.0f} 件")
-        st.caption(f"目標: {kpi_data.get('avg_los_target', 0):.1f} 件/週" if kpi_data.get('avg_los_target') else "目標: 未設定")
+        # 指標を表示
+        cols = st.columns([1, 1, 1])
         
-        # 平均在院日数は低い方が良いので、達成率の計算を逆にする
-        if kpi_data.get('avg_los_target'):
-            achievement = (kpi_data.get('avg_los_target', 0) / kpi_data.get('avg_length_of_stay', 1) * 100) if kpi_data.get('avg_length_of_stay', 0) > 0 else 0
-        else:
-            achievement = 0
+        metrics = [
+            {
+                'title': '日平均在院患者数',
+                'value': kpi_data.get('daily_avg_census', 0),
+                'recent': kpi_data.get('recent_week_daily_census', 0),
+                'target': kpi_data.get('daily_census_target'),
+                'achievement': kpi_data.get('daily_census_achievement', 0),
+                'unit': '件/週'
+            },
+            {
+                'title': '週合計新入院患者数',
+                'value': kpi_data.get('weekly_avg_admissions', 0),
+                'recent': kpi_data.get('recent_week_admissions', 0),
+                'target': kpi_data.get('weekly_admissions_target'),
+                'achievement': kpi_data.get('weekly_admissions_achievement', 0),
+                'unit': '件/週'
+            },
+            {
+                'title': '平均在院日数',
+                'value': kpi_data.get('avg_length_of_stay', 0),
+                'recent': kpi_data.get('recent_week_avg_los', 0),
+                'target': kpi_data.get('avg_los_target'),
+                'achievement': 0,  # 計算が必要
+                'unit': '日'
+            }
+        ]
         
-        color = get_color_by_achievement(achievement)
-        st.markdown(
-            f'<div style="background-color: {color}; color: white; padding: 5px; border-radius: 5px; text-align: center; font-weight: bold;">'
-            f'達成率: {achievement:.1f}%'
-            '</div>',
-            unsafe_allow_html=True
-        )
-    
-    st.markdown("---")
-
+        # 平均在院日数の達成率計算
+        if metrics[2]['target'] and kpi_data.get('avg_length_of_stay', 0) > 0:
+            metrics[2]['achievement'] = (metrics[2]['target'] / kpi_data.get('avg_length_of_stay', 1) * 100)
+        
+        for col, metric in zip(cols, metrics):
+            with col:
+                # 指標名
+                st.markdown(f"**{metric['title']}**")
+                
+                # メイン値（大きく表示）
+                st.markdown(
+                    f"<h2 style='text-align: center; margin: 10px 0;'>{metric['value']:.1f}</h2>",
+                    unsafe_allow_html=True
+                )
+                
+                # 詳細情報
+                st.caption(f"直近週: {metric['recent']:.1f} {metric['unit']}")
+                if metric['target']:
+                    st.caption(f"目標: {metric['target']:.1f} {metric['unit']}")
+                else:
+                    st.caption("目標: 未設定")
+                
+                # 達成率バッジ
+                achievement = metric['achievement']
+                if achievement >= 100:
+                    color = "#28a745"
+                    bg = "#d4edda"
+                elif achievement >= 95:
+                    color = "#17a2b8"
+                    bg = "#d1ecf1"
+                elif achievement >= 85:
+                    color = "#856404"
+                    bg = "#fff3cd"
+                else:
+                    color = "#721c24"
+                    bg = "#f8d7da"
+                
+                st.markdown(
+                    f"""
+                    <div style="
+                        background-color: {bg};
+                        color: {color};
+                        padding: 5px 10px;
+                        border-radius: 15px;
+                        text-align: center;
+                        font-weight: bold;
+                        font-size: 14px;
+                        margin-top: 10px;
+                        border: 1px solid {color};
+                    ">
+                        達成率: {achievement:.1f}%
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+        
+        st.markdown("<br>", unsafe_allow_html=True)
 
 def display_department_performance_dashboard():
     """診療科別パフォーマンスダッシュボードのメイン表示関数"""
