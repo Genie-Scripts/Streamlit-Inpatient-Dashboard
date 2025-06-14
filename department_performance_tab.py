@@ -230,9 +230,6 @@ def display_department_performance_dashboard():
     """診療科別パフォーマンスダッシュボードのメイン表示関数"""
     st.header("🏥 診療科別パフォーマンスダッシュボード")
     
-    # カスタムCSSを注入
-    # inject_custom_css()
-
     if not st.session_state.get('data_processed', False):
         st.warning("データを読み込み後に利用可能になります。")
         return
@@ -275,7 +272,11 @@ def display_department_performance_dashboard():
         "診療科名（昇順）": ('dept_name', False)
     }
     key, rev = sort_map.get(sort_key, ('dept_name', False))
-    dept_kpis.sort(key=lambda x: x.get(key) or 0, reverse=rev)
+    dept_kpis.sort(key=lambda x: x.get('daily_census_achievement', 0), reverse=True)
+    cols = st.columns(3)
+    for idx, kpi_data in enumerate(dept_kpis):
+        with cols[idx % 3]:
+            create_department_card_styled(kpi_data)
 
     # サマリー情報を表示
     total_depts = len(dept_kpis)
