@@ -77,12 +77,13 @@ for kpi in dept_kpis:
     st.markdown("---")
     st.code(card_html, language='html')  # HTML表示内容を確認（ステップ3）
 
-# ステップ5：データフィルター想定チェック
+# ステップ5：データフィルター想定チェック（同じ長さの列を使用）
+num_records = 90
 df = pd.DataFrame({
-    "診療科名": departments * 10,
-    "日付": pd.date_range(end=datetime.today(), periods=30).tolist() * len(departments),
-    "入院患者数（在院）": [40 + i % 5 for i in range(90)],
-    "総入院患者数": [5 + (i % 3) for i in range(90)],
-    "総退院患者数": [4 + (i % 2) for i in range(90)]
+    "診療科名": [departments[i % 3] for i in range(num_records)],
+    "日付": [datetime.today() - timedelta(days=i % 30) for i in range(num_records)],
+    "入院患者数（在院）": [40 + i % 5 for i in range(num_records)],
+    "総入院患者数": [5 + (i % 3) for i in range(num_records)],
+    "総退院患者数": [4 + (i % 2) for i in range(num_records)]
 })
 st.write("📊 データ件数（ステップ5フィルター確認用）:", df.shape)
