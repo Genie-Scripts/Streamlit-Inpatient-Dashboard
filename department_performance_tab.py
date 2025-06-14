@@ -269,3 +269,9 @@ def display_department_performance_dashboard():
 def create_department_performance_tab():
     """このモジュールのエントリーポイント"""
     display_department_performance_dashboard()
+
+# --- app.pyから呼び出されるメイン関数 ---
+def create_department_performance_tab():
+    """このモジュールのエントリーポイント"""
+    display_department_performance_dashboard()
+
