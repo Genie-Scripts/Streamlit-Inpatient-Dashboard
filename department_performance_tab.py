@@ -322,6 +322,25 @@ def display_department_performance_dashboard():
     with col3:
         st.metric("平均週新入院患者数", f"{avg_weekly_admissions:.1f}人")
 
+    # ---- HTMLダウンロードボタン ----
+    html_str = kpis_to_html(dept_kpis)
+    st.download_button(
+        label="この診療科別パフォーマンスをHTMLファイルでダウンロード",
+        data=html_str.encode('utf-8'),
+        file_name="performance_metrics.html",
+        mime="text/html"
+    )
+
+    # --- カードグリッド3列表示 ---
+    cols = st.columns(3)
+    for idx, kpi_data in enumerate(dept_kpis):
+        with cols[idx % 3]:
+            create_department_card_styled(kpi_data)
+
+    # --- 詳細テーブル表示（任意） ---
+    with st.expander("📋 詳細データテーブル"):
+        st.dataframe(pd.DataFrame(dept_kpis), use_container_width=True)
+
 def create_department_performance_tab():
     """タブエントリーポイント"""
     display_department_performance_dashboard()
