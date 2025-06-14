@@ -86,11 +86,43 @@ def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, 
 
 
 def create_department_card_html(kpi_data):
+    """各診療科の KPI を HTML カード形式で描画する"""
+    # CSS クラス取得
+    card_class = get_card_class(
+        kpi_data.get('census_achievement', 0),
+        kpi_data.get('admissions_achievement', 0)
+    )
+    census_color = get_achievement_color_class(kpi_data.get('census_achievement', 0))
+    admissions_color = get_achievement_color_class(kpi_data.get('admissions_achievement', 0))
+
     html = f"""
-        <div class="dept-performance-card {get_card_class(kpi_data['census_achievement'], kpi_data['admissions_achievement'])}">
-            <!-- 省略 -->
+        <div class="dept-performance-card {card_class}">
+            <!-- ヘッダー -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0; font-size:1em; font-weight:700;">{kpi_data['dept_name']}</h3>
+                <span style="font-size:0.75em; color:#666;">{kpi_data['total_days']}日間 | {kpi_data['data_count']}件</span>
+            </div>
+            <!-- ボディ -->
+            <div style="background:#fff; border-radius:8px; padding:10px;">
+                <div style="text-align:center; margin-bottom:8px;">
+                    <div style="font-size:0.75em; color:#999;">日平均在院患者数</div>
+                    <div style="font-size:1.5em; font-weight:600;">{kpi_data['avg_daily_census']:.1f}</div>
+                    <div style="font-size:0.75em; color:#999;">直近期間</div>
+                </div>
+                <div style="display:flex; justify-content:space-around;">
+                    <div style="text-align:center;">
+                        <div style="font-size:0.75em; color:#999;">在院達成率</div>
+                        <div class="achievement-badge {census_color}" style="display:inline-block; padding:2px 6px; border-radius:4px;">{kpi_data['census_achievement']*100:.1f}%</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:0.75em; color:#999;">週入院達成率</div>
+                        <div class="achievement-badge {admissions_color}" style="display:inline-block; padding:2px 6px; border-radius:4px;">{kpi_data['admissions_achievement']*100:.1f}%</div>
+                    </div>
+                </div>
+            </div>
         </div>
     """
+    # インデントと先頭空白を除去
     return textwrap.dedent(html).lstrip()
 
 
