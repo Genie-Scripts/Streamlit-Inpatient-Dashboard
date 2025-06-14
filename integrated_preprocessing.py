@@ -428,7 +428,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
             validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
         elif "入院患者数（在院）" not in df_processed.columns:
-            df_processed["入院患者数（在院）」] = 0
+            df_processed["入院患者数（在院）"] = 0
             validation_results["errors"].append("「在院患者数」または「入院患者数（在院）」列が存在しません。「入院患者数（在院）」を0で作成します。")
 
         if "入院患者数" in df_processed.columns and "緊急入院患者数" in df_processed.columns:
