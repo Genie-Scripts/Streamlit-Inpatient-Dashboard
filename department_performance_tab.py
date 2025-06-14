@@ -260,6 +260,7 @@ def create_department_card_html(kpi_data):
 
 
 def render_performance_cards(dept_kpis, columns_count):
+    """診療科別パフォーマンスカードを指定された列数で表示"""
     for i in range(0, len(dept_kpis), columns_count):
         cols = st.columns(columns_count)
         for j in range(columns_count):
@@ -270,6 +271,7 @@ def render_performance_cards(dept_kpis, columns_count):
 
 
 def display_department_performance_dashboard():
+    """診療科別パフォーマンスダッシュボードのメイン表示関数"""
     st.header("🏥 診療科別パフォーマンスダッシュボード")
     inject_department_performance_css()
 
@@ -304,6 +306,10 @@ def display_department_performance_dashboard():
         if kpi:
             dept_kpis.append(kpi)
 
+    if not dept_kpis:
+        st.warning("表示可能な診療科データがありません。")
+        return
+
     # KPIリストのソート
     sort_map = {
         "週新入院患者数達成率（降順）": ('weekly_admissions_achievement', True),
@@ -314,11 +320,28 @@ def display_department_performance_dashboard():
     key, rev = sort_map.get(sort_key, ('dept_name', False))
     dept_kpis.sort(key=lambda x: x.get(key) or 0, reverse=rev)
 
-    # タイトルとカード表示
+    # サマリー情報を表示
+    total_depts = len(dept_kpis)
+    avg_daily_census = sum(kpi.get('daily_avg_census', 0) for kpi in dept_kpis) / total_depts if total_depts > 0 else 0
+    avg_weekly_admissions = sum(kpi.get('weekly_avg_admissions', 0) for kpi in dept_kpis) / total_depts if total_depts > 0 else 0
+    
+    # タイトルとサマリー表示
     st.markdown(f"**{period_desc}** の診療科別パフォーマンス")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("対象診療科数", f"{total_depts}科")
+    with col2:
+        st.metric("平均日在院患者数", f"{avg_daily_census:.1f}人")
+    with col3:
+        st.metric("平均週新入院患者数", f"{avg_weekly_admissions:.1f}人")
+    
     st.markdown("---")
+    
+    # カード表示
     render_performance_cards(dept_kpis, columns_count)
 
 
 def create_department_performance_tab():
+    """診療科別パフォーマンスタブのエントリーポイント"""
     display_department_performance_dashboard()
