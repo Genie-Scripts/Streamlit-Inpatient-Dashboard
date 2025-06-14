@@ -65,14 +65,13 @@ def get_target_values_for_dept(target_data, dept_name):
     try:
         dept_targets = target_data[target_data['部門名'] == dept_name]
         for _, row in dept_targets.iterrows():
-            indicator_type = str(row.get('指標タイプ', ''))
+            indicator_type = str(row.get('指標タイプ', '')).strip()
             target_value = row.get('目標値', None)
-            if '日平均在院' in indicator_type or '在院患者数' in indicator_type:
+            if indicator_type == '日平均在院患者数':
                 targets['daily_census_target'] = target_value
-            elif '新入院' in indicator_type:
-                # すでに週目標なのでそのままセット
+            elif indicator_type == '週間新入院患者数':
                 targets['weekly_admissions_target'] = target_value
-            elif '平均在院日数' in indicator_type:
+            elif indicator_type == '平均在院日数':
                 targets['avg_los_target'] = target_value
     except Exception as e:
         logger.error(f"目標値取得エラー ({dept_name}): {e}")
