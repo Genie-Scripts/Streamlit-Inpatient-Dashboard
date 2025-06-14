@@ -13,7 +13,6 @@ except ImportError as e:
     st.stop()
 
 def get_period_dates(df, period_type):
-    """期間タイプに応じた開始日・終了日・説明文を返す"""
     if df is None or df.empty or '日付' not in df.columns:
         return None, None, "データなし"
     max_date = df['日付'].max()
@@ -27,14 +26,12 @@ def get_period_dates(df, period_type):
         start_date = max(start_date, min_date)
         desc = f"今年度 ({start_date.strftime('%Y/%m/%d')}～{max_date.strftime('%m/%d')})"
     else:
-        # デフォルト
         start_date = max_date - pd.Timedelta(days=27)
         desc = f"直近4週間 ({start_date.strftime('%m/%d')}～{max_date.strftime('%m/%d')})"
     start_date = max(start_date, min_date)
     return start_date, max_date, desc
 
 def get_target_values_for_dept(target_data, dept_name):
-    """目標値ファイルから診療科の目標値を厳密取得（完全一致のみ）"""
     targets = {
         'daily_census_target': None,
         'weekly_admissions_target': None,
@@ -58,7 +55,6 @@ def get_target_values_for_dept(target_data, dept_name):
     return targets
 
 def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, dept_col):
-    """診療科ごとのKPI集計"""
     try:
         dept_df = df[df[dept_col] == dept_name]
         period_df = safe_date_filter(dept_df, start_date, end_date)
@@ -102,8 +98,141 @@ def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, 
         logger.error(f"KPI計算エラー ({dept_name}): {e}", exc_info=True)
         return None
 
+def get_color(daily_achv):
+    if daily_achv >= 100:
+        return "#28a745"
+    elif daily_achv >= 80:
+        return "#ffc107"
+    else:
+        return "#dc3545"
+
+def kpis_to_html(dept_kpis):
+    card_htmls = []
+    for kpi in dept_kpis:
+        daily = kpi.get('daily_avg_census', 0)
+        daily_target = kpi.get('daily_census_target', None)
+        daily_achv = kpi.get('daily_census_achievement', 0)
+        weekly = kpi.get('weekly_avg_admissions', 0)
+        weekly_target = kpi.get('weekly_admissions_target', None)
+        weekly_achv = kpi.get('weekly_admissions_achievement', 0)
+        los = kpi.get('avg_length_of_stay', 0)
+        los_target = kpi.get('avg_los_target', None)
+        los_achv = (los_target / los * 100) if los_target and los else 0
+        color = get_color(daily_achv)
+        bar_width = min(daily_achv, 100)
+        card_htmls.append(f"""
+        <div class="metric-card" style="background-color: {color}10; border-left: 6px solid {color};">
+            <div class="metric-title">{kpi.get('dept_name') or '診療科未設定'}</div>
+            <div class="metric-row">
+                <div>
+                    <div class="metric-label">日平均在院患者数</div>
+                    <div class="metric-value">{daily:.1f}</div>
+                    <div class="metric-caption">目標: {daily_target if daily_target else '未設定'}</div>
+                    <div class="metric-caption">達成率: <span style="color:{color}; font-weight:bold;">{daily_achv:.1f}%</span></div>
+                </div>
+                <div>
+                    <div class="metric-label">週合計新入院患者数</div>
+                    <div class="metric-value">{weekly:.1f}</div>
+                    <div class="metric-caption">目標: {weekly_target if weekly_target else '未設定'}</div>
+                    <div class="metric-caption">達成率: <span style="color:{color}; font-weight:bold;">{weekly_achv:.1f}%</span></div>
+                </div>
+                <div>
+                    <div class="metric-label">平均在院日数</div>
+                    <div class="metric-value">{los:.1f}</div>
+                    <div class="metric-caption">目標: {los_target if los_target else '未設定'}</div>
+                    <div class="metric-caption">達成率: <span style="color:{color}; font-weight:bold;">{los_achv:.1f}%</span></div>
+                </div>
+            </div>
+            <div class="metric-bar-bg">
+                <div class="metric-bar-fg" style="width:{bar_width}%; background-color:{color};"></div>
+            </div>
+        </div>
+        """)
+    grid_html = ""
+    for i in range(0, len(card_htmls), 3):
+        grid_html += "<div class='metric-grid-row'>" + "".join(card_htmls[i:i+3]) + "</div>\n"
+    html = f"""
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>診療科別パフォーマンスメトリクス</title>
+    <style>
+        body {{
+            background: #f5f7fa;
+            font-family: 'Noto Sans JP', Meiryo, sans-serif;
+            margin: 0;
+            padding: 30px;
+        }}
+        .metric-grid-row {{
+            display: flex;
+            gap: 20px;
+            margin-bottom: 18px;
+        }}
+        .metric-card {{
+            flex: 1;
+            min-width: 0;
+            border-radius: 11px;
+            padding: 18px 14px 10px 18px;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.07);
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 200px;
+        }}
+        .metric-title {{
+            font-size: 1.13em;
+            font-weight: bold;
+            margin-bottom: 14px;
+            color: #23292f;
+        }}
+        .metric-row {{
+            display: flex;
+            gap: 16px;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }}
+        .metric-label {{
+            font-size: 0.95em;
+            margin-bottom: 5px;
+            color: #555;
+        }}
+        .metric-value {{
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 4px;
+            color: #222;
+        }}
+        .metric-caption {{
+            font-size: 0.93em;
+            color: #666;
+        }}
+        .metric-bar-bg {{
+            background: #e9ecef;
+            border-radius: 4px;
+            height: 7px;
+            margin: 10px 2px 0 2px;
+            position: relative;
+        }}
+        .metric-bar-fg {{
+            height: 7px;
+            border-radius: 4px;
+            position: absolute;
+            left: 0;
+            top: 0;
+        }}
+    </style>
+</head>
+<body>
+    <h2>診療科別パフォーマンスメトリクス</h2>
+    {grid_html}
+</body>
+</html>
+"""
+    return html
+
 def create_department_card_styled(kpi_data):
-    """診療科別カード: 色分けは日平均在院患者数達成率ベース・HTML一体型"""
     daily = kpi_data.get('daily_avg_census', 0)
     daily_target = kpi_data.get('daily_census_target', None)
     daily_achv = kpi_data.get('daily_census_achievement', 0)
@@ -113,8 +242,6 @@ def create_department_card_styled(kpi_data):
     los = kpi_data.get('avg_length_of_stay', 0)
     los_target = kpi_data.get('avg_los_target', None)
     los_achv = (los_target / los * 100) if los_target and los else 0
-
-    # ★ 色分け基準は日平均在院患者数達成率
     if daily_achv >= 100:
         color = "#28a745"
     elif daily_achv >= 80:
@@ -122,7 +249,6 @@ def create_department_card_styled(kpi_data):
     else:
         color = "#dc3545"
     bar_width = min(daily_achv, 100)
-
     st.markdown(f"""
     <div style="
         background-color: {color}10;
@@ -160,7 +286,6 @@ def create_department_card_styled(kpi_data):
     """, unsafe_allow_html=True)
 
 def display_department_performance_dashboard():
-    """ダッシュボードメイン表示"""
     st.header("🏥 診療科別パフォーマンスダッシュボード")
     if not st.session_state.get('data_processed', False):
         st.warning("データを読み込み後に利用可能になります。")
@@ -169,7 +294,6 @@ def display_department_performance_dashboard():
     target_data = st.session_state.get('target_data', {})
     unified_config = get_unified_filter_config()
     period_key = unified_config.get('period') or unified_config.get('period_type') or '直近4週'
-    sort_key = unified_config.get('sort', '診療科名（昇順）')
     start_date, end_date, period_desc = get_period_dates(df_original, period_key)
     date_filtered_df = safe_date_filter(df_original, start_date, end_date)
     possible_cols = ['部門名', '診療科', '診療科名']
@@ -177,7 +301,6 @@ def display_department_performance_dashboard():
     if dept_col is None:
         st.error(f"診療科列が見つかりません。期待する列: {possible_cols}")
         return
-    # KPI計算
     dept_kpis = []
     for dept in date_filtered_df[dept_col].unique():
         kpi = calculate_department_kpis(date_filtered_df, target_data, dept, start_date, end_date, dept_col)
@@ -186,9 +309,7 @@ def display_department_performance_dashboard():
     if not dept_kpis:
         st.warning("表示可能な診療科データがありません。")
         return
-    # 日平均在院患者数達成率の降順でソート
     dept_kpis.sort(key=lambda x: x.get('daily_census_achievement', 0), reverse=True)
-    # サマリー
     total_depts = len(dept_kpis)
     avg_daily_census = sum(kpi.get('daily_avg_census', 0) for kpi in dept_kpis) / total_depts if total_depts > 0 else 0
     avg_weekly_admissions = sum(kpi.get('weekly_avg_admissions', 0) for kpi in dept_kpis) / total_depts if total_depts > 0 else 0
@@ -197,18 +318,3 @@ def display_department_performance_dashboard():
     with col1:
         st.metric("対象診療科数", f"{total_depts}科")
     with col2:
-        st.metric("平均日在院患者数", f"{avg_daily_census:.1f}人")
-    with col3:
-        st.metric("平均週新入院患者数", f"{avg_weekly_admissions:.1f}人")
-    st.markdown("---")
-    # 3列グリッド表示
-    cols = st.columns(3)
-    for idx, kpi_data in enumerate(dept_kpis):
-        with cols[idx % 3]:
-            create_department_card_styled(kpi_data)
-    with st.expander("📋 詳細データテーブル"):
-        st.dataframe(pd.DataFrame(dept_kpis), use_container_width=True)
-
-def create_department_performance_tab():
-    """タブエントリーポイント"""
-    display_department_performance_dashboard()
