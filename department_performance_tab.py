@@ -152,10 +152,7 @@ def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, 
         logger.error(f"診療科KPI計算エラー ({dept_name}): {e}", exc_info=True)
         return None
 
-
 def create_department_card_styled(kpi_data):
-    """美しい一体型パフォーマンスカード（dashboard_page.py方式）"""
-    # 実績/目標/達成率を適切に取得
     daily = kpi_data.get('daily_avg_census', 0)
     daily_target = kpi_data.get('daily_census_target', None)
     daily_achv = kpi_data.get('daily_census_achievement', 0)
@@ -164,21 +161,19 @@ def create_department_card_styled(kpi_data):
     weekly_achv = kpi_data.get('weekly_admissions_achievement', 0)
     los = kpi_data.get('avg_length_of_stay', 0)
     los_target = kpi_data.get('avg_los_target', None)
-    # 平均在院日数達成率（低いほど良い逆指標の場合、ターゲット/実績比で算出。なければ0）
     if los_target and los:
         los_achv = los_target / los * 100
     else:
         los_achv = 0
 
-    # メイン達成率（色分け用）
-    main_achv = (daily_achv + weekly_achv) / 2
-    if main_achv >= 100:
-        color = "#28a745"  # 緑
-    elif main_achv >= 80:
-        color = "#ffc107"  # 黄
+    # ★ 色分け基準を「日平均在院患者数達成率」だけにする
+    if daily_achv >= 100:
+        color = "#28a745"   # 緑
+    elif daily_achv >= 80:
+        color = "#ffc107"   # 黄
     else:
-        color = "#dc3545"  # 赤
-    bar_width = min(main_achv, 100)
+        color = "#dc3545"   # 赤
+    bar_width = min(daily_achv, 100)
 
     # HTML一体で描画
     st.markdown(f"""
