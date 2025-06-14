@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 try:
-    from utils import safe_date_filter
+    from utils import safe_date_filter, get_display_name_for_dept, create_dept_mapping_table
     from unified_filters import get_unified_filter_config
 except ImportError as e:
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
@@ -30,40 +30,80 @@ def get_period_dates(df, period_type):
     start_date = max(start_date, min_date)
     return start_date, max_date, desc
 
-def get_target_values_for_dept(target_data, dept_name):
+def get_target_values_for_dept(target_data, dept_code, dept_name=None):
+    """
+    部門コードまたは部門名で目標値を取得
+    部門コードを優先し、見つからない場合は部門名でも検索
+    """
     targets = {
         'daily_census_target': None,
         'weekly_admissions_target': None,
-        'avg_los_target': None
+        'avg_los_target': None,
+        'display_name': dept_code  # デフォルトは部門コード
     }
+    
     if target_data is None or target_data.empty:
         return targets
+    
     try:
-        dept_targets = target_data[target_data['部門名'] == dept_name]
-        for _, row in dept_targets.iterrows():
-            indicator_type = str(row.get('指標タイプ', '')).strip()
-            target_value = row.get('目標値', None)
-            if indicator_type == '日平均在院患者数':
-                targets['daily_census_target'] = target_value
-            elif indicator_type == '週間新入院患者数':
-                targets['weekly_admissions_target'] = target_value
-            elif indicator_type == '平均在院日数':
-                targets['avg_los_target'] = target_value
+        # まず部門コードで検索
+        dept_targets = target_data[target_data['部門コード'] == dept_code]
+        
+        # 部門コードで見つからない場合、診療科名でも検索
+        if dept_targets.empty and dept_name:
+            dept_targets = target_data[target_data['部門コード'] == dept_name]
+        
+        # それでも見つからない場合、部門名でも検索
+        if dept_targets.empty and '部門名' in target_data.columns:
+            # 部門名でのマッチング（部分一致も試みる）
+            dept_targets = target_data[
+                (target_data['部門名'] == dept_code) | 
+                (target_data['部門名'] == dept_name) |
+                (target_data['部門名'].str.contains(dept_code, na=False)) |
+                (target_data['部門名'].str.contains(dept_name, na=False) if dept_name else False)
+            ]
+        
+        if not dept_targets.empty:
+            # 目標値ファイルの部門名を表示名として使用
+            if '部門名' in dept_targets.columns:
+                display_name = dept_targets.iloc[0]['部門名']
+                targets['display_name'] = display_name
+            
+            for _, row in dept_targets.iterrows():
+                indicator_type = str(row.get('指標タイプ', '')).strip()
+                target_value = row.get('目標値', None)
+                
+                if indicator_type == '日平均在院患者数':
+                    targets['daily_census_target'] = target_value
+                elif indicator_type == '週間新入院患者数':
+                    targets['weekly_admissions_target'] = target_value
+                elif indicator_type == '平均在院日数':
+                    targets['avg_los_target'] = target_value
+        else:
+            logger.warning(f"目標値が見つかりません - 部門コード: {dept_code}, 診療科名: {dept_name}")
+            
     except Exception as e:
-        logger.error(f"目標値取得エラー ({dept_name}): {e}")
+        logger.error(f"目標値取得エラー ({dept_code}): {e}")
+    
     return targets
 
-def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, dept_col):
+def calculate_department_kpis(df, target_data, dept_code, dept_name, start_date, end_date, dept_col):
     try:
-        dept_df = df[df[dept_col] == dept_name]
+        # 診療科でフィルタリング（部門コードベース）
+        dept_df = df[df[dept_col] == dept_code]
         period_df = safe_date_filter(dept_df, start_date, end_date)
+        
         if period_df.empty:
             return None
+        
         total_days = (end_date - start_date).days + 1
         total_patient_days = period_df['在院患者数'].sum() if '在院患者数' in period_df.columns else 0
         total_admissions = period_df['新入院患者数'].sum() if '新入院患者数' in period_df.columns else 0
         total_discharges = period_df['退院患者数'].sum() if '退院患者数' in period_df.columns else 0
+        
         daily_avg_census = total_patient_days / total_days if total_days > 0 else 0
+        
+        # 直近週の計算
         recent_week_end = end_date
         recent_week_start = end_date - pd.Timedelta(days=6)
         recent_week_df = safe_date_filter(dept_df, recent_week_start, recent_week_end)
@@ -71,15 +111,23 @@ def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, 
         recent_week_admissions = recent_week_df['新入院患者数'].sum() if '新入院患者数' in recent_week_df.columns and not recent_week_df.empty else 0
         recent_week_discharges = recent_week_df['退院患者数'].sum() if '退院患者数' in recent_week_df.columns and not recent_week_df.empty else 0
         recent_week_daily_census = recent_week_patient_days / 7 if recent_week_patient_days > 0 else 0
+        
         avg_length_of_stay = total_patient_days / total_discharges if total_discharges > 0 else 0
         recent_week_avg_los = recent_week_patient_days / recent_week_discharges if recent_week_discharges > 0 else 0
+        
         weekly_avg_admissions = (total_admissions / total_days) * 7 if total_days > 0 else 0
-        targets = get_target_values_for_dept(target_data, dept_name)
+        
+        # 目標値の取得（部門コードと診療科名の両方を渡す）
+        targets = get_target_values_for_dept(target_data, dept_code, dept_name)
+        
+        # 達成率の計算
         daily_census_achievement = (daily_avg_census / targets['daily_census_target'] * 100) if targets['daily_census_target'] else 0
         weekly_admissions_achievement = (weekly_avg_admissions / targets['weekly_admissions_target'] * 100) if targets['weekly_admissions_target'] else 0
         los_achievement = (targets['avg_los_target'] / avg_length_of_stay * 100) if targets['avg_los_target'] and avg_length_of_stay else 0
+        
         return {
-            'dept_name': dept_name,
+            'dept_code': dept_code,
+            'dept_name': targets['display_name'],  # 目標設定ファイルの部門名を使用
             'daily_avg_census': daily_avg_census,
             'recent_week_daily_census': recent_week_daily_census,
             'daily_census_target': targets['daily_census_target'],
@@ -94,7 +142,7 @@ def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, 
             'avg_los_achievement': los_achievement
         }
     except Exception as e:
-        logger.error(f"KPI計算エラー ({dept_name}): {e}", exc_info=True)
+        logger.error(f"KPI計算エラー ({dept_code}): {e}", exc_info=True)
         return None
 
 def get_color(val):
@@ -146,23 +194,38 @@ def display_department_performance_dashboard():
     if not st.session_state.get('data_processed', False):
         st.warning("データを読み込み後に利用可能になります。")
         return
+    
     df_original = st.session_state['df']
-    target_data = st.session_state.get('target_data', {})
+    target_data = st.session_state.get('target_data', pd.DataFrame())
+    
+    # 診療科マッピングを初期化（目標値ファイルの情報を使用）
+    if not target_data.empty:
+        create_dept_mapping_table(target_data)
+    
     unified_config = get_unified_filter_config()
     period_key = unified_config.get('period') or unified_config.get('period_type') or '直近4週'
     start_date, end_date, period_desc = get_period_dates(df_original, period_key)
     date_filtered_df = safe_date_filter(df_original, start_date, end_date)
+    
     possible_cols = ['部門名', '診療科', '診療科名']
     dept_col = next((c for c in possible_cols if c in date_filtered_df.columns), None)
     if dept_col is None:
         st.error(f"診療科列が見つかりません。期待する列: {possible_cols}")
         return
 
+    # 診療科のユニークなリストを取得
+    unique_depts = date_filtered_df[dept_col].unique()
     dept_kpis = []
-    for dept in date_filtered_df[dept_col].unique():
-        kpi = calculate_department_kpis(date_filtered_df, target_data, dept, start_date, end_date, dept_col)
+    
+    for dept_code in unique_depts:
+        dept_name = dept_code  # デフォルトは同じ値
+        kpi = calculate_department_kpis(
+            date_filtered_df, target_data, dept_code, dept_name, 
+            start_date, end_date, dept_col
+        )
         if kpi:
             dept_kpis.append(kpi)
+    
     if not dept_kpis:
         st.warning("表示可能な診療科データがありません。")
         return
@@ -200,8 +263,10 @@ def display_department_performance_dashboard():
         avg_disp = f"{avg:.1f}" if avg or avg == 0 else "--"
         recent_disp = f"{recent:.1f}" if recent or recent == 0 else "--"
         target_disp = f"{target:.1f}" if target else "--"
+        
+        # 部門名を使用（目標設定ファイルの名称）
         html = render_metric_card(
-            label=kpi["dept_name"],
+            label=kpi["dept_name"],  # ここで部門名を使用
             period_avg=avg_disp,
             recent=recent_disp,
             target=target_disp,
@@ -212,7 +277,7 @@ def display_department_performance_dashboard():
         with cols[idx % 3]:
             st.markdown(html, unsafe_allow_html=True)
 
-    # ダウンロードボタン（現在の指標のみを出力するHTML）
+    # ダウンロードボタン
     html_cards = ""
     for kpi in dept_kpis:
         avg = kpi.get(opt["avg"], 0)
