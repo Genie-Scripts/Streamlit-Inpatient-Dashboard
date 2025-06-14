@@ -11,6 +11,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
 import logging
+from utils import create_dept_mapping_table
 
 # ロギング設定
 logging.basicConfig(
@@ -297,25 +298,46 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         "info": [],
         "summaries": {}
     }
+
     major_departments_list = []
+    dept_name_to_code = {}
+
     if target_data_df is not None and not target_data_df.empty and '部門コード' in target_data_df.columns:
         potential_major_depts = target_data_df['部門コード'].astype(str).unique()
+        # 部門名も診療科名の参照候補に含める（両方混在ケースに備える）
         if '部門名' in target_data_df.columns:
             potential_major_depts_from_name = target_data_df['部門名'].astype(str).unique()
             potential_major_depts = np.union1d(potential_major_depts, potential_major_depts_from_name)
+            # マッピング用（診療科名→部門名 or コード）の対応表を作成
+            for _, row in target_data_df.iterrows():
+                code = str(row.get('部門コード', '')).strip()
+                name = str(row.get('部門名', '')).strip()
+                if name:
+                    dept_name_to_code[name] = code  # 診療科名として部門名が出現する場合
+                if code:
+                    dept_name_to_code[code] = name  # コードで出てきた場合
 
-        if '診療科名' in df.columns: # df can be None or empty here
+        # 実データの診療科名と、部門コード/部門名のどちらとも突き合わせ
+        if '診療科名' in df.columns:
             actual_depts_in_df = df['診療科名'].astype(str).unique() if df is not None and not df.empty else []
+            # major_departments_listは、診療科名がpotential_major_deptsに含まれるものすべて
             major_departments_list = [dept for dept in actual_depts_in_df if dept in potential_major_depts]
-        
+            # さらに、診療科名が「部門名→部門コード」にマッピングできる場合も主要診療科とする
+            if dept_name_to_code:
+                for dept in actual_depts_in_df:
+                    mapped_code = dept_name_to_code.get(dept)
+                    if mapped_code and (mapped_code in potential_major_depts):
+                        major_departments_list.append(dept)
+                # 重複を排除
+                major_departments_list = list(set(major_departments_list))
+
         if not major_departments_list and len(potential_major_depts) > 0:
             major_departments_list = list(potential_major_depts)
             validation_results["warnings"].append(
-                "目標設定ファイルに記載の診療科が、実績データの診療科名と直接一致しませんでした。"
-                "目標設定ファイルの「部門コード」または「部門名」を主要診療科として扱います。"
+                "目標設定ファイルの部門名・コードが実データの診療科名と一致しなかったため、目標設定ファイル上の全診療科を主要診療科として扱います。"
             )
-        if not major_departments_list: # After all attempts
-             validation_results["warnings"].append("目標設定ファイルから主要診療科リストを特定できませんでした。")
+        if not major_departments_list:
+            validation_results["warnings"].append("目標設定ファイルから主要診療科リストを特定できませんでした。")
     else:
         validation_results["warnings"].append("目標設定ファイルが提供されなかったか、'部門コード'列がありません。全ての診療科を「その他」として扱います。")
 
@@ -331,7 +353,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         df_processed = df[available_cols].copy()
 
         initial_rows = len(df_processed)
-        df_processed.dropna(subset=['病棟コード'], inplace=True) # Ensure '病棟コード' exists
+        df_processed.dropna(subset=['病棟コード'], inplace=True)
         rows_dropped_due_to_ward_nan = initial_rows - len(df_processed)
         if rows_dropped_due_to_ward_nan > 0:
             validation_results["warnings"].append(
@@ -342,8 +364,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             validation_results["is_valid"] = False
             validation_results["errors"].append("必須列「日付」が存在しません。")
             return None, validation_results
-            
-        # Ensure '日付' column is datetime before operating on it
+
         df_processed['日付'] = pd.to_datetime(df_processed['日付'], errors='coerce')
         initial_rows = len(df_processed)
         df_processed.dropna(subset=['日付'], inplace=True)
@@ -359,18 +380,24 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             return None, validation_results
             
         df_processed["病棟コード"] = df_processed["病棟コード"].astype(str)
-    
+
+        # ここで診療科名を主要診療科＋その他へ集約
         if '診療科名' in df_processed.columns:
             if pd.api.types.is_categorical_dtype(df_processed['診療科名']):
                 df_processed['診療科名'] = df_processed['診療科名'].astype(str).fillna("空白診療科")
             else:
                 df_processed['診療科名'] = df_processed['診療科名'].fillna("空白診療科").astype(str)
-            
-            df_processed['診療科名'] = df_processed['診療科名'].apply(
-                lambda x: x if x in major_departments_list else 'その他'
-            )
+            # 集約判定: major_departments_list, もしくはマッピング先に含まれているもの
+            def map_dept_name(x):
+                if x in major_departments_list:
+                    return x
+                elif dept_name_to_code and dept_name_to_code.get(x) and dept_name_to_code.get(x) in major_departments_list:
+                    return dept_name_to_code.get(x)  # 診療科名→部門名のマッピングが成立
+                else:
+                    return "その他"
+            df_processed['診療科名'] = df_processed['診療科名'].apply(map_dept_name)
             validation_results["info"].append(
-                f"診療科名を主要診療科（{len(major_departments_list)}件）と「その他」に集約しました。「空白」も「その他」に含まれます。"
+                f"診療科名を主要診療科（{len(major_departments_list)}件）と「その他」に集約しました。"
             )
         else:
             validation_results["warnings"].append("「診療科名」列が存在しないため、診療科集約をスキップしました。")
@@ -378,7 +405,6 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         initial_rows = len(df_processed)
         df_processed = efficient_duplicate_check(df_processed)
         rows_dropped_due_to_duplicates = initial_rows - len(df_processed)
-        
         if rows_dropped_due_to_duplicates > 0:
             validation_results["info"].append(
                 f"重複データ {rows_dropped_due_to_duplicates} 行を削除しました"
@@ -402,14 +428,14 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             df_processed["入院患者数（在院）"] = df_processed["在院患者数"].copy()
             validation_results["info"].append("「在院患者数」列を「入院患者数（在院）」列にコピーしました。")
         elif "入院患者数（在院）" not in df_processed.columns:
-            df_processed["入院患者数（在院）"] = 0
+            df_processed["入院患者数（在院）」] = 0
             validation_results["errors"].append("「在院患者数」または「入院患者数（在院）」列が存在しません。「入院患者数（在院）」を0で作成します。")
 
         if "入院患者数" in df_processed.columns and "緊急入院患者数" in df_processed.columns:
             df_processed["総入院患者数"] = df_processed["入院患者数"] + df_processed["緊急入院患者数"]
         elif "入院患者数" in df_processed.columns:
-             df_processed["総入院患者数"] = df_processed["入院患者数"]
-             validation_results["info"].append("「緊急入院患者数」列がないため、「総入院患者数」は「入院患者数」と同じ値になります。")
+            df_processed["総入院患者数"] = df_processed["入院患者数"]
+            validation_results["info"].append("「緊急入院患者数」列がないため、「総入院患者数」は「入院患者数」と同じ値になります。")
         else:
             validation_results["warnings"].append("「入院患者数」列がないため、「総入院患者数」は計算できませんでした。0で作成します。")
             df_processed["総入院患者数"] = 0
@@ -427,22 +453,22 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             df_processed["新入院患者数"] = df_processed["総入院患者数"]
         else:
             df_processed["新入院患者数"] = 0
-        
-        # **移植した add_patient_days_calculation を呼び出す**
-        df_processed = add_patient_days_calculation(df_processed) #
+
+        # 延べ在院日数の計算
+        df_processed = add_patient_days_calculation(df_processed)
         validation_results["info"].append("延べ在院日数（人日）を計算しました。")
 
-        if '日付' in df_processed.columns: # '日付'列の存在を再確認
-            df_processed = add_weekday_flag(df_processed) #
+        if '日付' in df_processed.columns:
+            df_processed = add_weekday_flag(df_processed)
             validation_results["info"].append("平日/休日フラグを追加しました。")
         else:
             validation_results["errors"].append("「日付」列がないため、平日/休日フラグを追加できません。")
 
-        general_validation_res = validate_general_data(df_processed) #
+        general_validation_res = validate_general_data(df_processed)
         validation_results["warnings"].extend(general_validation_res.get("warnings", []))
         validation_results["errors"].extend(general_validation_res.get("errors", []))
         
-        patient_days_validation_res = validate_patient_days_data(df_processed) #
+        patient_days_validation_res = validate_patient_days_data(df_processed)
         validation_results["warnings"].extend(patient_days_validation_res.get("warnings", []))
         validation_results["errors"].extend(patient_days_validation_res.get("errors", []))
         if "summary" in patient_days_validation_res:
@@ -450,7 +476,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
 
         if validation_results["errors"]:
             validation_results["is_valid"] = False
-            
+
         gc.collect()
         end_time = time.time()
         validation_results["info"].append(f"データ前処理全体時間: {end_time - start_time:.2f}秒")
@@ -467,7 +493,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
             validation_results["errors"].append("前処理の結果、有効なデータが残りませんでした。")
             logger.warning("Data became empty after processing but was initially considered valid.")
             return None, validation_results
-            
+
         return df_processed, validation_results
 
     except Exception as e:
@@ -477,7 +503,7 @@ def integrated_preprocess_data(df: pd.DataFrame, target_data_df: pd.DataFrame = 
         validation_results["errors"].append(f"データの前処理中に予期せぬエラーが発生しました: {str(e)}")
         logger.error(f"前処理エラー: {error_detail}")
         return None, validation_results
-
+        
 def add_weekday_flag(df):
     """
     平日/休日の判定フラグを追加する

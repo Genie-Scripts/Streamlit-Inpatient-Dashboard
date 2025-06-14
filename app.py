@@ -75,6 +75,19 @@ except ImportError as e:
 
 inject_global_css(FONT_SCALE)
 
+def load_and_initialize_data(df, target_data):
+    if df is not None and target_data is not None:
+        df = initialize_all_mappings(df, target_data)
+        st.session_state['df'] = df
+        st.session_state['target_data'] = target_data
+        st.session_state['data_processed'] = True
+        if '日付' in df.columns and not df['日付'].empty:
+            st.session_state.latest_data_date_str = df['日付'].max().strftime('%Y年%m月%d日')
+        else:
+            st.session_state.latest_data_date_str = "日付不明"
+        # その他フィルター等も初期化
+        initialize_unified_filters(df)
+        st.session_state.mappings_initialized_after_processing = True
 
 def get_analysis_period():
     if not st.session_state.get('data_processed', False):

@@ -29,6 +29,7 @@ def create_dept_mapping_table(target_data_df=None):
             name = str(row.get('部門名', '')).strip()
             if code and name:  # コードと名前が両方存在する場合のみマッピング
                 dept_mapping[code] = name
+                dept_mapping[name] = name   # 追加: 診療科名が部門名と同じ場合も
 
     # --- 特別なマッピングの読み込みと適用 ---
     # st.session_state.common_config から SPECIAL_DEPT_MAPPINGS を取得
