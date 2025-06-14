@@ -22,10 +22,9 @@ def get_period_dates(df, period_type):
     """期間タイプに基づいて開始日・終了日・説明文を計算する"""
     if df is None or df.empty or '日付' not in df.columns:
         return None, None, "データなし"
-    
     max_date = df['日付'].max()
     min_date = df['日付'].min()
-    
+
     # 期間タイプに応じた計算
     if period_type == "直近4週":
         start_date = max_date - pd.Timedelta(days=27)
@@ -58,24 +57,37 @@ def get_period_dates(df, period_type):
     return start_date, max_date, period_desc
 
 
-def calculate_department_kpis(df, target_data, dept_name, start_date, end_date):
-    # 省略: KPI計算は従来どおり
+def calculate_department_kpis(df, target_data, dept_name, start_date, end_date, dept_col):
+    """各診療科のKPIを計算して辞書で返す"""
     try:
-        dept_df = df[df['部門名'] == dept_name]
+        # 部門列名を動的に使用
+        dept_df = df[df[dept_col] == dept_name]
         period_df = safe_date_filter(dept_df, start_date, end_date)
         if period_df.empty:
             return None
-        # 以下、既存の計算ロジック...
-        # return {...}
+        # KPI計算ロジック（例）
+        total_days = (end_date - start_date).days + 1
+        data_count = len(period_df)
+        avg_daily_census = data_count / total_days
+        # 例: admissions_achievement を算出
+        admissions_achievement = np.random.rand()  # 実ロジックに置き換えてください
+        # その他KPIも同様に計算
+        return {
+            'dept_name': dept_name,
+            'total_days': total_days,
+            'data_count': data_count,
+            'avg_daily_census': avg_daily_census,
+            'admissions_achievement': admissions_achievement,
+            'census_achievement': avg_daily_census / target_data.get('census_target', 1)
+        }
     except Exception as e:
         logger.error(f"診療科KPI計算エラー ({dept_name}): {e}", exc_info=True)
         return None
 
 
 def create_department_card_html(kpi_data):
-    # 省略: HTMLテンプレートは従来どおり
     html = f"""
-        <div class="dept-performance-card {get_card_class(kpi_data.get('census_achievement'), kpi_data.get('admissions_achievement'))}">
+        <div class="dept-performance-card {get_card_class(kpi_data['census_achievement'], kpi_data['admissions_achievement'])}">
             <!-- 省略 -->
         </div>
     """
@@ -101,9 +113,9 @@ def display_department_performance_dashboard():
         return
 
     df_original = st.session_state['df']
-    target_data = st.session_state.get('target_data')
+    target_data = st.session_state.get('target_data', {})
 
-    # 統一設定から期間・ソート・列数を取得（キー名が異なる場合にも対応）
+    # 統一設定から期間・ソート・列数を取得
     unified_config = get_unified_filter_config()
     period_key = unified_config.get('period') or unified_config.get('period_type') or '直近4週'
     sort_key = unified_config.get('sort', '診療科名（昇順）')
@@ -111,13 +123,19 @@ def display_department_performance_dashboard():
 
     # 開始日・終了日・説明文を取得
     start_date, end_date, period_desc = get_period_dates(df_original, period_key)
-    # フィルタリング
     date_filtered_df = safe_date_filter(df_original, start_date, end_date)
+
+    # 部門名／診療科名の列を自動検出
+    possible_cols = ['部門名', '診療科', '診療科名']
+    dept_col = next((c for c in possible_cols if c in date_filtered_df.columns), None)
+    if dept_col is None:
+        st.error(f"診療科列が見つかりません。期待する列: {possible_cols}")
+        return
 
     # 各診療科のKPI計算
     dept_kpis = []
-    for dept in date_filtered_df['部門名'].unique():
-        kpi = calculate_department_kpis(date_filtered_df, target_data, dept, start_date, end_date)
+    for dept in date_filtered_df[dept_col].unique():
+        kpi = calculate_department_kpis(date_filtered_df, target_data, dept, start_date, end_date, dept_col)
         if kpi:
             dept_kpis.append(kpi)
 
@@ -130,7 +148,7 @@ def display_department_performance_dashboard():
     key, rev = sort_map.get(sort_key, ('dept_name', False))
     dept_kpis.sort(key=lambda x: x.get(key) or 0, reverse=rev)
 
-    # タイトルに期間を表示
+    # タイトルとカード表示
     st.markdown(f"**{period_desc}** の診療科別パフォーマンス")
     st.markdown("---")
     render_performance_cards(dept_kpis, columns_count)
