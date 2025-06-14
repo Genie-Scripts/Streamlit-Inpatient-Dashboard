@@ -129,53 +129,74 @@ def calculate_department_kpis(df, dept_name, start_date, end_date, target_data=N
 
 def create_enhanced_department_card(kpi_data):
     """
-    強化版診療科別パフォーマンスカードの作成
+    強化版診療科別パフォーマンスカードの作成（修正版：HTML生成ロジックを改善）
     """
     if not kpi_data:
         return ""
-    
-    dept_name = kpi_data['dept_name']
-    
-    if get_card_class and get_achievement_color_class:
-        census_achievement = kpi_data.get('census_achievement')
-        admissions_achievement = kpi_data.get('admissions_achievement')
-        
-        card_class = get_card_class(census_achievement, admissions_achievement)
-        census_badge_class = get_achievement_color_class(census_achievement)
-        admissions_badge_class = get_achievement_color_class(admissions_achievement)
-        
-        card_html = f"""
-        <div class="dept-performance-card {card_class}">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <h3 style="margin: 0; color: #2c3e50; font-size: 1.3em; font-weight: 700;">{dept_name}</h3>
-                <div style="font-size: 0.7em; color: #868e96; text-align: right;">{kpi_data['total_days']}日間 | {kpi_data['data_count']}件</div>
+
+    # スタイル関数が利用できない場合のフォールバック
+    if not (get_card_class and get_achievement_color_class):
+        return create_basic_department_card(kpi_data)
+
+    # KPI達成率に基づくCSSクラス名を取得
+    census_achievement = kpi_data.get('census_achievement')
+    admissions_achievement = kpi_data.get('admissions_achievement')
+    card_class = get_card_class(census_achievement, admissions_achievement)
+    census_badge_class = get_achievement_color_class(census_achievement)
+    admissions_badge_class = get_achievement_color_class(admissions_achievement)
+
+    # ---- ★★★ ここから修正 ★★★ ----
+    # オプションで表示するHTMLパーツを事前に生成
+
+    # 1. 日平均在院患者数の目標値・達成率部分のHTML
+    census_target_html = ""
+    if kpi_data.get('target_daily_census') and census_achievement is not None:
+        census_target_html = f"""
+            <div class="metric-detail">目標 {kpi_data['target_daily_census']:.1f}人</div>
+            <div class="achievement-badge {census_badge_class}">{census_achievement:.1f}%</div>
+        """
+
+    # 2. 週合計新入院患者数の目標値・達成率部分のHTML
+    admissions_target_html = ""
+    if kpi_data.get('target_weekly_admissions') and admissions_achievement is not None:
+        admissions_target_html = f"""
+            <div class="metric-detail">目標 {kpi_data['target_weekly_admissions']:.1f}人</div>
+            <div class="achievement-badge {admissions_badge_class}">{admissions_achievement:.1f}%</div>
+        """
+
+    # 事前に生成したパーツを使って、最終的なHTMLカードを組み立てる
+    card_html = f"""
+    <div class="dept-performance-card {card_class}">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3 style="margin: 0; color: #2c3e50; font-size: 1.3em; font-weight: 700;">{kpi_data['dept_name']}</h3>
+            <div style="font-size: 0.7em; color: #868e96; text-align: right;">{kpi_data['total_days']}日間 | {kpi_data['data_count']}件</div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px;">
+            <div style="text-align: center;">
+                <div class="metric-label">日平均在院患者数</div>
+                <div class="metric-value">{kpi_data['avg_daily_census']:.1f}</div>
+                <div class="metric-detail">直近週 {kpi_data['latest_week_census']:.1f}人/日</div>
+                {census_target_html}
             </div>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px;">
-                <div style="text-align: center;">
-                    <div class="metric-label">日平均在院患者数</div>
-                    <div class="metric-value">{kpi_data['avg_daily_census']:.1f}</div>
-                    <div class="metric-detail">直近週 {kpi_data['latest_week_census']:.1f}人/日</div>
-                    {f'''<div class="metric-detail">目標 {kpi_data['target_daily_census']:.1f}人</div>
-                         <div class="achievement-badge {census_badge_class}">{kpi_data['census_achievement']:.1f}%</div>''' if kpi_data.get('target_daily_census') and kpi_data.get('census_achievement') is not None else ''}
-                </div>
-                <div style="text-align: center;">
-                    <div class="metric-label">週合計新入院患者数</div>
-                    <div class="metric-value">{kpi_data['weekly_admissions']:.0f}</div>
-                    <div class="metric-detail">直近週 {kpi_data['latest_week_admissions']:.0f}人/週</div>
-                    {f'''<div class="metric-detail">目標 {kpi_data['target_weekly_admissions']:.1f}人</div>
-                         <div class="achievement-badge {admissions_badge_class}">{kpi_data['admissions_achievement']:.1f}%</div>''' if kpi_data.get('target_weekly_admissions') and kpi_data.get('admissions_achievement') is not None else ''}
-                </div>
-                <div style="text-align: center;">
-                    <div class="metric-label">平均在院日数</div>
-                    <div class="metric-value">{kpi_data['alos']:.1f}</div>
-                    <div class="metric-detail">直近週 {kpi_data['latest_week_alos']:.1f}日</div>
-                </div>
+
+            <div style="text-align: center;">
+                <div class="metric-label">週合計新入院患者数</div>
+                <div class="metric-value">{kpi_data['weekly_admissions']:.0f}</div>
+                <div class="metric-detail">直近週 {kpi_data['latest_week_admissions']:.0f}人/週</div>
+                {admissions_target_html}
+            </div>
+
+            <div style="text-align: center;">
+                <div class="metric-label">平均在院日数</div>
+                <div class="metric-value">{kpi_data['alos']:.1f}</div>
+                <div class="metric-detail">直近週 {kpi_data['latest_week_alos']:.1f}日</div>
             </div>
         </div>
-        """
-    else:
-        card_html = create_basic_department_card(kpi_data)
-    
+    </div>
+    """
+    # ---- ★★★ ここまで修正 ★★★ ----
+
     return card_html
 
 def create_basic_department_card(kpi_data):
