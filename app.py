@@ -66,7 +66,7 @@ except ImportError as e:
     create_individual_analysis_section = lambda df_filtered, filter_config_from_caller: st.error("個別分析セクション機能は利用できません。")
 
 try:
-    from department_performance_tab_debug_v5 import create_department_performance_tab
+    from department_performance_tab_debug_v6 import create_department_performance_tab
     DEPT_PERFORMANCE_AVAILABLE = True
 except ImportError as e:
     st.error(f"診療科別パフォーマンスタブのインポートに失敗しました: {e}")

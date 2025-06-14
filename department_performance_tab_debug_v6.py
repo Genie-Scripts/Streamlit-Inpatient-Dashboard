@@ -167,7 +167,6 @@ def create_department_card_html(kpi_data):
     </div>
     """
 
-def 
     # ✅ デバッグ出力の挿入
     st.subheader("🛠 デバッグ：フィルター後のデータ件数")
     st.write("🔹 フィルター後の DataFrame 件数:", len(df_filtered))
