@@ -73,6 +73,14 @@ except ImportError as e:
     DEPT_PERFORMANCE_AVAILABLE = False
     create_department_performance_tab = lambda: st.error("診療科別パフォーマンス機能は利用できません。")
 
+try:
+    from ward_performance_tab import create_ward_performance_tab
+    WARD_PERFORMANCE_AVAILABLE = True
+except ImportError as e:
+    st.error(f"病棟別パフォーマンスタブのインポートに失敗しました: {e}")
+    WARD_PERFORMANCE_AVAILABLE = False
+    create_ward_performance_tab = lambda: st.error("病棟別パフォーマンス機能は利用できません。")
+
 inject_global_css(FONT_SCALE)
 
 
@@ -815,7 +823,7 @@ def main():
     create_sidebar()
 
     # タブの作成と処理
-    tab_titles = ["📊 主要指標", "🏥 診療科別パフォーマンス", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
+    tab_titles = ["📊 主要指標", "🏥 診療科別パフォーマンス", "🏨 病棟別パフォーマンス", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
     if FORECAST_AVAILABLE:
         tab_titles.append("🔮 予測分析")
     tab_titles.extend(["📤 データ出力", "📥 データ入力"])
@@ -855,6 +863,15 @@ def main():
                     st.error("診療科別パフォーマンス機能が利用できません。")
             except Exception as e:
                 st.error(f"診療科別パフォーマンスでエラー: {str(e)}\n{traceback.format_exc()}")
+
+        with tabs[tab_titles.index("🏨 病棟別パフォーマンス")]:
+            try:
+                if WARD_PERFORMANCE_AVAILABLE:
+                    create_ward_performance_tab()
+                else:
+                    st.error("病棟別パフォーマンス機能が利用できません。")
+            except Exception as e:
+                st.error(f"病棟別パフォーマンスでエラー: {str(e)}\n{traceback.format_exc()}")
 
         with tabs[tab_titles.index("🗓️ 平均在院日数分析")]:
             try:
