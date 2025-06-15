@@ -420,34 +420,89 @@ def display_ward_performance_dashboard():
             st.markdown(html, unsafe_allow_html=True)
             
     # デバッグ開始
-    unique_wards = date_filtered_df[ward_col].unique()
+    # 実データの病棟のユニークなリストを取得
+    unique_wards_in_data = date_filtered_df[ward_col].unique()
+    
+    # 目標データの病棟のユニークなリストを取得
+    unique_wards_in_targets = target_data['病棟'].unique() if 'ward_targets' in target_data.columns else []
     
     # デバッグ情報の表示
-    with st.expander("🔍 デバッグ情報", expanded=True):
-        st.write("実データの病棟コード一覧:", sorted(unique_wards))
+    with st.expander("🔍 詳細デバッグ情報", expanded=True):
+        col1, col2 = st.columns(2)
         
-        # 各病棟のKPI計算をデバッグ
-        debug_info = []
-        for ward_code in unique_wards:
+        with col1:
+            st.write("**実データの病棟コード:**")
+            st.write(sorted(unique_wards_in_data))
+            st.write(f"実データ病棟数: {len(unique_wards_in_data)}")
+            
+        with col2:
+            st.write("**目標データの病棟コード:**")
+            st.write(sorted(unique_wards_in_targets))
+            st.write(f"目標データ病棟数: {len(unique_wards_in_targets)}")
+        
+        # 実データにないが目標データにある病棟
+        missing_in_data = set(unique_wards_in_targets) - set(unique_wards_in_data)
+        if missing_in_data:
+            st.warning(f"🚨 実データに存在しないが目標データにある病棟: {sorted(missing_in_data)}")
+        
+        # 目標データにないが実データにある病棟
+        missing_in_targets = set(unique_wards_in_data) - set(unique_wards_in_targets)
+        if missing_in_targets:
+            st.warning(f"⚠️ 目標データに存在しないが実データにある病棟: {sorted(missing_in_targets)}")
+        
+        # 各病棟のマッピング確認
+        st.write("**病棟コードマッピング確認:**")
+        mapping_debug = []
+        for ward_code in sorted(set(unique_wards_in_data) | set(unique_wards_in_targets)):
             ward_name = get_ward_display_name(ward_code)
+            
+            # 実データの存在確認
+            has_real_data = ward_code in unique_wards_in_data
+            
+            # 実データの患者数確認（期間内）
+            if has_real_data:
+                ward_df = date_filtered_df[date_filtered_df[ward_col] == ward_code]
+                period_df = safe_date_filter(ward_df, start_date, end_date)
+                patient_count = len(period_df)
+                weekly_admissions = period_df['新入院患者数'].sum() / ((end_date - start_date).days + 1) * 7 if not period_df.empty else 0
+            else:
+                patient_count = 0
+                weekly_admissions = 0
+            
+            # 目標値の取得
             targets = get_target_values_for_ward(target_data, ward_code, ward_name)
             
-            # 期間内の新入院患者数を確認
-            ward_df = date_filtered_df[date_filtered_df[ward_col] == ward_code]
-            period_df = safe_date_filter(ward_df, start_date, end_date)
-            weekly_admissions = period_df['新入院患者数'].sum() / ((end_date - start_date).days + 1) * 7 if not period_df.empty else 0
-            
-            debug_info.append({
+            mapping_debug.append({
                 '病棟コード': ward_code,
-                '表示名': targets['display_name'],
+                '表示名': ward_name,
+                '実データ存在': has_real_data,
+                '期間内患者数': patient_count,
                 '週間新入院実績': round(weekly_admissions, 1),
-                '週間新入院目標': targets['weekly_admissions_target'],
-                '達成率': round((weekly_admissions / targets['weekly_admissions_target'] * 100) if targets['weekly_admissions_target'] else 0, 1)
+                '週間新入院目標': targets.get('weekly_admissions_target', 'なし'),
+                '目標データ存在': targets.get('weekly_admissions_target') is not None
             })
         
-        st.dataframe(pd.DataFrame(debug_info))
+        st.dataframe(pd.DataFrame(mapping_debug))
+        
+        # get_ward_display_name関数の動作確認
+        st.write("**get_ward_display_name関数のテスト:**")
+        test_codes = ['04A', '04B', '04C'] + list(unique_wards_in_data)
+        name_mapping = {code: get_ward_display_name(code) for code in test_codes}
+        st.json(name_mapping)
     
+    # 実データが存在する病棟のみでKPI計算を行う
     ward_kpis = []
+    for ward_code in unique_wards_in_data:  # 実データが存在する病棟のみ
+        ward_name = get_ward_display_name(ward_code)
+        targets = get_target_values_for_ward(target_data, ward_code, ward_name)
+        
+        # 病棟別データをフィルタリング
+        ward_df = date_filtered_df[date_filtered_df[ward_col] == ward_code]
+        period_df = safe_date_filter(ward_df, start_date, end_date)
+        
+        if not period_df.empty:  # 実際にデータがある場合のみKPI計算
+            kpi = calculate_ward_kpi(period_df, targets, start_date, end_date)
+            ward_kpis.append(kpi)
     # デバッグ修了
     
     # ダウンロードボタン
