@@ -418,7 +418,16 @@ def display_ward_performance_dashboard():
         )
         with cols[idx % 3]:
             st.markdown(html, unsafe_allow_html=True)
-
+            
+    # デバッグ開始
+    with st.expander("デバッグ情報", expanded=False):
+        st.write("実データの病棟一覧:", unique_wards)
+        if not target_data.empty:
+            ward_targets = target_data[target_data['部門種別'] == '病棟']
+            st.write("目標値の病棟一覧:", ward_targets['部門コード'].unique())
+            st.dataframe(ward_targets[['部門コード', '部門名', '指標タイプ', '目標値']])
+    # デバッグ修了
+    
     # ダウンロードボタン
     html_cards = ""
     for kpi in ward_kpis:
