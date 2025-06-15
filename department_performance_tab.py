@@ -265,7 +265,7 @@ def display_department_performance_dashboard():
         create_dept_mapping_table(target_data)
     
     # 期間選択と指標選択を横に並べる
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         period_options = ["直近4週間", "直近8週", "直近12週", "今年度", "先月", "昨年度"]
@@ -283,6 +283,21 @@ def display_department_performance_dashboard():
             metric_options,
             index=0,
             key="dept_performance_metric"
+        )
+    
+    with col3:
+        # カード数によって列数を動的に選択
+        layout_options = {
+            "自動調整": "auto",
+            "3列": 3,
+            "4列": 4,
+            "5列": 5
+        }
+        selected_layout = st.selectbox(
+            "🖼️ 表示レイアウト",
+            list(layout_options.keys()),
+            index=0,
+            key="dept_performance_layout"
         )
     
     # 選択された期間に基づいて日付を計算
@@ -344,8 +359,22 @@ def display_department_performance_dashboard():
 
     st.markdown(f"### 📈 **{period_desc}** の診療科別パフォーマンス（{selected_metric}）")
     
+    # レイアウト列数の決定
+    layout_value = layout_options[selected_layout]
+    if layout_value == "auto":
+        # カード数に応じて自動で列数を決定
+        n_cards = len(dept_kpis)
+        if n_cards <= 6:
+            n_cols = 3
+        elif n_cards <= 12:
+            n_cols = 4
+        else:
+            n_cols = 5
+    else:
+        n_cols = layout_value
+    
     # パフォーマンスカードの表示
-    cols = st.columns(3)
+    cols = st.columns(n_cols)
     for idx, kpi in enumerate(dept_kpis):
         avg = kpi.get(opt["avg"], 0)
         recent = kpi.get(opt["recent"], 0)
@@ -366,12 +395,12 @@ def display_department_performance_dashboard():
             unit=opt["unit"],
             card_color=color
         )
-        with cols[idx % 3]:
+        with cols[idx % n_cols]:
             st.markdown(html, unsafe_allow_html=True)
 
-    # ダウンロードボタン
+    # ダウンロードボタン用のHTMLを生成（レスポンシブグリッドレイアウト）
     html_cards = ""
-    for kpi in dept_kpis:
+    for idx, kpi in enumerate(dept_kpis):
         avg = kpi.get(opt["avg"], 0)
         recent = kpi.get(opt["recent"], 0)
         target = kpi.get(opt["target"], None)
@@ -380,29 +409,141 @@ def display_department_performance_dashboard():
         avg_disp = f"{avg:.1f}" if avg or avg == 0 else "--"
         recent_disp = f"{recent:.1f}" if recent or recent == 0 else "--"
         target_disp = f"{target:.1f}" if target else "--"
-        html_cards += render_metric_card(
-            label=kpi["dept_name"],
-            period_avg=avg_disp,
-            recent=recent_disp,
-            target=target_disp,
-            achievement=ach,
-            unit=opt["unit"],
-            card_color=color
-        )
+        
+        card_html = f"""
+        <div class="metric-card" style="
+            background: {color}0E;
+            border-radius: 11px;
+            border-left: 6px solid {color};
+            padding: 12px 16px 7px 16px;
+            height: 100%;
+            box-sizing: border-box;
+            ">
+            <div style="font-size:1.13em; font-weight:700; margin-bottom:7px; color:#293a27;">{kpi["dept_name"]}</div>
+            <div style="display:flex; flex-direction:column; gap:2px;">
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="font-size:0.93em; color:#7b8a7a;">期間平均:</span>
+                    <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{avg_disp} {opt["unit"]}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="font-size:0.93em; color:#7b8a7a;">直近週実績:</span>
+                    <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{recent_disp} {opt["unit"]}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="font-size:0.93em; color:#7b8a7a;">目標:</span>
+                    <span style="font-size:1.07em; font-weight:700; color:#7b8a7a;">{target_disp if target else '--'} {opt["unit"]}</span>
+                </div>
+            </div>
+            <div style="margin-top:7px; display:flex; justify-content:space-between; align-items:center;">
+              <div style="font-weight:700; font-size:1.03em; color:{color};">達成率:</div>
+              <div style="font-weight:700; font-size:1.20em; color:{color};">{ach:.1f}%</div>
+            </div>
+        </div>
+        """
+        html_cards += f'<div class="grid-item">{card_html}</div>'
     
+    # レスポンシブグリッドレイアウトのHTMLテンプレート
     dl_html = f"""<!DOCTYPE html>
-<html lang="ja"><head>
-<meta charset="UTF-8"><title>診療科別 {selected_metric} パフォーマンス - {period_desc}</title></head>
-<body style="background:#f5f7fa; font-family: 'Noto Sans JP', Meiryo, sans-serif;">
-<h2>{selected_metric} 診療科別パフォーマンス - {period_desc}</h2>
-{html_cards}
-</body></html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>診療科別 {selected_metric} パフォーマンス - {period_desc}</title>
+    <style>
+        body {{
+            background: #f5f7fa;
+            font-family: 'Noto Sans JP', Meiryo, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }}
+        
+        h2 {{
+            text-align: center;
+            color: #293a27;
+            margin-bottom: 30px;
+        }}
+        
+        .grid-container {{
+            display: grid;
+            gap: 20px;
+            max-width: 1920px;
+            margin: 0 auto;
+        }}
+        
+        /* デフォルト: 5列レイアウト */
+        @media (min-width: 1600px) {{
+            .grid-container {{
+                grid-template-columns: repeat(5, 1fr);
+            }}
+        }}
+        
+        /* 4列レイアウト */
+        @media (min-width: 1200px) and (max-width: 1599px) {{
+            .grid-container {{
+                grid-template-columns: repeat(4, 1fr);
+            }}
+        }}
+        
+        /* 3列レイアウト */
+        @media (min-width: 900px) and (max-width: 1199px) {{
+            .grid-container {{
+                grid-template-columns: repeat(3, 1fr);
+            }}
+        }}
+        
+        /* 2列レイアウト */
+        @media (min-width: 600px) and (max-width: 899px) {{
+            .grid-container {{
+                grid-template-columns: repeat(2, 1fr);
+            }}
+        }}
+        
+        /* 1列レイアウト */
+        @media (max-width: 599px) {{
+            .grid-container {{
+                grid-template-columns: 1fr;
+            }}
+        }}
+        
+        .grid-item {{
+            min-height: 180px;
+        }}
+        
+        .metric-card {{
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }}
+        
+        .metric-card:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }}
+        
+        @media print {{
+            body {{
+                padding: 10px;
+            }}
+            .grid-container {{
+                grid-template-columns: repeat(5, 1fr);
+                gap: 15px;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <h2>{selected_metric} 診療科別パフォーマンス - {period_desc}</h2>
+    <div class="grid-container">
+        {html_cards}
+    </div>
+</body>
+</html>
 """
+    
     st.download_button(
-        label=f"{selected_metric}のパフォーマンスをHTMLダウンロード",
+        label=f"📥 {selected_metric}のパフォーマンスをHTMLダウンロード",
         data=dl_html.encode("utf-8"),
         file_name=f"{selected_metric}_performance_{selected_period}.html",
-        mime="text/html"
+        mime="text/html",
+        help="16:9画面に最適化されたレスポンシブレイアウトでダウンロード"
     )
 
 def create_department_performance_tab():
