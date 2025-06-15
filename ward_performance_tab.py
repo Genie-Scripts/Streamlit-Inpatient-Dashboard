@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 try:
     from utils import safe_date_filter, get_ward_display_name, create_ward_name_mapping
     from unified_filters import get_unified_filter_config
-    from unified_html_export import generate_unified_html_export  # ← この行を追加
+    from unified_html_export import generate_unified_html_export
 except ImportError as e:
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
     st.stop()
-    
+
 def get_period_dates(df, period_type):
     """
     期間タイプに基づいて開始日と終了日を計算
@@ -449,92 +449,91 @@ def display_ward_performance_dashboard():
         with cols[idx % n_cols]:
             st.markdown(html, unsafe_allow_html=True)
 
-# ===== ここから修正 =====
-# 統合HTMLダウンロードボタン
-unified_html = generate_unified_html_export(
-    kpis_data=ward_kpis,
-    period_desc=period_desc,
-    dashboard_type="ward"
-)
-
-# 2つのダウンロードボタンを横並びに配置
-col1, col2 = st.columns(2)
-
-with col1:
-    st.download_button(
-        label=f"📥 全指標統合HTMLダウンロード（切り替え機能付き）",
-        data=unified_html.encode("utf-8"),
-        file_name=f"ward_all_metrics_performance_{selected_period}.html",
-        mime="text/html",
-        help="全ての指標を含む統合HTMLファイル。ブラウザで開いて指標を切り替えられます。",
-        type="primary"
+    # 統合HTMLダウンロードボタン
+    unified_html = generate_unified_html_export(
+        kpis_data=ward_kpis,
+        period_desc=period_desc,
+        dashboard_type="ward"
     )
-
-with col2:
-    # 既存の単一指標HTMLダウンロード（以下は既存のコードそのまま）
-    html_cards = ""
-    for idx, kpi in enumerate(ward_kpis):
-        avg = kpi.get(opt["avg"], 0)
-        recent = kpi.get(opt["recent"], 0)
-        target = kpi.get(opt["target"], None)
-        ach = kpi.get(opt["ach"], 0)
-        color = get_color(ach)
-        avg_disp = f"{avg:.1f}" if avg or avg == 0 else "--"
-        recent_disp = f"{recent:.1f}" if recent or recent == 0 else "--"
-        target_disp = f"{target:.1f}" if target else "--"
-        
-        # 病床情報のHTML
-        bed_info_html = ""
-        if selected_metric == "日平均在院患者数" and kpi.get('bed_count'):
-            occupancy_str = f"{kpi.get('bed_occupancy_rate'):.1f}%" if kpi.get('bed_occupancy_rate') is not None else "--"
-            bed_info_html = f"""
-            <div style="margin-top:4px; padding-top:4px; border-top:1px solid #e0e0e0;">
-                <div style="display:flex; justify-content:space-between;">
-                    <span style="font-size:0.85em; color:#999;">病床数:</span>
-                    <span style="font-size:0.9em; color:#666;">{kpi['bed_count']}床</span>
+    
+    # 2つのダウンロードボタンを横並びに配置
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.download_button(
+            label=f"📥 全指標統合HTMLダウンロード（切り替え機能付き）",
+            data=unified_html.encode("utf-8"),
+            file_name=f"ward_all_metrics_performance_{selected_period}.html",
+            mime="text/html",
+            help="全ての指標を含む統合HTMLファイル。ブラウザで開いて指標を切り替えられます。",
+            type="primary"
+        )
+    
+    with col2:
+        # 既存の単一指標HTMLダウンロード
+        html_cards = ""
+        for idx, kpi in enumerate(ward_kpis):
+            avg = kpi.get(opt["avg"], 0)
+            recent = kpi.get(opt["recent"], 0)
+            target = kpi.get(opt["target"], None)
+            ach = kpi.get(opt["ach"], 0)
+            color = get_color(ach)
+            avg_disp = f"{avg:.1f}" if avg or avg == 0 else "--"
+            recent_disp = f"{recent:.1f}" if recent or recent == 0 else "--"
+            target_disp = f"{target:.1f}" if target else "--"
+            
+            # 病床情報のHTML
+            bed_info_html = ""
+            if selected_metric == "日平均在院患者数" and kpi.get('bed_count'):
+                occupancy_str = f"{kpi.get('bed_occupancy_rate'):.1f}%" if kpi.get('bed_occupancy_rate') is not None else "--"
+                bed_info_html = f"""
+                <div style="margin-top:4px; padding-top:4px; border-top:1px solid #e0e0e0;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="font-size:0.85em; color:#999;">病床数:</span>
+                        <span style="font-size:0.9em; color:#666;">{kpi['bed_count']}床</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="font-size:0.85em; color:#999;">稼働率:</span>
+                        <span style="font-size:0.9em; font-weight:600; color:#666;">{occupancy_str}</span>
+                    </div>
                 </div>
-                <div style="display:flex; justify-content:space-between;">
-                    <span style="font-size:0.85em; color:#999;">稼働率:</span>
-                    <span style="font-size:0.9em; font-weight:600; color:#666;">{occupancy_str}</span>
+                """
+            
+            card_html = f"""
+            <div class="metric-card" style="
+                background: {color}0E;
+                border-radius: 11px;
+                border-left: 6px solid {color};
+                padding: 12px 16px 7px 16px;
+                height: 100%;
+                box-sizing: border-box;
+                ">
+                <div style="font-size:1.13em; font-weight:700; margin-bottom:7px; color:#293a27;">{kpi["ward_name"]}</div>
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="font-size:0.93em; color:#7b8a7a;">期間平均:</span>
+                        <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{avg_disp} {opt["unit"]}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="font-size:0.93em; color:#7b8a7a;">直近週実績:</span>
+                        <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{recent_disp} {opt["unit"]}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="font-size:0.93em; color:#7b8a7a;">目標:</span>
+                        <span style="font-size:1.07em; font-weight:700; color:#7b8a7a;">{target_disp if target else '--'} {opt["unit"]}</span>
+                    </div>
                 </div>
+                <div style="margin-top:7px; display:flex; justify-content:space-between; align-items:center;">
+                  <div style="font-weight:700; font-size:1.03em; color:{color};">達成率:</div>
+                  <div style="font-weight:700; font-size:1.20em; color:{color};">{ach:.1f}%</div>
+                </div>
+                {bed_info_html}
             </div>
             """
+            html_cards += f'<div class="grid-item">{card_html}</div>'
         
-        card_html = f"""
-        <div class="metric-card" style="
-            background: {color}0E;
-            border-radius: 11px;
-            border-left: 6px solid {color};
-            padding: 12px 16px 7px 16px;
-            height: 100%;
-            box-sizing: border-box;
-            ">
-            <div style="font-size:1.13em; font-weight:700; margin-bottom:7px; color:#293a27;">{kpi["ward_name"]}</div>
-            <div style="display:flex; flex-direction:column; gap:2px;">
-                <div style="display:flex; justify-content:space-between;">
-                    <span style="font-size:0.93em; color:#7b8a7a;">期間平均:</span>
-                    <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{avg_disp} {opt["unit"]}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between;">
-                    <span style="font-size:0.93em; color:#7b8a7a;">直近週実績:</span>
-                    <span style="font-size:1.07em; font-weight:700; color:#2e3532;">{recent_disp} {opt["unit"]}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between;">
-                    <span style="font-size:0.93em; color:#7b8a7a;">目標:</span>
-                    <span style="font-size:1.07em; font-weight:700; color:#7b8a7a;">{target_disp if target else '--'} {opt["unit"]}</span>
-                </div>
-            </div>
-            <div style="margin-top:7px; display:flex; justify-content:space-between; align-items:center;">
-              <div style="font-weight:700; font-size:1.03em; color:{color};">達成率:</div>
-              <div style="font-weight:700; font-size:1.20em; color:{color};">{ach:.1f}%</div>
-            </div>
-            {bed_info_html}
-        </div>
-        """
-        html_cards += f'<div class="grid-item">{card_html}</div>'
-    
-    # レスポンシブグリッドレイアウトのHTMLテンプレート
-    dl_html = f"""<!DOCTYPE html>
+        # レスポンシブグリッドレイアウトのHTMLテンプレート
+        dl_html = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -628,14 +627,14 @@ with col2:
 </body>
 </html>
 """
-    
-    st.download_button(
-        label=f"📥 {selected_metric}のパフォーマンスをHTMLダウンロード",
-        data=dl_html.encode("utf-8"),
-        file_name=f"ward_{selected_metric}_performance_{selected_period}.html",
-        mime="text/html",
-        help="16:9画面に最適化されたレスポンシブレイアウトでダウンロード"
-    )
+        
+        st.download_button(
+            label=f"📥 {selected_metric}のみHTMLダウンロード",
+            data=dl_html.encode("utf-8"),
+            file_name=f"ward_{selected_metric}_performance_{selected_period}.html",
+            mime="text/html",
+            help="現在選択中の指標のみのHTMLファイル"
+        )
 
 def create_ward_performance_tab():
     display_ward_performance_dashboard()
