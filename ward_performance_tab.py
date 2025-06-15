@@ -420,12 +420,34 @@ def display_ward_performance_dashboard():
             st.markdown(html, unsafe_allow_html=True)
             
     # デバッグ開始
-    with st.expander("デバッグ情報", expanded=False):
-        st.write("実データの病棟一覧:", unique_wards)
-        if not target_data.empty:
-            ward_targets = target_data[target_data['部門種別'] == '病棟']
-            st.write("目標値の病棟一覧:", ward_targets['部門コード'].unique())
-            st.dataframe(ward_targets[['部門コード', '部門名', '指標タイプ', '目標値']])
+    unique_wards = date_filtered_df[ward_col].unique()
+    
+    # デバッグ情報の表示
+    with st.expander("🔍 デバッグ情報", expanded=True):
+        st.write("実データの病棟コード一覧:", sorted(unique_wards))
+        
+        # 各病棟のKPI計算をデバッグ
+        debug_info = []
+        for ward_code in unique_wards:
+            ward_name = get_ward_display_name(ward_code)
+            targets = get_target_values_for_ward(target_data, ward_code, ward_name)
+            
+            # 期間内の新入院患者数を確認
+            ward_df = date_filtered_df[date_filtered_df[ward_col] == ward_code]
+            period_df = safe_date_filter(ward_df, start_date, end_date)
+            weekly_admissions = period_df['新入院患者数'].sum() / ((end_date - start_date).days + 1) * 7 if not period_df.empty else 0
+            
+            debug_info.append({
+                '病棟コード': ward_code,
+                '表示名': targets['display_name'],
+                '週間新入院実績': round(weekly_admissions, 1),
+                '週間新入院目標': targets['weekly_admissions_target'],
+                '達成率': round((weekly_admissions / targets['weekly_admissions_target'] * 100) if targets['weekly_admissions_target'] else 0, 1)
+            })
+        
+        st.dataframe(pd.DataFrame(debug_info))
+    
+    ward_kpis = []
     # デバッグ修了
     
     # ダウンロードボタン
