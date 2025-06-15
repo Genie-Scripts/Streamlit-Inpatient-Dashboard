@@ -210,11 +210,11 @@ def calculate_department_kpis(df, target_data, dept_code, dept_name, start_date,
 
 def get_color(val):
     if val >= 100:
-        return "#22a350"
+        return "#7fb069"  # パステルグリーン
     elif val >= 80:
-        return "#f6c700"
+        return "#f5d76e"  # パステルイエロー
     else:
-        return "#d53a3a"
+        return "#e08283"  # パステルレッド
 
 def render_metric_card(label, period_avg, recent, target, achievement, unit, card_color):
     ach_str = f"{achievement:.1f}%" if achievement or achievement == 0 else "--"

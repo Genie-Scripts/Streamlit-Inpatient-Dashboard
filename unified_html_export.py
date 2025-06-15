@@ -270,13 +270,13 @@ def generate_unified_html_export(kpis_data, period_desc, dashboard_type="departm
         }}
         
         /* 達成率による色分け */
-        .achievement-high {{ color: #22a350; }}
-        .achievement-medium {{ color: #f6c700; }}
-        .achievement-low {{ color: #d53a3a; }}
+        .achievement-high {{ color: #7fb069; }}
+        .achievement-medium {{ color: #f5d76e; }}
+        .achievement-low {{ color: #e08283; }}
         
-        .border-high {{ border-left-color: #22a350; }}
-        .border-medium {{ border-left-color: #f6c700; }}
-        .border-low {{ border-left-color: #d53a3a; }}
+        .border-high {{ border-left-color: #7fb069; }}
+        .border-medium {{ border-left-color: #f5d76e; }}
+        .border-low {{ border-left-color: #e08283; }}
         
         @media print {{
             body {{ padding: 10px; }}
