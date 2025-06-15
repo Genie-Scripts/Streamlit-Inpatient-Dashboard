@@ -264,16 +264,26 @@ def display_department_performance_dashboard():
     if not target_data.empty:
         create_dept_mapping_table(target_data)
     
-    # 期間選択メニュー
-    st.markdown("### 📅 集計期間選択")
-    period_options = ["直近4週間", "直近8週", "直近12週", "今年度", "先月", "昨年度"]
-    selected_period = st.radio(
-        "",
-        period_options,
-        index=0,
-        horizontal=True,
-        key="dept_performance_period"
-    )
+    # 期間選択と指標選択を横に並べる
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        period_options = ["直近4週間", "直近8週", "直近12週", "今年度", "先月", "昨年度"]
+        selected_period = st.selectbox(
+            "📅 集計期間",
+            period_options,
+            index=0,
+            key="dept_performance_period"
+        )
+    
+    with col2:
+        metric_options = ["日平均在院患者数", "週合計新入院患者数", "平均在院日数"]
+        selected_metric = st.selectbox(
+            "📊 表示指標",
+            metric_options,
+            index=0,
+            key="dept_performance_metric"
+        )
     
     # 選択された期間に基づいて日付を計算
     start_date, end_date, period_desc = get_period_dates(df_original, selected_period)
@@ -311,8 +321,7 @@ def display_department_performance_dashboard():
         st.warning("表示可能な診療科データがありません。")
         return
 
-    # 指標切替
-    st.markdown("### 📊 表示指標選択")
+    # 指標の詳細設定
     metric_opts = {
         "日平均在院患者数": {
             "avg": "daily_avg_census", "recent": "recent_week_daily_census",
@@ -327,7 +336,6 @@ def display_department_performance_dashboard():
             "target": "avg_los_target", "ach": "avg_los_achievement", "unit": "日"
         }
     }
-    selected_metric = st.radio("", list(metric_opts.keys()), horizontal=True)
     opt = metric_opts[selected_metric]
 
     # ソート（達成率降順 or 在院日数のみ昇順）
