@@ -9,10 +9,11 @@ logger = logging.getLogger(__name__)
 try:
     from utils import safe_date_filter, get_display_name_for_dept, create_dept_mapping_table
     from unified_filters import get_unified_filter_config
+    from unified_html_export import generate_unified_html_export  # ← この行を追加
 except ImportError as e:
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
     st.stop()
-
+    
 def get_period_dates(df, period_type):
     """
     期間タイプに基づいて開始日と終了日を計算
@@ -398,7 +399,29 @@ def display_department_performance_dashboard():
         with cols[idx % n_cols]:
             st.markdown(html, unsafe_allow_html=True)
 
-    # ダウンロードボタン用のHTMLを生成（レスポンシブグリッドレイアウト）
+# ===== ここから修正 =====
+# 統合HTMLダウンロードボタン
+unified_html = generate_unified_html_export(
+    kpis_data=dept_kpis,
+    period_desc=period_desc,
+    dashboard_type="department"
+)
+
+# 2つのダウンロードボタンを横並びに配置
+col1, col2 = st.columns(2)
+
+with col1:
+    st.download_button(
+        label=f"📥 全指標統合HTMLダウンロード（切り替え機能付き）",
+        data=unified_html.encode("utf-8"),
+        file_name=f"dept_all_metrics_performance_{selected_period}.html",
+        mime="text/html",
+        help="全ての指標を含む統合HTMLファイル。ブラウザで開いて指標を切り替えられます。",
+        type="primary"
+    )
+
+with col2:
+    # 既存の単一指標HTMLダウンロード（以下は既存のコードそのまま）
     html_cards = ""
     for idx, kpi in enumerate(dept_kpis):
         avg = kpi.get(opt["avg"], 0)
