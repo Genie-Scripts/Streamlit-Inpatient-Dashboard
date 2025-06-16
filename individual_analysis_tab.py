@@ -289,8 +289,8 @@ def display_individual_analysis_tab(df_filtered_main):
             else:
                 st.warning("グラフ生成関数 (create_interactive_patient_chart) が利用できません。")
 
-        graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
-        
+graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
+
         with graph_tab1:
             if create_interactive_patient_chart:
                 st.markdown("##### 全日 入院患者数推移")
@@ -307,7 +307,7 @@ def display_individual_analysis_tab(df_filtered_main):
                     target_val_all_graph = target_val_all if target_val_all is not None else None
                 
                 # デバッグ用：グラフ呼び出し直前の確認
-                if st.checkbox("グラフ呼び出し詳細を確認", key="graph_call_debug"):
+                if st.checkbox("全日グラフ呼び出し詳細を確認", key="graph_call_debug_all_unique"):  # ユニークなキー
                     st.write(f"**全日グラフパラメータ:**")
                     st.write(f"- days: {selected_days_for_graph}")
                     st.write(f"- target_value: {target_val_all_graph}")
@@ -348,6 +348,12 @@ def display_individual_analysis_tab(df_filtered_main):
                                 target_val_weekday_graph = None
                     else:
                         target_val_weekday_graph = target_val_weekday if target_val_weekday is not None else None
+                    
+                    # 平日グラフのデバッグ（必要に応じて）
+                    if st.checkbox("平日グラフ呼び出し詳細を確認", key="graph_call_debug_weekday_unique"):  # ユニークなキー
+                        st.write(f"**平日グラフパラメータ:**")
+                        st.write(f"- target_value: {target_val_weekday_graph}")
+                        st.write(f"- データ行数: {len(weekday_data_ind)}")
                     
                     try:
                         fig_weekday_ind = create_interactive_patient_chart(
