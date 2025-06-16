@@ -90,7 +90,29 @@ def display_individual_analysis_tab(df_filtered_main):
     current_filter_title_display = "統一フィルター適用範囲全体" if unified_filter_applied else "全体"
     current_results_data = all_results
     chart_data_for_graphs = df.copy()
-    filter_code_for_target = "全体"
+    
+    # 統一フィルターから選択された部門を取得
+    filter_code_for_target = None  # 初期値をNoneに
+    filter_config = get_unified_filter_config() if get_unified_filter_config else {}
+    
+    if filter_config:
+        # 診療科が選択されている場合
+        if filter_config.get('selected_departments') and len(filter_config['selected_departments']) == 1:
+            # 単一診療科の場合、その診療科コードを使用
+            selected_dept = filter_config['selected_departments'][0]
+            filter_code_for_target = selected_dept
+            current_filter_title_display = f"診療科: {selected_dept}"
+        
+        # 病棟が選択されている場合
+        elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
+            # 単一病棟の場合、その病棟コードを使用
+            selected_ward = filter_config['selected_wards'][0]
+            filter_code_for_target = selected_ward
+            current_filter_title_display = f"病棟: {selected_ward}"
+    
+    # 部門が特定されていない場合は全体を対象とする
+    if filter_code_for_target is None:
+        filter_code_for_target = "全体"
 
     st.markdown(f"#### 分析結果: {current_filter_title_display}")
 
@@ -127,9 +149,62 @@ def display_individual_analysis_tab(df_filtered_main):
                 st.session_state._target_dict = {}
                 for _, row in target_data.iterrows():
                     st.session_state._target_dict[(str(row['部門コード']), str(row['区分']))] = row['目標値']
-            target_val_all = st.session_state._target_dict.get((str(filter_code_for_target), '全日'))
-            target_val_weekday = st.session_state._target_dict.get((str(filter_code_for_target), '平日'))
-            target_val_holiday = st.session_state._target_dict.get((str(filter_code_for_target), '休日'))
+            
+            # 全体表示の場合は複数の候補で検索
+            if filter_code_for_target == "全体":
+                # 全体目標の部門コードを探す（空文字、0、000、全体などの可能性）
+                possible_codes_for_all = ["全体", "", "0", "000", "病院全体", "合計", " ", "ALL", "all"]
+                
+                # 各候補で目標値を検索
+                for code in possible_codes_for_all:
+                    if target_val_all is None:
+                        target_val_all = st.session_state._target_dict.get((str(code), '全日'))
+                    if target_val_weekday is None:
+                        target_val_weekday = st.session_state._target_dict.get((str(code), '平日'))
+                    if target_val_holiday is None:
+                        target_val_holiday = st.session_state._target_dict.get((str(code), '休日'))
+                    
+                    # 全て見つかったら検索終了
+                    if all([target_val_all, target_val_weekday, target_val_holiday]):
+                        break
+            else:
+                # 特定の部門が選択されている場合は、その部門コードで検索
+                target_val_all = st.session_state._target_dict.get((str(filter_code_for_target), '全日'))
+                target_val_weekday = st.session_state._target_dict.get((str(filter_code_for_target), '平日'))
+                target_val_holiday = st.session_state._target_dict.get((str(filter_code_for_target), '休日'))
+            
+            # デバッグ情報（必要に応じて表示）
+            if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.write(f"**検索キー:** {filter_code_for_target}")
+                    st.write(f"**全日目標:** {target_val_all if target_val_all else '未設定'}")
+                    st.write(f"**平日目標:** {target_val_weekday if target_val_weekday else '未設定'}")
+                    st.write(f"**休日目標:** {target_val_holiday if target_val_holiday else '未設定'}")
+                with col2:
+                    # target_data内の全部門コードを表示（最初の15件）
+                    st.write("**目標値データ内の部門コード一覧:**")
+                    unique_codes = sorted(target_data['部門コード'].unique())[:15]
+                    for code in unique_codes:
+                        count = len(target_data[target_data['部門コード'] == code])
+                        st.write(f"- '{code}' ({count}件)")
+                    if len(target_data['部門コード'].unique()) > 15:
+                        st.write(f"... 他 {len(target_data['部門コード'].unique()) - 15} 件")
+                with col3:
+                    # 全体目標として認識される可能性のある部門コードを確認
+                    st.write("**全体目標の候補:**")
+                    if filter_code_for_target == "全体":
+                        for code in ["全体", "", "0", "000", "病院全体", "合計"]:
+                            targets = [(k, v) for k, v in st.session_state._target_dict.items() if k[0] == str(code)]
+                            if targets:
+                                st.write(f"✅ '{code}': {len(targets)}件")
+                    else:
+                        # 選択された部門の目標値
+                        dept_targets = [(k, v) for k, v in st.session_state._target_dict.items() if k[0] == str(filter_code_for_target)]
+                        if dept_targets:
+                            st.write(f"**{filter_code_for_target}の目標値:**")
+                            for (code, type_), value in dept_targets:
+                                st.write(f"- {type_}: {value}")
 
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
 
