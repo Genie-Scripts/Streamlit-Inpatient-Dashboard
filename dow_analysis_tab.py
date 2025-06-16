@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import logging
-
+from config import EXCLUDED_WARDS
 logger = logging.getLogger(__name__)
 
 # dow_charts.py から必要な関数をインポート (変更なし)
@@ -60,6 +60,8 @@ def display_dow_analysis_tab(
 
     # '平日判定' 列の確認と追加
     df_analysis = df.copy()
+    if '病棟コード' in df_analysis.columns and EXCLUDED_WARDS:
+        df_analysis = df_analysis[~df_analysis['病棟コード'].isin(EXCLUDED_WARDS)]
     if '平日判定' not in df_analysis.columns:
         try:
             import jpholiday

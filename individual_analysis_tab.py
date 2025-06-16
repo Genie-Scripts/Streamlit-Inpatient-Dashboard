@@ -3,7 +3,7 @@
 import streamlit as st
 import pandas as pd
 import logging
-
+from config import EXCLUDED_WARDS
 logger = logging.getLogger(__name__)
 
 try:
@@ -41,6 +41,9 @@ def display_individual_analysis_tab(df_filtered_main):
         return
 
     df = df_filtered_main
+    # 除外病棟をフィルタリング
+    if df is not None and not df.empty and '病棟コード' in df.columns and EXCLUDED_WARDS:
+        df = df[~df['病棟コード'].isin(EXCLUDED_WARDS)]
     target_data = st.session_state.get('target_data')
     all_results = st.session_state.get('all_results')
     latest_data_date_str_from_session = st.session_state.get('latest_data_date_str', pd.Timestamp.now().strftime("%Y年%m月%d日"))

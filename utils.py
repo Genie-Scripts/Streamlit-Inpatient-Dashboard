@@ -535,3 +535,34 @@ def get_unique_values_as_str(df, column_name):
     except Exception as e:
         logger.error(f"get_unique_values_as_str ({column_name}) でエラー: {e}")
         return []
+        
+def filter_excluded_wards(df):
+    """
+    除外病棟をデータフレームから削除する汎用関数
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        フィルタリング対象のデータフレーム
+        
+    Returns:
+    --------
+    pd.DataFrame
+        除外病棟を削除したデータフレーム
+    """
+    from config import EXCLUDED_WARDS
+    
+    if df is None or df.empty:
+        return df
+        
+    if '病棟コード' in df.columns and EXCLUDED_WARDS:
+        original_count = len(df)
+        df_filtered = df[~df['病棟コード'].isin(EXCLUDED_WARDS)]
+        removed_count = original_count - len(df_filtered)
+        
+        if removed_count > 0:
+            logger.info(f"除外病棟フィルタリング: {removed_count}件のレコードを除外しました（病棟: {', '.join(EXCLUDED_WARDS)}）")
+        
+        return df_filtered
+    
+    return df

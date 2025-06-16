@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta
 import logging
-
+from config import EXCLUDED_WARDS
 logger = logging.getLogger(__name__)
 
 # dashboard_charts.py からのインポートは維持
@@ -991,7 +991,7 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
     if calculate_kpis is None:
         st.error("KPI計算関数が利用できません。")
         return
-    
+        
     # =================================================================
     # 1. データ準備
     # =================================================================
@@ -1012,7 +1012,10 @@ def display_kpi_cards_only(df, start_date, end_date, total_beds_setting, target_
         else:
             target_df = st.session_state.get('target_values_df', pd.DataFrame())
         target_data_source = "読み込み待ち"
-    
+
+    if df is not None and not df.empty and '病棟コード' in df.columns and EXCLUDED_WARDS:
+        df = df[~df['病棟コード'].isin(EXCLUDED_WARDS)]
+
     # KPI計算
     kpis_selected_period = calculate_kpis(df, start_date, end_date, total_beds=total_beds_setting)
     if kpis_selected_period is None or kpis_selected_period.get("error"):
