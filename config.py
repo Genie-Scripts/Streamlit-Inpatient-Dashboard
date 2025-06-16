@@ -13,6 +13,9 @@ DEFAULT_ADMISSION_FEE = 55000  # 円/日
 DEFAULT_TARGET_PATIENT_DAYS = 17000  # 人日/月
 DEFAULT_TARGET_ADMISSIONS = 1700  # 人/月
 
+# ===== 除外設定 =====
+EXCLUDED_WARDS = ['03B']  # 表示・分析から除外する病棟のリスト
+
 # ===== UI設定 =====
 CHART_HEIGHT = 400
 FONT_SCALE = 1.0  # style.pyで使用

@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
+from config import EXCLUDED_WARDS
 
 # utilsから必要な関数をインポート
 from utils import (
@@ -217,6 +218,8 @@ class UnifiedFilterManager:
             elif filter_mode == "特定病棟":
                 if '病棟コード' in df.columns:
                     available_wards_actual = sorted(df['病棟コード'].astype(str).unique())
+                    # 除外病棟をフィルタリング  
+                    available_wards_actual = [ward for ward in available_wards_actual if ward not in EXCLUDED_WARDS]
                     ward_mapping_session = st.session_state.get('ward_mapping', {})
                     ward_options_display, ward_display_to_code_map = create_ward_display_options(available_wards_actual, ward_mapping_session)
 

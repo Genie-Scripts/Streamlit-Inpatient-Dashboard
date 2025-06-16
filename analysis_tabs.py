@@ -13,6 +13,7 @@ import gc
 import logging
 logger = logging.getLogger(__name__)
 import traceback
+from config import EXCLUDED_WARDS
 
 # 統一フィルター関連のインポート
 from unified_filters import (
@@ -315,6 +316,10 @@ def create_csv_download_button(summary_df, df_filtered, data_type):
 def calculate_ward_summary(df):
     """病棟別サマリー計算"""
     try:
+        # 除外病棟をフィルタリング
+        if '病棟コード' in df.columns:
+            df = df[~df['病棟コード'].isin(EXCLUDED_WARDS)]
+
         required_cols = ['病棟コード', '日付', '入院患者数（在院）', '総入院患者数', '総退院患者数', '緊急入院患者数', '死亡患者数']
         if not all(col in df.columns for col in required_cols):
             missing = [col for col in required_cols if col not in df.columns]

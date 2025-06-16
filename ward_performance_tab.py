@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 from datetime import datetime
 import calendar
+from config import EXCLUDED_WARDS
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +365,8 @@ def display_ward_performance_dashboard():
 
     # 病棟のユニークなリストを取得
     unique_wards = date_filtered_df[ward_col].unique()
+    # 除外病棟をフィルタリング
+    unique_wards = [ward for ward in unique_wards if ward not in EXCLUDED_WARDS]
     ward_kpis = []
     
     for ward_code in unique_wards:
