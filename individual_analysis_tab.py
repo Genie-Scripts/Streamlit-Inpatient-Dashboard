@@ -84,7 +84,7 @@ def display_individual_analysis_tab(df_filtered_main):
         st.error(f"最新データ日付の処理中にエラーが発生しました。予測基準日として本日の日付を使用します。")
         latest_data_date = pd.Timestamp.now().normalize()
 
-    # =================================================================
+# =================================================================
     # 統一フィルター範囲全体での分析（選択機能削除）
     # =================================================================
     current_filter_title_display = "統一フィルター適用範囲全体" if unified_filter_applied else "全体"
@@ -150,10 +150,10 @@ def display_individual_analysis_tab(df_filtered_main):
                 for _, row in target_data.iterrows():
                     st.session_state._target_dict[(str(row['部門コード']), str(row['区分']))] = row['目標値']
             
-            # 全体表示の場合は複数の候補で検索
+            # 全体表示の場合は複数の候補で検索（000を最優先に）
             if filter_code_for_target == "全体":
-                # 全体目標の部門コードを探す（空文字、0、000、全体などの可能性）
-                possible_codes_for_all = ["全体", "", "0", "000", "病院全体", "合計", " ", "ALL", "all"]
+                # 全体目標の部門コードを探す（000が最も可能性が高い）
+                possible_codes_for_all = ["000", "全体", "", "0", "病院全体", "合計", " ", "ALL", "all"]
                 
                 # 各候補で目標値を検索
                 for code in possible_codes_for_all:
@@ -164,9 +164,9 @@ def display_individual_analysis_tab(df_filtered_main):
                     if target_val_holiday is None:
                         target_val_holiday = st.session_state._target_dict.get((str(code), '休日'))
                     
-                    # 全て見つかったら検索終了
-                    if all([target_val_all, target_val_weekday, target_val_holiday]):
-                        break
+                    # 何か見つかったらその部門コードを記録（デバッグ用）
+                    if any([target_val_all, target_val_weekday, target_val_holiday]) and 'found_global_code' not in st.session_state:
+                        st.session_state.found_global_code = code
             else:
                 # 特定の部門が選択されている場合は、その部門コードで検索
                 target_val_all = st.session_state._target_dict.get((str(filter_code_for_target), '全日'))
@@ -181,6 +181,8 @@ def display_individual_analysis_tab(df_filtered_main):
                     st.write(f"**全日目標:** {target_val_all if target_val_all else '未設定'}")
                     st.write(f"**平日目標:** {target_val_weekday if target_val_weekday else '未設定'}")
                     st.write(f"**休日目標:** {target_val_holiday if target_val_holiday else '未設定'}")
+                    if filter_code_for_target == "全体" and 'found_global_code' in st.session_state:
+                        st.write(f"**全体目標コード:** '{st.session_state.found_global_code}'")
                 with col2:
                     # target_data内の全部門コードを表示（最初の15件）
                     st.write("**目標値データ内の部門コード一覧:**")
@@ -192,12 +194,15 @@ def display_individual_analysis_tab(df_filtered_main):
                         st.write(f"... 他 {len(target_data['部門コード'].unique()) - 15} 件")
                 with col3:
                     # 全体目標として認識される可能性のある部門コードを確認
-                    st.write("**全体目標の候補:**")
+                    st.write("**全体目標の候補確認:**")
                     if filter_code_for_target == "全体":
-                        for code in ["全体", "", "0", "000", "病院全体", "合計"]:
+                        for code in ["000", "全体", "", "0", "病院全体", "合計"]:
                             targets = [(k, v) for k, v in st.session_state._target_dict.items() if k[0] == str(code)]
                             if targets:
                                 st.write(f"✅ '{code}': {len(targets)}件")
+                                # 値も表示
+                                for (c, type_), value in targets[:3]:  # 最初の3件
+                                    st.write(f"  - {type_}: {value}")
                     else:
                         # 選択された部門の目標値
                         dept_targets = [(k, v) for k, v in st.session_state._target_dict.items() if k[0] == str(filter_code_for_target)]
