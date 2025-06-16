@@ -290,14 +290,39 @@ def display_individual_analysis_tab(df_filtered_main):
                 st.warning("グラフ生成関数 (create_interactive_patient_chart) が利用できません。")
 
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
-
+        
         with graph_tab1:
             if create_interactive_patient_chart:
                 st.markdown("##### 全日 入院患者数推移")
+                
+                # 目標値を再度確認・取得（タブ内で確実に値を保持）
+                if filter_code_for_target == "全体" and '_target_dict' in st.session_state:
+                    target_val_all_graph = st.session_state._target_dict.get(("000", '全日'))
+                    if target_val_all_graph is not None:
+                        try:
+                            target_val_all_graph = float(target_val_all_graph)
+                        except:
+                            target_val_all_graph = None
+                else:
+                    target_val_all_graph = target_val_all if target_val_all is not None else None
+                
+                # デバッグ用：グラフ呼び出し直前の確認
+                if st.checkbox("グラフ呼び出し詳細を確認", key="graph_call_debug"):
+                    st.write(f"**全日グラフパラメータ:**")
+                    st.write(f"- days: {selected_days_for_graph}")
+                    st.write(f"- target_value: {target_val_all_graph}")
+                    st.write(f"- chart_type: 全日")
+                    st.write(f"- データ行数: {len(chart_data_for_graphs)}")
+                    st.write(f"- filter_code_for_target: {filter_code_for_target}")
+                    st.write(f"- target_val_all（元の値）: {target_val_all}")
+                
                 try:
                     fig_all_ind = create_interactive_patient_chart(
-                        chart_data_for_graphs, title=f"{current_filter_title_display} 全日", 
-                        days=selected_days_for_graph, target_value=target_val_all, chart_type="全日"
+                        chart_data_for_graphs, 
+                        title=f"{current_filter_title_display} 全日", 
+                        days=selected_days_for_graph, 
+                        target_value=target_val_all_graph,  # 再取得した値を使用
+                        chart_type="全日"
                     )
                     if fig_all_ind: 
                         st.plotly_chart(fig_all_ind, use_container_width=True)
@@ -312,11 +337,26 @@ def display_individual_analysis_tab(df_filtered_main):
                     holiday_data_ind = chart_data_for_graphs[chart_data_for_graphs["平日判定"] == "休日"]
                     
                     st.markdown("##### 平日 入院患者数推移")
+                    
+                    # 平日目標値の再取得
+                    if filter_code_for_target == "全体" and '_target_dict' in st.session_state:
+                        target_val_weekday_graph = st.session_state._target_dict.get(("000", '平日'))
+                        if target_val_weekday_graph is not None:
+                            try:
+                                target_val_weekday_graph = float(target_val_weekday_graph)
+                            except:
+                                target_val_weekday_graph = None
+                    else:
+                        target_val_weekday_graph = target_val_weekday if target_val_weekday is not None else None
+                    
                     try:
                         fig_weekday_ind = create_interactive_patient_chart(
-                            weekday_data_ind, title=f"{current_filter_title_display} 平日", 
-                            days=selected_days_for_graph, show_moving_average=False, 
-                            target_value=target_val_weekday, chart_type="平日"
+                            weekday_data_ind, 
+                            title=f"{current_filter_title_display} 平日", 
+                            days=selected_days_for_graph, 
+                            show_moving_average=False, 
+                            target_value=target_val_weekday_graph,  # 再取得した値を使用
+                            chart_type="平日"
                         )
                         if fig_weekday_ind: 
                             st.plotly_chart(fig_weekday_ind, use_container_width=True)
@@ -327,11 +367,26 @@ def display_individual_analysis_tab(df_filtered_main):
                         st.error(f"平日グラフの作成中にエラーが発生しました: {e}")
                     
                     st.markdown("##### 休日 入院患者数推移")
+                    
+                    # 休日目標値の再取得
+                    if filter_code_for_target == "全体" and '_target_dict' in st.session_state:
+                        target_val_holiday_graph = st.session_state._target_dict.get(("000", '休日'))
+                        if target_val_holiday_graph is not None:
+                            try:
+                                target_val_holiday_graph = float(target_val_holiday_graph)
+                            except:
+                                target_val_holiday_graph = None
+                    else:
+                        target_val_holiday_graph = target_val_holiday if target_val_holiday is not None else None
+                    
                     try:
                         fig_holiday_ind = create_interactive_patient_chart(
-                            holiday_data_ind, title=f"{current_filter_title_display} 休日", 
-                            days=selected_days_for_graph, show_moving_average=False, 
-                            target_value=target_val_holiday, chart_type="休日"
+                            holiday_data_ind, 
+                            title=f"{current_filter_title_display} 休日", 
+                            days=selected_days_for_graph, 
+                            show_moving_average=False, 
+                            target_value=target_val_holiday_graph,  # 再取得した値を使用
+                            chart_type="休日"
                         )
                         if fig_holiday_ind: 
                             st.plotly_chart(fig_holiday_ind, use_container_width=True)
