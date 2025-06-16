@@ -3,6 +3,25 @@ import pandas as pd
 import numpy as np
 import datetime
 import traceback
+import json
+import os
+from pathlib import Path
+
+# ===== 修正: 冒頭でimport実行 =====
+try:
+    from config import (
+        FORECAST_AVAILABLE, 
+        create_sidebar, 
+        create_management_dashboard_tab,
+        create_data_processing_tab,
+        create_department_performance_tab,
+        create_ward_performance_tab
+    )
+    CONFIG_IMPORTED = True
+except ImportError as e:
+    st.warning(f"設定モジュール読み込みエラー: {e}")
+    CONFIG_IMPORTED = False
+    FORECAST_AVAILABLE = False
 
 # PWA設定
 PWA_CONFIG = {
@@ -29,34 +48,6 @@ st.set_page_config(
         'About': f"# {PWA_CONFIG['name']}\n医療現場向けPWAダッシュボード"
     }
 )
-
-import json
-import os
-from pathlib import Path
-
-try:
-    # configからは設定値のみをインポート
-    from config import (
-        FORECAST_SETTINGS, # 例: 必要な設定値
-        # 他の必要な設定値をここに追加
-    )
-    # 各UIタブは対応するモジュールから直接インポート
-    from data_processing_tab import create_data_processing_tab
-    from department_performance_tab import create_department_performance_tab
-    from ward_performance_tab import create_ward_performance_tab
-
-    # 予測機能の利用可否は別途判定
-    try:
-        import prophet
-        FORECAST_AVAILABLE = True
-    except ImportError:
-        FORECAST_AVAILABLE = False
-        
-    CONFIG_IMPORTED = True
-except ImportError as e:
-    st.warning(f"設定モジュール読み込みエラー: {e}")
-    CONFIG_IMPORTED = False
-    FORECAST_AVAILABLE = False
 
 # CSS & PWA Assets 注入
 def inject_pwa_assets():
