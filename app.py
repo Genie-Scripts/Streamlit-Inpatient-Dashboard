@@ -3,25 +3,6 @@ import pandas as pd
 import numpy as np
 import datetime
 import traceback
-import json
-import os
-from pathlib import Path
-
-# ===== 修正: 冒頭でimport実行 =====
-try:
-    from config import (
-        FORECAST_AVAILABLE, 
-        create_sidebar, 
-        create_management_dashboard_tab,
-        create_data_processing_tab,
-        create_department_performance_tab,
-        create_ward_performance_tab
-    )
-    CONFIG_IMPORTED = True
-except ImportError as e:
-    st.warning(f"設定モジュール読み込みエラー: {e}")
-    CONFIG_IMPORTED = False
-    FORECAST_AVAILABLE = False
 
 # PWA設定
 PWA_CONFIG = {
@@ -48,6 +29,27 @@ st.set_page_config(
         'About': f"# {PWA_CONFIG['name']}\n医療現場向けPWAダッシュボード"
     }
 )
+
+import json
+import os
+from pathlib import Path
+
+# ===== 修正: 冒頭でimport実行 =====
+try:
+    from config import (
+        FORECAST_AVAILABLE, 
+        create_sidebar, 
+        create_management_dashboard_tab,
+        create_data_processing_tab,
+        create_department_performance_tab,
+        create_ward_performance_tab
+    )
+    CONFIG_IMPORTED = True
+except ImportError as e:
+    st.warning(f"設定モジュール読み込みエラー: {e}")
+    CONFIG_IMPORTED = False
+    FORECAST_AVAILABLE = False
+
 
 # CSS & PWA Assets 注入
 def inject_pwa_assets():
