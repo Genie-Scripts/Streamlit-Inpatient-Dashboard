@@ -289,7 +289,7 @@ def display_individual_analysis_tab(df_filtered_main):
             else:
                 st.warning("グラフ生成関数 (create_interactive_patient_chart) が利用できません。")
 
-graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
+        graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
 
         with graph_tab1:
             if create_interactive_patient_chart:
