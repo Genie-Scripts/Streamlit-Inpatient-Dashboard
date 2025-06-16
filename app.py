@@ -807,9 +807,6 @@ def main():
 
     # メインヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
-    
-    # サイドバー作成
-    create_sidebar()
 
     # ----------- ここからタブUI→ドロップダウン型に切替 -----------
 
@@ -824,6 +821,9 @@ def main():
 
     # サイドバーのドロップダウンで選択
     selected_menu = st.sidebar.selectbox("画面選択", menu_options, index=0)
+    
+    # サイドバー作成
+    create_sidebar()
 
     # データ入力画面
     if selected_menu == "📥 データ入力":
