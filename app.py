@@ -7,8 +7,21 @@ import json
 import os
 from pathlib import Path
 
-# ===== PWA設定とモバイルファースト設定 =====
-from config import *
+# ===== 修正: 冒頭でimport実行 =====
+try:
+    from config import (
+        FORECAST_AVAILABLE, 
+        create_sidebar, 
+        create_management_dashboard_tab,
+        create_data_processing_tab,
+        create_department_performance_tab,
+        create_ward_performance_tab
+    )
+    CONFIG_IMPORTED = True
+except ImportError as e:
+    st.warning(f"設定モジュール読み込みエラー: {e}")
+    CONFIG_IMPORTED = False
+    FORECAST_AVAILABLE = False
 
 # PWA設定
 PWA_CONFIG = {
@@ -28,7 +41,7 @@ st.set_page_config(
     page_title=PWA_CONFIG["name"],
     page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="collapsed",  # モバイルファーストのため初期は閉じる
+    initial_sidebar_state="collapsed",
     menu_items={
         'Get Help': None,
         'Report a bug': None,
@@ -209,27 +222,6 @@ def inject_pwa_assets():
         border-color: var(--primary-color);
     }
     
-    .nav-button.active::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, #ffffff40, #ffffff80, #ffffff40);
-        animation: shimmer 2s infinite;
-    }
-    
-    @keyframes shimmer {
-        0% { transform: translateX(-100%); }
-        100% { transform: translateX(100%); }
-    }
-    
-    .nav-icon {
-        font-size: 1.5rem;
-        margin-bottom: 0.25rem;
-    }
-    
     /* メトリクスカード */
     .metric-card-mobile {
         background: white;
@@ -246,16 +238,6 @@ def inject_pwa_assets():
     .metric-card-mobile:hover {
         transform: translateY(-1px);
         box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-    }
-    
-    .metric-card-mobile::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: linear-gradient(90deg, var(--primary-color), var(--info-color));
     }
     
     .metric-title {
@@ -283,17 +265,10 @@ def inject_pwa_assets():
         gap: 0.25rem;
     }
     
-    .metric-delta.positive {
-        color: var(--success-color);
-    }
-    
-    .metric-delta.negative {
-        color: var(--danger-color);
-    }
-    
-    .metric-delta.neutral {
-        color: var(--secondary-color);
-    }
+    .metric-delta.success { color: var(--success-color); }
+    .metric-delta.warning { color: var(--warning-color); }
+    .metric-delta.error { color: var(--danger-color); }
+    .metric-delta.info { color: var(--info-color); }
     
     /* ボタン強化 */
     .stButton > button {
@@ -315,18 +290,7 @@ def inject_pwa_assets():
         box-shadow: 0 6px 20px rgba(0,123,255,0.3) !important;
     }
     
-    .stButton > button:active {
-        transform: translateY(0) !important;
-    }
-    
-    /* セレクトボックス */
-    .stSelectbox > div > div {
-        border-radius: var(--border-radius) !important;
-        border: 2px solid #e9ecef !important;
-        min-height: 48px !important;
-    }
-    
-    /* アラート・通知 */
+    /* アラート */
     .alert-mobile {
         padding: 1rem;
         border-radius: var(--border-radius);
@@ -356,58 +320,6 @@ def inject_pwa_assets():
     @keyframes slideInRight {
         from { transform: translateX(100%); opacity: 0; }
         to { transform: translateX(0); opacity: 1; }
-    }
-    
-    /* 読み込み状態 */
-    .loading-spinner {
-        display: inline-block;
-        width: 1.5rem;
-        height: 1.5rem;
-        border: 3px solid #f3f3f3;
-        border-top: 3px solid var(--primary-color);
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    
-    /* データテーブル最適化 */
-    .dataframe {
-        font-size: 0.875rem;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        border-radius: var(--border-radius);
-        box-shadow: var(--box-shadow);
-    }
-    
-    .dataframe table {
-        min-width: 600px;
-        background: white;
-    }
-    
-    .dataframe th {
-        background: var(--primary-color) !important;
-        color: white !important;
-        font-weight: 600 !important;
-        padding: 1rem 0.75rem !important;
-        text-align: center !important;
-    }
-    
-    .dataframe td {
-        padding: 0.75rem !important;
-        border-bottom: 1px solid #e9ecef !important;
-    }
-    
-    /* チャート最適化 */
-    .chart-container {
-        background: white;
-        border-radius: var(--border-radius);
-        padding: 1rem;
-        box-shadow: var(--box-shadow);
-        margin: 1rem 0;
     }
     
     /* タブレット対応 */
@@ -440,78 +352,6 @@ def inject_pwa_assets():
             max-width: 1200px;
             margin: 0 auto;
         }
-        
-        .metric-card-mobile {
-            margin: 1rem 0;
-        }
-    }
-    
-    /* ダークモード */
-    @media (prefers-color-scheme: dark) {
-        :root {
-            --light-color: #2d3748;
-            --dark-color: #e2e8f0;
-        }
-        
-        .metric-card-mobile {
-            background: #2d3748;
-            color: #e2e8f0;
-        }
-        
-        .nav-button {
-            background: #4a5568;
-            color: #e2e8f0;
-        }
-    }
-    
-    /* 印刷対応 */
-    @media print {
-        .mobile-header,
-        .mobile-main-nav,
-        .stSidebar {
-            display: none !important;
-        }
-        
-        .metric-card-mobile {
-            box-shadow: none !important;
-            border: 1px solid #000 !important;
-        }
-    }
-    
-    /* アクセシビリティ */
-    @media (prefers-reduced-motion: reduce) {
-        * {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
-        }
-    }
-    
-    /* フォーカス管理 */
-    .nav-button:focus,
-    .stButton > button:focus {
-        outline: 3px solid #80bdff !important;
-        outline-offset: 2px !important;
-    }
-    
-    /* スクロールバー調整 */
-    ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 4px;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: #c1c1c1;
-        border-radius: 4px;
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-        background: #a8a8a8;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -542,7 +382,6 @@ class MobileAppManager:
     
     def detect_mobile_mode(self) -> bool:
         """モバイルモード検出"""
-        # 実際の実装では JavaScript の window.innerWidth や User-Agent を使用
         return st.sidebar.checkbox(
             "📱 モバイルモード", 
             value=st.session_state.get('mobile_mode', False),
@@ -591,8 +430,6 @@ class MobileAppManager:
             nav_cols = st.columns(3)
             for i, (page_key, config) in enumerate(pages.items()):
                 with nav_cols[i % 3]:
-                    active_class = "active" if st.session_state.current_page == page_key else ""
-                    
                     if st.button(
                         f"{config['icon']}\n{config['label']}", 
                         key=f"nav_{page_key}",
@@ -608,10 +445,13 @@ class MobileAppManager:
         else:
             # デスクトップ用タブナビゲーション
             tab_names = [f"{config['icon']} {config['label']}" for config in pages.values()]
-            selected_tab = st.tabs(tab_names)
+            tabs = st.tabs(tab_names)
             
-            # タブの選択状態を検出（簡易版）
-            # 実際の実装では、各タブ内でcurrent_pageを設定
+            # タブクリック検出のための一時的な実装
+            current_tab = st.session_state.get('current_tab', 0)
+            page_keys = list(pages.keys())
+            if current_tab < len(page_keys):
+                st.session_state.current_page = page_keys[current_tab]
             
         return st.session_state.current_page
     
@@ -624,20 +464,35 @@ class MobileAppManager:
         if page == 'home':
             self.render_home_page()
         elif page == 'kpi':
-            if data_available:
-                self.render_kpi_page()
+            if data_available and CONFIG_IMPORTED:
+                try:
+                    create_management_dashboard_tab()
+                except Exception as e:
+                    st.error(f"KPI表示エラー: {str(e)}")
             else:
                 self.render_no_data_message("KPI表示")
         elif page == 'input':
-            self.render_input_page()
+            if CONFIG_IMPORTED:
+                try:
+                    create_data_processing_tab()
+                except Exception as e:
+                    st.error(f"データ入力エラー: {str(e)}")
+            else:
+                st.info("データ入力機能を読み込み中...")
         elif page == 'dept':
-            if data_available:
-                self.render_department_page()
+            if data_available and CONFIG_IMPORTED:
+                try:
+                    create_department_performance_tab()
+                except Exception as e:
+                    st.error(f"診療科別分析エラー: {str(e)}")
             else:
                 self.render_no_data_message("診療科別分析")
         elif page == 'ward':
-            if data_available:
-                self.render_ward_page()
+            if data_available and CONFIG_IMPORTED:
+                try:
+                    create_ward_performance_tab()
+                except Exception as e:
+                    st.error(f"病棟別分析エラー: {str(e)}")
             else:
                 self.render_no_data_message("病棟別分析")
         elif page == 'analysis':
@@ -665,9 +520,14 @@ class MobileAppManager:
         else:
             # デスクトップ版は従来通り
             try:
-                create_management_dashboard_tab()
+                if CONFIG_IMPORTED:
+                    create_management_dashboard_tab()
+                else:
+                    self.render_quick_status()
+                    self.render_quick_actions()
             except Exception as e:
                 st.error(f"ダッシュボード表示エラー: {str(e)}")
+                self.render_quick_status()
     
     def render_quick_status(self):
         """クイックステータス表示"""
@@ -715,6 +575,13 @@ class MobileAppManager:
                 "type": "warning",
                 "title": "データ未読み込み",
                 "message": "分析を開始するためにデータを読み込んでください。"
+            })
+        
+        if not CONFIG_IMPORTED:
+            alerts.append({
+                "type": "error",
+                "title": "モジュール読み込みエラー",
+                "message": "一部機能が利用できません。設定を確認してください。"
             })
         
         if not alerts:
@@ -773,46 +640,6 @@ class MobileAppManager:
         with col2:
             if st.button("🔄 保存データ読み込み", key=f"load_data_{feature_name}", use_container_width=True):
                 self.load_saved_data()
-    
-    def render_kpi_page(self):
-        """KPI詳細ページ"""
-        try:
-            if 'create_management_dashboard_tab' in globals():
-                create_management_dashboard_tab()
-            else:
-                st.info("KPI機能を読み込み中...")
-        except Exception as e:
-            st.error(f"KPI表示エラー: {str(e)}")
-    
-    def render_input_page(self):
-        """データ入力ページ"""
-        try:
-            if 'create_data_processing_tab' in globals():
-                create_data_processing_tab()
-            else:
-                st.info("データ入力機能を読み込み中...")
-        except Exception as e:
-            st.error(f"データ入力エラー: {str(e)}")
-    
-    def render_department_page(self):
-        """診療科別ページ"""
-        try:
-            if 'create_department_performance_tab' in globals():
-                create_department_performance_tab()
-            else:
-                st.info("診療科別分析機能を読み込み中...")
-        except Exception as e:
-            st.error(f"診療科別分析エラー: {str(e)}")
-    
-    def render_ward_page(self):
-        """病棟別ページ"""
-        try:
-            if 'create_ward_performance_tab' in globals():
-                create_ward_performance_tab()
-            else:
-                st.info("病棟別分析機能を読み込み中...")
-        except Exception as e:
-            st.error(f"病棟別分析エラー: {str(e)}")
     
     def render_analysis_menu(self):
         """分析メニューページ"""
@@ -884,9 +711,8 @@ def main():
     # モバイルアプリマネージャー初期化
     app_manager = MobileAppManager()
     
-    # 必要なモジュールの動的インポート
+    # 必要なモジュールの動的インポート（修正版）
     try:
-        from config import *
         from data_persistence import auto_load_data
         from utils import initialize_all_mappings
         from unified_filters import initialize_unified_filters
@@ -913,9 +739,12 @@ def main():
     # サイドバー（設定とフィルター）
     if not app_manager.is_mobile or st.sidebar.checkbox("⚙️ 詳細設定表示", key="show_sidebar"):
         try:
-            create_sidebar()
-        except:
-            st.sidebar.info("設定機能を読み込み中...")
+            if CONFIG_IMPORTED:
+                create_sidebar()
+            else:
+                st.sidebar.info("設定機能を読み込み中...")
+        except Exception as e:
+            st.sidebar.error(f"サイドバーエラー: {str(e)}")
     
     # ページコンテンツ表示
     app_manager.render_page_content(current_page)
