@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from datetime import datetime
 import calendar
-
+from utils import filter_closed_wards
 logger = logging.getLogger(__name__)
 
 try:
@@ -637,4 +637,16 @@ def display_ward_performance_dashboard():
         )
 
 def create_ward_performance_tab():
+    # データ取得
+    df = st.session_state.get('df')
+    if df is None or df.empty:
+        st.warning("データがありません。")
+        return
+
+    # ★最初に除外
+    df = filter_closed_wards(df)
+
+    # 病棟リスト生成時にも必ず除外
+    ward_list = sorted(df["病棟コード"].unique())
+
     display_ward_performance_dashboard()

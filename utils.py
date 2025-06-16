@@ -7,6 +7,13 @@ import logging # ロギング用に追加
 
 logger = logging.getLogger(__name__) # ロガーのセットアップ
 
+CLOSED_WARDS = ["03B"]
+
+def filter_closed_wards(df, ward_col="病棟コード"):
+    if ward_col in df.columns:
+        return df[~df[ward_col].isin(CLOSED_WARDS)]
+    return df
+
 # --- 診療科マッピング関連関数 ---
 def create_dept_mapping_table(target_data_df=None):
     """
