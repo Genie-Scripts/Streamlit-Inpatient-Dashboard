@@ -3,6 +3,20 @@ import pandas as pd
 import numpy as np
 import datetime
 import traceback
+
+# ページ設定（PWA対応）
+st.set_page_config(
+    page_title=PWA_CONFIG["name"],
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': f"# {PWA_CONFIG['name']}\n医療現場向けPWAダッシュボード"
+    }
+)
+
 import json
 import os
 from pathlib import Path
@@ -35,19 +49,6 @@ PWA_CONFIG = {
     "start_url": "/",
     "orientation": "portrait-primary"
 }
-
-# ページ設定（PWA対応）
-st.set_page_config(
-    page_title=PWA_CONFIG["name"],
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-    menu_items={
-        'Get Help': None,
-        'Report a bug': None,
-        'About': f"# {PWA_CONFIG['name']}\n医療現場向けPWAダッシュボード"
-    }
-)
 
 # CSS & PWA Assets 注入
 def inject_pwa_assets():
