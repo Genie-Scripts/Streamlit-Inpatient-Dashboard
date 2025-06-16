@@ -3,8 +3,7 @@ import pandas as pd
 import numpy as np
 import datetime
 import traceback
-# ===== ページ設定 (スクリプトの最初に移動) と config.py のインポート =====
-# config.py を st.set_page_config より先にインポート
+# ===== ページ設定と config.py のインポート =====
 from config import *
 
 st.set_page_config(
@@ -14,11 +13,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ===== 設定値とスタイルの読み込み =====
 from style import inject_global_css
 from utils import initialize_all_mappings
 
-# データ永続化機能のインポート
 from data_persistence import (
     auto_load_data, save_data_to_file, load_data_from_file,
     get_data_info, delete_saved_data, get_file_sizes,
@@ -26,7 +23,7 @@ from data_persistence import (
     get_backup_info, restore_from_backup
 )
 
-# カスタムモジュールのインポート (エラー時のフォールバックも含む)
+# カスタムモジュールのインポート
 try:
     from analysis_tabs import create_data_tables_tab
     from data_processing_tab import create_data_processing_tab
@@ -528,9 +525,6 @@ def create_sidebar_target_file_status():
                         else:
                             st.sidebar.write(f"「{keyword}」: 該当なし")
 
-# --- メインのサイドバー作成関数 ---
-# app.py の create_sidebar() 関数内の設定値初期化部分を修正
-
 def create_sidebar():
     """サイドバーの設定UI（設定値初期化強化版）"""
 
@@ -786,7 +780,7 @@ def main():
     if 'mappings_initialized_after_processing' not in st.session_state: 
         st.session_state.mappings_initialized_after_processing = False
 
-    # 設定値の初期化（config.pyから）
+    # 設定値の初期化
     if 'global_settings_initialized' not in st.session_state:
         st.session_state.total_beds = DEFAULT_TOTAL_BEDS
         st.session_state.bed_occupancy_rate = DEFAULT_OCCUPANCY_RATE
@@ -797,22 +791,17 @@ def main():
         st.session_state.monthly_target_admissions = DEFAULT_TARGET_ADMISSIONS
         st.session_state.global_settings_initialized = True
 
-    # 自動読み込み実行（シンプル版）
+    # 自動読み込み
     try:
         auto_loaded = auto_load_data()
         if auto_loaded and st.session_state.get('df') is not None:
             st.success("✅ 保存されたデータを自動読み込みしました")
-            
-            # target_dataの初期化
             if 'target_data' not in st.session_state: 
                 st.session_state.target_data = None
-                
-            # マッピングとフィルターの初期化
             initialize_all_mappings(st.session_state.df, st.session_state.target_data)
             if st.session_state.df is not None and not st.session_state.df.empty:
                 initialize_unified_filters(st.session_state.df)
             st.session_state.mappings_initialized_after_processing = True
-            
     except Exception as e:
         st.error(f"自動読み込み中にエラーが発生しました: {str(e)}")
 
@@ -822,40 +811,43 @@ def main():
     # サイドバー作成
     create_sidebar()
 
-    # タブの作成と処理
-    tab_titles = ["📊 主要指標", "🏥 診療科別パフォーマンス", "🏨 病棟別パフォーマンス", "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"]
+    # ----------- ここからタブUI→ドロップダウン型に切替 -----------
+
+    # メニュー項目定義（予測分析の有無も考慮）
+    menu_options = [
+        "📊 主要指標", "🏥 診療科別パフォーマンス", "🏨 病棟別パフォーマンス",
+        "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"
+    ]
     if FORECAST_AVAILABLE:
-        tab_titles.append("🔮 予測分析")
-    tab_titles.extend(["📤 データ出力", "📥 データ入力"])
+        menu_options.append("🔮 予測分析")
+    menu_options.extend(["📤 データ出力", "📥 データ入力"])
 
-    tabs = st.tabs(tab_titles)
+    # サイドバーのドロップダウンで選択
+    selected_menu = st.sidebar.selectbox("画面選択", menu_options, index=0)
 
-    # データ入力タブ
-    data_input_tab_index = tab_titles.index("📥 データ入力")
-    with tabs[data_input_tab_index]:
+    # データ入力画面
+    if selected_menu == "📥 データ入力":
         try:
             create_data_processing_tab()
             if st.session_state.get('data_processed') and st.session_state.get('df') is not None:
-                 if not st.session_state.get('df').empty:
+                if not st.session_state.get('df').empty:
                     initialize_unified_filters(st.session_state.df)
         except Exception as e:
             st.error(f"データ入力タブでエラー: {str(e)}\n{traceback.format_exc()}")
 
-    # データが読み込まれている場合の処理
-    if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
+    # データが読み込まれている場合
+    elif st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
         df_original_main = st.session_state.get('df')
         common_config_main = st.session_state.get('common_config', {})
         df_filtered_unified = filter_data_by_analysis_period(df_original_main)
         current_filter_config = get_unified_filter_config()
 
-        with tabs[tab_titles.index("📊 主要指標")]:
+        if selected_menu == "📊 主要指標":
             try: 
                 create_management_dashboard_tab()
             except Exception as e: 
                 st.error(f"主要指標でエラー: {str(e)}\n{traceback.format_exc()}")
-
-        # 新しいタブ: 診療科別パフォーマンス
-        with tabs[tab_titles.index("🏥 診療科別パフォーマンス")]:
+        elif selected_menu == "🏥 診療科別パフォーマンス":
             try:
                 if DEPT_PERFORMANCE_AVAILABLE:
                     create_department_performance_tab()
@@ -863,8 +855,7 @@ def main():
                     st.error("診療科別パフォーマンス機能が利用できません。")
             except Exception as e:
                 st.error(f"診療科別パフォーマンスでエラー: {str(e)}\n{traceback.format_exc()}")
-
-        with tabs[tab_titles.index("🏨 病棟別パフォーマンス")]:
+        elif selected_menu == "🏨 病棟別パフォーマンス":
             try:
                 if WARD_PERFORMANCE_AVAILABLE:
                     create_ward_performance_tab()
@@ -872,8 +863,7 @@ def main():
                     st.error("病棟別パフォーマンス機能が利用できません。")
             except Exception as e:
                 st.error(f"病棟別パフォーマンスでエラー: {str(e)}\n{traceback.format_exc()}")
-
-        with tabs[tab_titles.index("🗓️ 平均在院日数分析")]:
+        elif selected_menu == "🗓️ 平均在院日数分析":
             try:
                 if display_alos_analysis_tab:
                     start_dt, end_dt, _ = get_analysis_period()
@@ -885,8 +875,7 @@ def main():
                     st.error("平均在院日数分析機能が利用できません。")
             except Exception as e: 
                 st.error(f"平均在院日数分析でエラー: {str(e)}\n{traceback.format_exc()}")
-
-        with tabs[tab_titles.index("📅 曜日別入退院分析")]:
+        elif selected_menu == "📅 曜日別入退院分析":
             try:
                 if display_dow_analysis_tab:
                     start_dt, end_dt, _ = get_analysis_period()
@@ -898,8 +887,7 @@ def main():
                     st.error("曜日別入退院分析機能が利用できません。")
             except Exception as e: 
                 st.error(f"曜日別入退院分析でエラー: {str(e)}\n{traceback.format_exc()}")
-
-        with tabs[tab_titles.index("🔍 個別分析")]:
+        elif selected_menu == "🔍 個別分析":
             try:
                 if create_individual_analysis_section:
                     create_individual_analysis_section(df_filtered_unified, current_filter_config)
@@ -907,23 +895,19 @@ def main():
                     st.error("個別分析機能が利用できません。")
             except Exception as e: 
                 st.error(f"個別分析でエラー: {str(e)}\n{traceback.format_exc()}")
-
-        if FORECAST_AVAILABLE:
-            with tabs[tab_titles.index("🔮 予測分析")]:
-                try:
-                    deps_ok = check_forecast_dependencies()
-                    if deps_ok:
-                        original_df_for_forecast = st.session_state.get('df')
-                        st.session_state['df'] = df_filtered_unified
-                        display_forecast_analysis_tab()
-                        st.session_state['df'] = original_df_for_forecast
-                    else: 
-                        st.info("予測分析には追加ライブラリが必要です。")
-                except Exception as e: 
-                    st.error(f"予測分析でエラー: {str(e)}\n{traceback.format_exc()}")
-
-        data_output_tab_index = tab_titles.index("📤 データ出力")
-        with tabs[data_output_tab_index]:
+        elif selected_menu == "🔮 予測分析" and FORECAST_AVAILABLE:
+            try:
+                deps_ok = check_forecast_dependencies()
+                if deps_ok:
+                    original_df_for_forecast = st.session_state.get('df')
+                    st.session_state['df'] = df_filtered_unified
+                    display_forecast_analysis_tab()
+                    st.session_state['df'] = original_df_for_forecast
+                else: 
+                    st.info("予測分析には追加ライブラリが必要です。")
+            except Exception as e: 
+                st.error(f"予測分析でエラー: {str(e)}\n{traceback.format_exc()}")
+        elif selected_menu == "📤 データ出力":
             st.header("📤 データ出力")
             output_sub_tab1, output_sub_tab2 = st.tabs(["📋 データテーブル", "📄 PDF出力"])
             with output_sub_tab1:
@@ -938,63 +922,51 @@ def main():
                     st.error(f"PDF出力機能でエラー: {str(e)}\n{traceback.format_exc()}")
     else:
         # データが読み込まれていない場合
-        non_input_tab_indices = [i for i, title in enumerate(tab_titles) if title != "📥 データ入力"]
-        for i in non_input_tab_indices:
-            with tabs[i]:
-                st.info("📊 データを読み込み後に利用可能になります。")
-                
-                # 保存データの確認と読み込みボタン
-                data_info = get_data_info()
-                if data_info: 
-                    st.info("💾 保存されたデータがあります。以下から読み込むことができます。")
-                    
-                    # 保存データの簡易情報
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("データ件数", f"{data_info.get('data_rows', 0):,}件")
-                    with col2:
-                        if data_info.get('file_size_mb'):
-                            st.metric("ファイルサイズ", f"{data_info['file_size_mb']} MB")
-                    with col3:
-                        if data_info.get('last_saved'):
-                            try:
-                                saved_date = datetime.datetime.fromisoformat(data_info['last_saved'].replace('Z', '+00:00'))
-                                st.metric("最終保存", saved_date.strftime('%m/%d %H:%M'))
-                            except:
-                                st.metric("最終保存", "不明")
-                    
-                    # データ読み込みボタン
-                    col_load1, col_load2 = st.columns(2)
-                    with col_load1:
-                        if st.button("🚀 データを読み込む", key=f"quick_load_tab_{i}", use_container_width=True):
-                            df_loaded, target_data_loaded, metadata_loaded = load_data_from_file()
-                            if df_loaded is not None:
-                                st.session_state['df'] = df_loaded
-                                st.session_state['target_data'] = target_data_loaded
-                                st.session_state['data_processed'] = True
-                                st.session_state['data_source'] = 'manual_loaded'
-                                st.session_state['data_metadata'] = metadata_loaded
-                                
-                                if '日付' in df_loaded.columns and not df_loaded['日付'].empty:
-                                    latest_date = df_loaded['日付'].max()
-                                    st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
-                                else:
-                                    st.session_state.latest_data_date_str = "日付不明"
-                                
-                                initialize_all_mappings(st.session_state.df, st.session_state.target_data)
-                                if st.session_state.df is not None and not st.session_state.df.empty:
-                                    initialize_unified_filters(st.session_state.df)
-                                st.session_state.mappings_initialized_after_processing = True
-                                
-                                st.success("✅ データ読み込み完了!")
-                                st.rerun()
+        if selected_menu != "📥 データ入力":
+            st.info("📊 データを読み込み後に利用可能になります。")
+            data_info = get_data_info()
+            if data_info: 
+                st.info("💾 保存されたデータがあります。以下から読み込むことができます。")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("データ件数", f"{data_info.get('data_rows', 0):,}件")
+                with col2:
+                    if data_info.get('file_size_mb'):
+                        st.metric("ファイルサイズ", f"{data_info['file_size_mb']} MB")
+                with col3:
+                    if data_info.get('last_saved'):
+                        try:
+                            saved_date = datetime.datetime.fromisoformat(data_info['last_saved'].replace('Z', '+00:00'))
+                            st.metric("最終保存", saved_date.strftime('%m/%d %H:%M'))
+                        except:
+                            st.metric("最終保存", "不明")
+                col_load1, col_load2 = st.columns(2)
+                with col_load1:
+                    if st.button("🚀 データを読み込む", key=f"quick_load_tab_{selected_menu}", use_container_width=True):
+                        df_loaded, target_data_loaded, metadata_loaded = load_data_from_file()
+                        if df_loaded is not None:
+                            st.session_state['df'] = df_loaded
+                            st.session_state['target_data'] = target_data_loaded
+                            st.session_state['data_processed'] = True
+                            st.session_state['data_source'] = 'manual_loaded'
+                            st.session_state['data_metadata'] = metadata_loaded
+                            if '日付' in df_loaded.columns and not df_loaded['日付'].empty:
+                                latest_date = df_loaded['日付'].max()
+                                st.session_state.latest_data_date_str = latest_date.strftime('%Y年%m月%d日')
                             else:
-                                st.error("❌ データ読み込みに失敗しました")
-                    
-                    with col_load2:
-                        st.caption("または「データ入力」タブから新しいデータをアップロード")
-                else: 
-                    st.info("📋 「データ入力」タブから新しいデータをアップロードしてください。")
+                                st.session_state.latest_data_date_str = "日付不明"
+                            initialize_all_mappings(st.session_state.df, st.session_state.target_data)
+                            if st.session_state.df is not None and not st.session_state.df.empty:
+                                initialize_unified_filters(st.session_state.df)
+                            st.session_state.mappings_initialized_after_processing = True
+                            st.success("✅ データ読み込み完了!")
+                            st.rerun()
+                        else:
+                            st.error("❌ データ読み込みに失敗しました")
+                with col_load2:
+                    st.caption("または「データ入力」から新しいデータをアップロード")
+            else: 
+                st.info("📋 「データ入力」タブから新しいデータをアップロードしてください。")
 
     # フッター
     st.markdown("---")
