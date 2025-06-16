@@ -101,3 +101,5 @@ SESSION_SETTINGS = {
     ],
     'auto_clear_on_new_data': False,  # 新データ時の自動クリア
 }
+
+from data_processing_tab import create_data_processing_tab
