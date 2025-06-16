@@ -4,16 +4,29 @@ import pandas as pd
 from datetime import datetime, timedelta
 import re # 病棟コードのパターンマッチング用
 import logging # ロギング用に追加
-
+import re
 logger = logging.getLogger(__name__) # ロガーのセットアップ
 
 CLOSED_WARDS = ["03B"]
 
+def normalize_ward_code(code):
+    """病棟コードを正規化（大文字・全角→半角・スペース除去）"""
+    if not isinstance(code, str):
+        code = str(code)
+    code = code.upper().strip()
+    code = code.replace("　", "")  # 全角スペース除去
+    code = re.sub(r"\s+", "", code)  # 改行/タブ除去
+    # 全角数字を半角
+    code = code.translate(str.maketrans("０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+    return code
+
+CLOSED_WARDS = [normalize_ward_code(c) for c in CLOSED_WARDS_RAW]
+
 def filter_closed_wards(df, ward_col="病棟コード"):
     if ward_col in df.columns:
-        return df[~df[ward_col].isin(CLOSED_WARDS)]
+        norm_codes = df[ward_col].apply(normalize_ward_code)
+        return df[~norm_codes.isin(CLOSED_WARDS)]
     return df
-
 # --- 診療科マッピング関連関数 ---
 def create_dept_mapping_table(target_data_df=None):
     """
