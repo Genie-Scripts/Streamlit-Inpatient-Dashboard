@@ -90,8 +90,26 @@ def display_individual_analysis_tab(df_filtered_main):
     current_filter_title_display = "統一フィルター適用範囲全体" if unified_filter_applied else "全体"
     current_results_data = all_results
     chart_data_for_graphs = df.copy()
+    
+    # 統一フィルターから選択された部門を取得
     filter_code_for_target = "全体"
-
+    filter_config = get_unified_filter_config() if get_unified_filter_config else {}
+    
+    if filter_config:
+        # 診療科が選択されている場合
+        if filter_config.get('selected_departments') and len(filter_config['selected_departments']) == 1:
+            # 単一診療科の場合、その診療科コードを使用
+            selected_dept = filter_config['selected_departments'][0]
+            # 診療科コードを取得（通常は診療科名がそのままコードとして使用される）
+            filter_code_for_target = selected_dept
+            current_filter_title_display = f"診療科: {selected_dept}"
+        
+        # 病棟が選択されている場合
+        elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
+            # 単一病棟の場合、その病棟コードを使用
+            selected_ward = filter_config['selected_wards'][0]
+            filter_code_for_target = selected_ward
+            current_filter_title_display = f"病棟: {selected_ward}"
     st.markdown(f"#### 分析結果: {current_filter_title_display}")
 
     if not current_results_data or not isinstance(current_results_data, dict) or current_results_data.get("summary") is None:
