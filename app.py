@@ -37,7 +37,6 @@ from pathlib import Path
 # ===== 修正: 冒頭でimport実行 =====
 try:
     from config import (
-        FORECAST_AVAILABLE, 
         create_sidebar, 
         create_management_dashboard_tab,
         create_data_processing_tab,
