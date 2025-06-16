@@ -4,6 +4,19 @@ import numpy as np
 import datetime
 import traceback
 
+# PWA設定
+PWA_CONFIG = {
+    "name": "入退院分析ダッシュボード",
+    "short_name": "入退院分析",
+    "description": "医療機関向け入退院患者分析PWAダッシュボード",
+    "theme_color": "#007bff",
+    "background_color": "#ffffff",
+    "display": "standalone",
+    "scope": "/",
+    "start_url": "/",
+    "orientation": "portrait-primary"
+}
+
 # ページ設定（PWA対応）
 st.set_page_config(
     page_title=PWA_CONFIG["name"],
@@ -36,19 +49,6 @@ except ImportError as e:
     st.warning(f"設定モジュール読み込みエラー: {e}")
     CONFIG_IMPORTED = False
     FORECAST_AVAILABLE = False
-
-# PWA設定
-PWA_CONFIG = {
-    "name": "入退院分析ダッシュボード",
-    "short_name": "入退院分析",
-    "description": "医療機関向け入退院患者分析PWAダッシュボード",
-    "theme_color": "#007bff",
-    "background_color": "#ffffff",
-    "display": "standalone",
-    "scope": "/",
-    "start_url": "/",
-    "orientation": "portrait-primary"
-}
 
 # CSS & PWA Assets 注入
 def inject_pwa_assets():
