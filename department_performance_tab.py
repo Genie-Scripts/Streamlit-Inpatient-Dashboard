@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 from datetime import datetime
 import calendar
+from config import EXCLUDED_WARDS
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +311,14 @@ def display_department_performance_dashboard():
     
     date_filtered_df = safe_date_filter(df_original, start_date, end_date)
     
+    # 除外病棟をフィルタリング（病棟コード列がある場合のみ）
+    if '病棟コード' in date_filtered_df.columns and EXCLUDED_WARDS:
+        original_count = len(date_filtered_df)
+        date_filtered_df = date_filtered_df[~date_filtered_df['病棟コード'].isin(EXCLUDED_WARDS)]
+        removed_count = original_count - len(date_filtered_df)
+        if removed_count > 0:
+            logger.info(f"除外病棟フィルタリング: {removed_count}件のレコードを除外しました")
+
     if date_filtered_df.empty:
         st.warning(f"選択された期間（{period_desc}）にデータがありません。")
         return

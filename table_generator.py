@@ -5,6 +5,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import time
 import re # 病棟コードのパターンマッチング用
+from config import EXCLUDED_WARDS
 
 def get_fiscal_year_info(date_val: pd.Timestamp):
     """
@@ -31,7 +32,7 @@ def generate_department_table(
     display_mode: str = 'basic',
     sort_by: str = 'code',
     target_data_df: pd.DataFrame = None,
-    included_departments: list = None # 主に診療科テーブルのサイドバー選択用
+    included_departments: list = None
 ):
     total_processing_start_time = time.time()
 
@@ -42,6 +43,14 @@ def generate_department_table(
         (df['日付'] >= pd.to_datetime(start_date)) &
         (df['日付'] <= pd.to_datetime(end_date))
     ].copy()
+    
+    # 除外病棟をフィルタリング（病棟タイプの場合のみ）
+    if department_type == 'ward' and '病棟コード' in df_filtered_for_analysis_period.columns and EXCLUDED_WARDS:
+        original_count = len(df_filtered_for_analysis_period)
+        df_filtered_for_analysis_period = df_filtered_for_analysis_period[~df_filtered_for_analysis_period['病棟コード'].isin(EXCLUDED_WARDS)]
+        removed_count = original_count - len(df_filtered_for_analysis_period)
+        if removed_count > 0:
+            print(f"テーブル生成: 除外病棟フィルタリングで{removed_count}件のレコードを除外")
 
     if df_filtered_for_analysis_period.empty:
         st.info(f"指定された分析期間 ({pd.to_datetime(start_date).strftime('%Y-%m-%d')} ~ {pd.to_datetime(end_date).strftime('%Y-%m-%d')}) にデータがありません。")
@@ -52,7 +61,9 @@ def generate_department_table(
     # --- 表示対象部門の絞り込み ---
     unique_depts_from_actual_data = sorted(df_filtered_for_analysis_period[group_col].unique())
     
-    if department_type == 'ward':
+    # 病棟の場合、除外病棟をフィルタリング
+    if department_type == 'ward' and EXCLUDED_WARDS:
+        unique_depts_from_actual_data = [ward for ward in unique_depts_from_actual_data if ward not in EXCLUDED_WARDS]
         if target_data_df is not None and not target_data_df.empty and \
            '部門コード' in target_data_df.columns and '部門種別' in target_data_df.columns:
             # 目標CSVから「病棟」と特定できる部門コードのリストを取得

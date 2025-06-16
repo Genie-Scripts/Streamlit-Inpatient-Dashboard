@@ -7,6 +7,7 @@ import time
 import hashlib
 import gc
 import numpy as np
+from config import EXCLUDED_WARDS
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -667,8 +668,18 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
     if chart_data is None or chart_data.empty or latest_date is None:
         return [], [], []
 
-    if not pd.api.types.is_datetime64_any_dtype(chart_data['日付']):
-        try: chart_data['日付'] = pd.to_datetime(chart_data['日付'])
+    # データコピーを作成して除外病棟をフィルタリング
+    chart_data_filtered = chart_data.copy()
+    if '病棟コード' in chart_data_filtered.columns and EXCLUDED_WARDS:
+        original_count = len(chart_data_filtered)
+        chart_data_filtered = chart_data_filtered[~chart_data_filtered['病棟コード'].isin(EXCLUDED_WARDS)]
+        removed_count = original_count - len(chart_data_filtered)
+        if removed_count > 0:
+            print(f"PDF生成: 除外病棟フィルタリングで{removed_count}件のレコードを除外")
+    
+    # 以降、chart_dataの代わりにchart_data_filteredを使用
+    if not pd.api.types.is_datetime64_any_dtype(chart_data_filtered['日付']):
+        try: chart_data_filtered['日付'] = pd.to_datetime(chart_data_filtered['日付'])
         except Exception: return [], [], []
     if not isinstance(latest_date, pd.Timestamp): latest_date = pd.Timestamp(latest_date)
 
@@ -699,8 +710,11 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
 
     period_labels_for_header = [Paragraph(label.replace("直近", "直近<br/>").replace("年度", "<br/>年度"), para_style) for label in period_labels_for_data]
 
-    ward_codes_unique = sorted(chart_data["病棟コード"].astype(str).unique()) if "病棟コード" in chart_data.columns else []
-    dept_names_original = sorted(chart_data["診療科名"].unique()) if "診療科名" in chart_data.columns else []
+    ward_codes_unique = sorted(chart_data_filtered["病棟コード"].astype(str).unique()) if "病棟コード" in chart_data_filtered.columns else []
+    # 除外病棟を再度フィルタリング（念のため）
+    if EXCLUDED_WARDS:
+        ward_codes_unique = [ward for ward in ward_codes_unique if ward not in EXCLUDED_WARDS]
+    dept_names_original = sorted(chart_data_filtered["診療科名"].unique()) if "診療科名" in chart_data_filtered.columns else []
     
     show_all_depts = True; use_selected_depts = False; selected_depts_list = []
     # ワーカープロセスでは st.session_state は使えないため、この部分は実質的に機能しない。
@@ -726,7 +740,7 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
 
     for period_label, (start_dt_period, end_dt_period) in period_definitions.items():
         if start_dt_period > end_dt_period: continue
-        period_data_df = chart_data[(chart_data["日付"] >= start_dt_period) & (chart_data["日付"] <= end_dt_period)]
+        period_data_df = chart_data_filtered[(chart_data_filtered["日付"] >= start_dt_period) & (chart_data_filtered["日付"] <= end_dt_period)]
         if period_data_df.empty: continue
         num_days_in_period_calc = period_data_df['日付'].nunique()
         if num_days_in_period_calc == 0: continue

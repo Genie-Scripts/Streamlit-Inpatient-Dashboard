@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import logging
-
+from config import EXCLUDED_WARDS
 logger = logging.getLogger(__name__)
 
 # alos_charts.py からインポート (変更なし)
@@ -35,6 +35,14 @@ def display_alos_analysis_tab(df_filtered_by_period, start_date_ts, end_date_ts,
         return
 
     df_analysis = df_filtered_by_period.copy()
+    
+    # 除外病棟をフィルタリング
+    if '病棟コード' in df_analysis.columns and EXCLUDED_WARDS:
+        original_count = len(df_analysis)
+        df_analysis = df_analysis[~df_analysis['病棟コード'].isin(EXCLUDED_WARDS)]
+        removed_count = original_count - len(df_analysis)
+        if removed_count > 0:
+            logger.info(f"除外病棟フィルタリング: {removed_count}件のレコードを除外しました")
 
     total_days = (end_date_ts - start_date_ts).days + 1
     st.info(f"📅 **分析期間 (統一フィルター適用済):** {start_date_ts.strftime('%Y年%m月%d日')} ～ {end_date_ts.strftime('%Y年%m月%d日')} （{total_days}日間）")
