@@ -525,6 +525,9 @@ def create_sidebar_target_file_status():
                         else:
                             st.sidebar.write(f"「{keyword}」: 該当なし")
 
+# --- メインのサイドバー作成関数 ---
+# app.py の create_sidebar() 関数内の設定値初期化部分を修正
+
 def create_sidebar():
     """サイドバーの設定UI（設定値初期化強化版）"""
 
@@ -807,7 +810,7 @@ def main():
 
     # メインヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
-
+    
     # ----------- ここからタブUI→ドロップダウン型に切替 -----------
 
     # メニュー項目定義（予測分析の有無も考慮）
@@ -821,7 +824,7 @@ def main():
 
     # サイドバーのドロップダウンで選択
     selected_menu = st.sidebar.selectbox("画面選択", menu_options, index=0)
-    
+
     # サイドバー作成
     create_sidebar()
 
