@@ -39,9 +39,6 @@ try:
     from config import (
         create_sidebar, 
         create_management_dashboard_tab,
-        create_data_processing_tab,
-        create_department_performance_tab,
-        create_ward_performance_tab
     )
     CONFIG_IMPORTED = True
 except ImportError as e:
