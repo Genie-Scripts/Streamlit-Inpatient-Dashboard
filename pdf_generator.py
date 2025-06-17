@@ -231,7 +231,7 @@ def create_patient_chart_with_target_wrapper(
                 y_min = max(0, data_min * 0.9)
                 
                 # 上限：データ最大値と目標値の大きい方に20%のマージン
-                y_max = max(data_max, target_val_float) * 1.07
+                y_max = max(data_max, target_val_float) * 1.05
                 
                 # Y軸の範囲を設定
                 ax.set_ylim(bottom=y_min, top=y_max)
