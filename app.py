@@ -808,30 +808,41 @@ def main():
     except Exception as e:
         st.error(f"自動読み込み中にエラーが発生しました: {str(e)}")
 
-    # --- ▼▼▼ ここにセッションステート内のDFを直接クレンジングする処理を追加 ▼▼▼ ---
-    if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
-        df_to_check = st.session_state.get('df')
+    # --- ▼▼▼ ここから最終診断コードを追加 ▼▼▼ ---
+    if 'df' in st.session_state and st.session_state.df is not None:
+        df_to_check = st.session_state.df
         
         numeric_cols_to_clean = [
             '入院患者数（在院）', '新入院患者数', '緊急入院患者数', '退院患者数', '死亡患者数'
         ]
         
-        # クレンジングが必要なobject型の数値列があるかチェック
-        has_object_cols = any(
-            col in df_to_check.columns and df_to_check[col].dtype == 'object'
-            for col in numeric_cols_to_clean
-        )
+        # クレンジングが必要な'object'型の列を特定
+        cols_that_are_object = [
+            col for col in numeric_cols_to_clean 
+            if col in df_to_check.columns and df_to_check[col].dtype == 'object'
+        ]
 
-        if has_object_cols:
-            df_cleaned = df_to_check.copy()
-            for col in numeric_cols_to_clean:
-                if col in df_cleaned.columns and df_cleaned[col].dtype == 'object':
-                    # 数値に変換できないものはNaNにし、その後0で埋める
-                    df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce').fillna(0)
+        if cols_that_are_object:
+            # 実行されたことを証明するために、画面に警告とレポートを表示
+            st.warning(f"以下の数値列がテキストとして読み込まれたため、データ型を強制修正します: {', '.join(cols_that_are_object)}", icon="⚠️")
             
-            # セッションステート内のデータフレームをクレンジング済みのものに完全に置き換える
-            st.session_state['df'] = df_cleaned
-    # --- ▲▲▲ クレンジング処理終了 ▲▲▲ ---
+            df_cleaned = df_to_check.copy()
+            for col in cols_that_are_object:
+                df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce').fillna(0)
+            
+            # セッションステート内のデータフレームを修正済みのものに上書き
+            st.session_state.df = df_cleaned
+            
+            # --- 修正結果の証明 ---
+            st.subheader("🤖 データクレンジング実行レポート")
+            st.caption("上記の警告に基づき、セッション内のデータフレームのデータ型を修正しました。")
+            
+            cleaned_dtypes = df_cleaned[numeric_cols_to_clean].dtypes.reset_index()
+            cleaned_dtypes.columns = ['列名', '修正後のデータ型']
+            cleaned_dtypes['修正後のデータ型'] = cleaned_dtypes['修正後のデータ型'].astype(str)
+            st.table(cleaned_dtypes)
+            st.markdown("---")
+    # --- ▲▲▲ 診断コード終了 ▲▲▲ ---
 
     # メインヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
