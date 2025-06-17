@@ -808,6 +808,31 @@ def main():
     except Exception as e:
         st.error(f"自動読み込み中にエラーが発生しました: {str(e)}")
 
+    # --- ▼▼▼ ここにセッションステート内のDFを直接クレンジングする処理を追加 ▼▼▼ ---
+    if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
+        df_to_check = st.session_state.get('df')
+        
+        numeric_cols_to_clean = [
+            '入院患者数（在院）', '新入院患者数', '緊急入院患者数', '退院患者数', '死亡患者数'
+        ]
+        
+        # クレンジングが必要なobject型の数値列があるかチェック
+        has_object_cols = any(
+            col in df_to_check.columns and df_to_check[col].dtype == 'object'
+            for col in numeric_cols_to_clean
+        )
+
+        if has_object_cols:
+            df_cleaned = df_to_check.copy()
+            for col in numeric_cols_to_clean:
+                if col in df_cleaned.columns and df_cleaned[col].dtype == 'object':
+                    # 数値に変換できないものはNaNにし、その後0で埋める
+                    df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce').fillna(0)
+            
+            # セッションステート内のデータフレームをクレンジング済みのものに完全に置き換える
+            st.session_state['df'] = df_cleaned
+    # --- ▲▲▲ クレンジング処理終了 ▲▲▲ ---
+
     # メインヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
     
