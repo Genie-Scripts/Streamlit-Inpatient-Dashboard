@@ -138,9 +138,11 @@ def display_individual_analysis_tab(df_filtered_main):
     logger.info(f"フィルター設定デバッグ: {filter_config}")
     
     if filter_config:
-        # 診療科フィルターをチェック
-        selected_departments = filter_config.get('selected_departments', [])
-        selected_wards = filter_config.get('selected_wards', [])
+        # 診療科フィルターをチェック（複数のキー名に対応）
+        selected_departments = (filter_config.get('selected_departments', []) or 
+                              filter_config.get('selected_depts', []))
+        selected_wards = (filter_config.get('selected_wards', []) or 
+                         filter_config.get('selected_ward', []))
         
         logger.info(f"選択された診療科: {selected_departments} (数: {len(selected_departments) if selected_departments else 0})")
         logger.info(f"選択された病棟: {selected_wards} (数: {len(selected_wards) if selected_wards else 0})")
@@ -233,7 +235,9 @@ def display_individual_analysis_tab(df_filtered_main):
                 actual_dept_code = filter_code_for_target
                 
                 # 診療科の場合、目標値辞書から対応する部門コードを探す
-                if filter_config and filter_config.get('selected_departments'):
+                selected_depts = (filter_config.get('selected_departments', []) or 
+                                filter_config.get('selected_depts', []))
+                if filter_config and selected_depts:
                     dept_code_found, target_exists = find_department_code_in_targets(
                         filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
                     )
@@ -267,12 +271,21 @@ def display_individual_analysis_tab(df_filtered_main):
                 st.write("**フィルター設定:**")
                 st.json(filter_config)
                 
-                selected_departments = filter_config.get('selected_departments', [])
-                selected_wards = filter_config.get('selected_wards', [])
+                # 複数のキー名に対応
+                selected_departments = (filter_config.get('selected_departments', []) or 
+                                      filter_config.get('selected_depts', []))
+                selected_wards = (filter_config.get('selected_wards', []) or 
+                                filter_config.get('selected_ward', []))
                 
-                st.write(f"**選択された診療科:** {selected_departments} (数: {len(selected_departments) if selected_departments else 0})")
-                st.write(f"**選択された病棟:** {selected_wards} (数: {len(selected_wards) if selected_wards else 0})")
+                st.write(f"**検出された診療科:** {selected_departments} (数: {len(selected_departments) if selected_departments else 0})")
+                st.write(f"**検出された病棟:** {selected_wards} (数: {len(selected_wards) if selected_wards else 0})")
                 st.write(f"**最終的なfilter_code_for_target:** `{filter_code_for_target}`")
+                
+                # キー名の確認
+                if 'selected_depts' in filter_config:
+                    st.info("ℹ️ フィルター設定は `selected_depts` キーを使用しています")
+                if 'selected_departments' in filter_config:
+                    st.info("ℹ️ フィルター設定は `selected_departments` キーを使用しています")
                 
                 # なぜ「全体」になったかの判定ロジックを表示
                 if selected_departments and len(selected_departments) == 1:
@@ -294,7 +307,9 @@ def display_individual_analysis_tab(df_filtered_main):
             st.markdown("##### 1. プログラムが使用している検索キー")
             
             # 診療科の場合の部門コード変換状況を表示
-            if filter_config and filter_config.get('selected_departments'):
+            selected_depts_for_debug = (filter_config.get('selected_departments', []) or 
+                                      filter_config.get('selected_depts', []))
+            if filter_config and selected_depts_for_debug:
                 original_dept_name = filter_code_for_target
                 dept_code_found, target_exists = find_department_code_in_targets(
                     filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
@@ -343,7 +358,9 @@ def display_individual_analysis_tab(df_filtered_main):
                     st.dataframe(key_df, use_container_width=True)
                     
                     # 診療科名との一致候補を表示
-                    if filter_config and filter_config.get('selected_departments'):
+                    selected_depts_for_debug = (filter_config.get('selected_departments', []) or 
+                                              filter_config.get('selected_depts', []))
+                    if filter_config and selected_depts_for_debug:
                         st.markdown("##### 4. 診療科名との一致候補")
                         dept_name = filter_code_for_target
                         candidates = []
