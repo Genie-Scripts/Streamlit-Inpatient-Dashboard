@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (構文エラー修正版)
+# individual_analysis_tab.py (クラッシュバグ修正版)
 
 import streamlit as st
 import pandas as pd
@@ -33,6 +33,9 @@ def display_dataframe_with_title(title, df_data, key_suffix=""):
 
 def display_individual_analysis_tab(df_filtered_main):
     st.header("📊 個別分析")
+
+    # このグラフで分析する指標名を関数の先頭で定義
+    METRIC_FOR_CHART = '日平均在院患者数'
 
     if not all([generate_filtered_summaries, create_forecast_dataframe, create_interactive_patient_chart,
                 create_interactive_dual_axis_chart, get_display_name_for_dept,
@@ -98,7 +101,6 @@ def display_individual_analysis_tab(df_filtered_main):
             current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_identifier)}"
         
         elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
-            # ここがエラー箇所でした
             selected_ward = str(filter_config['selected_wards'][0]).strip()
             filter_code_for_target = selected_ward
             current_filter_title_display = f"病棟: {selected_ward}"
@@ -161,8 +163,6 @@ def display_individual_analysis_tab(df_filtered_main):
                     key = (dept_code, indicator, period)
                     st.session_state._target_dict[key] = row['目標値']
             
-            METRIC_FOR_CHART = '日平均在院患者数'
-
             if filter_code_for_target == "全体":
                 key_all_1 = ("000", METRIC_FOR_CHART, '全日')
                 key_all_2 = ("全体", METRIC_FOR_CHART, '全日')
@@ -196,12 +196,12 @@ def display_individual_analysis_tab(df_filtered_main):
             st.subheader("詳細デバッグ: 目標値辞書と検索キーの比較")
 
             st.markdown("##### 1. プログラムが使用している検索キー")
-            search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日') if 'METRIC_FOR_CHART' in locals() else "N/A"
+            search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
             st.info(f"**全日用検索キー:** `{search_key_all}`")
 
             if '_target_dict' in st.session_state:
                 st.markdown("##### 2. 検索キーの存在チェック結果")
-                if search_key_all != "N/A" and search_key_all in st.session_state._target_dict:
+                if search_key_all in st.session_state._target_dict:
                     st.success(f"✅ 検索キーは目標値辞書内に **存在します**。")
                     st.write(f"取得された目標値: `{st.session_state._target_dict.get(search_key_all)}`")
                 else:
@@ -212,12 +212,12 @@ def display_individual_analysis_tab(df_filtered_main):
                     st.write("2. 日々の実績データ（入退院クロス.csvなど）の「診療科名」列を、コピーしたテキストに修正・統一してください。")
 
                 st.markdown("##### 3. 目標値ファイルから読み込まれた利用可能なキー（部門コード）のリスト")
-                st.caption(f"指標タイプが「{METRIC_FOR_CHART if 'METRIC_FOR_CHART' in locals() else 'N/A'}」のものに絞って表示しています。")
+                st.caption(f"指標タイプが「{METRIC_FOR_CHART}」のものに絞って表示しています。")
                 
-                available_keys = {k: v for k, v in st.session_state._target_dict.items() if k[1] == (METRIC_FOR_CHART if 'METRIC_FOR_CHART' in locals() else '')}
+                available_keys = {k: v for k, v in st.session_state._target_dict.items() if k[1] == METRIC_FOR_CHART}
                 
                 if not available_keys:
-                    st.warning(f"辞書内に「{METRIC_FOR_CHART if 'METRIC_FOR_CHART' in locals() else 'N/A'}」の指標を持つキーが見つかりませんでした。")
+                    st.warning(f"辞書内に「{METRIC_FOR_CHART}」の指標を持つキーが見つかりませんでした。")
                 else:
                     key_df_data = []
                     for key, value in available_keys.items():
