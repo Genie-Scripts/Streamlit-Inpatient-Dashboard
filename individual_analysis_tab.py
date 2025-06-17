@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (診療科目標値修正版)
+# individual_analysis_tab.py (クリーンアップ版)
 
 import streamlit as st
 import pandas as pd
@@ -24,34 +24,23 @@ except ImportError as e:
     get_unified_filter_config = None
 
 def find_department_code_in_targets(dept_name, target_dict, metric_name):
-    """
-    診療科名に対応する部門コードを目標値辞書から探す
-    
-    Args:
-        dept_name: 診療科名
-        target_dict: 目標値辞書
-        metric_name: 指標名
-        
-    Returns:
-        tuple: (部門コード, 目標値が見つかったかどうか)
-    """
+    """診療科名に対応する部門コードを目標値辞書から探す"""
     if not target_dict:
         return None, False
     
-    # 1. 直接一致をチェック
+    # 直接一致をチェック
     test_key = (str(dept_name).strip(), metric_name, '全日')
     if test_key in target_dict:
         return str(dept_name).strip(), True
     
-    # 2. 部分一致をチェック（診療科名が部門コードに含まれる場合）
+    # 部分一致をチェック
     dept_name_clean = str(dept_name).strip()
     for (dept_code, indicator, period), value in target_dict.items():
         if indicator == metric_name and period == '全日':
-            # 部門コードが診療科名を含む場合
             if dept_name_clean in str(dept_code) or str(dept_code) in dept_name_clean:
                 return str(dept_code), True
     
-    # 3. より柔軟な一致をチェック（スペースや特殊文字を無視）
+    # 正規化一致をチェック（スペースや特殊文字を無視）
     import re
     dept_name_normalized = re.sub(r'[^\w]', '', dept_name_clean)
     for (dept_code, indicator, period), value in target_dict.items():
@@ -74,7 +63,6 @@ def display_dataframe_with_title(title, df_data, key_suffix=""):
 def display_individual_analysis_tab(df_filtered_main):
     st.header("📊 個別分析")
 
-    # このグラフで分析する指標名を関数の先頭で定義
     METRIC_FOR_CHART = '日平均在院患者数'
 
     if not all([generate_filtered_summaries, create_forecast_dataframe, create_interactive_patient_chart,
@@ -121,7 +109,6 @@ def display_individual_analysis_tab(df_filtered_main):
             latest_data_date = pd.Timestamp(latest_data_date_from_df).normalize()
         else:
             latest_data_date = pd.to_datetime(latest_data_date_str_from_session, format="%Y年%m月%d日").normalize()
-        logger.info(f"個別分析: 予測基準日として {latest_data_date.strftime('%Y-%m-%d')} を使用します。")
     except Exception as e:
         logger.error(f"最新データ日付の処理中にエラー: {e}", exc_info=True)
         st.error(f"最新データ日付の処理中にエラーが発生しました。予測基準日として本日の日付を使用します。")
@@ -134,36 +121,24 @@ def display_individual_analysis_tab(df_filtered_main):
     filter_code_for_target = None
     filter_config = get_unified_filter_config() if get_unified_filter_config else {}
 
-    # デバッグ: フィルター設定の詳細を確認
-    logger.info(f"フィルター設定デバッグ: {filter_config}")
-    
+    # フィルター設定から対象コードを決定（複数のキー名に対応）
     if filter_config:
-        # 診療科フィルターをチェック（複数のキー名に対応）
         selected_departments = (filter_config.get('selected_departments', []) or 
                               filter_config.get('selected_depts', []))
         selected_wards = (filter_config.get('selected_wards', []) or 
                          filter_config.get('selected_ward', []))
         
-        logger.info(f"選択された診療科: {selected_departments} (数: {len(selected_departments) if selected_departments else 0})")
-        logger.info(f"選択された病棟: {selected_wards} (数: {len(selected_wards) if selected_wards else 0})")
-        
         if selected_departments and len(selected_departments) == 1:
             selected_dept_identifier = str(selected_departments[0]).strip()
             filter_code_for_target = selected_dept_identifier
             current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_identifier)}"
-            logger.info(f"診療科モード設定: {filter_code_for_target}")
-        
         elif selected_wards and len(selected_wards) == 1:
             selected_ward = str(selected_wards[0]).strip()
             filter_code_for_target = selected_ward
             current_filter_title_display = f"病棟: {selected_ward}"
-            logger.info(f"病棟モード設定: {filter_code_for_target}")
-        else:
-            logger.info("複数選択または未選択のため全体モードに設定")
 
     if filter_code_for_target is None:
         filter_code_for_target = "全体"
-        logger.info(f"最終的なfilter_code_for_target: {filter_code_for_target}")
 
     st.markdown(f"#### 分析結果: {current_filter_title_display}")
 
@@ -195,187 +170,89 @@ def display_individual_analysis_tab(df_filtered_main):
 
         target_val_all, target_val_weekday, target_val_holiday = None, None, None
         
-        period_col_name = None
-        indicator_col_name = None
-        
+        # 目標値の取得
         if target_data is not None and not target_data.empty:
-            if '区分' in target_data.columns:
-                period_col_name = '区分'
-            elif '期間区分' in target_data.columns:
-                period_col_name = '期間区分'
-            
-            if '指標タイプ' in target_data.columns:
-                indicator_col_name = '指標タイプ'
-
-        if target_data is not None and not target_data.empty and \
-           period_col_name and indicator_col_name and \
-           all(col in target_data.columns for col in ['部門コード', '目標値']):
-            
+            # 目標値辞書の構築
             if '_target_dict' not in st.session_state:
                 st.session_state._target_dict = {}
-                for _, row in target_data.iterrows():
-                    dept_code = str(row['部門コード']).strip()
-                    indicator = str(row[indicator_col_name]).strip()
-                    period = str(row[period_col_name]).strip()
-                    key = (dept_code, indicator, period)
-                    st.session_state._target_dict[key] = row['目標値']
+                period_col_name = '区分' if '区分' in target_data.columns else '期間区分'
+                indicator_col_name = '指標タイプ'
+                
+                if all(col in target_data.columns for col in ['部門コード', '目標値', period_col_name, indicator_col_name]):
+                    for _, row in target_data.iterrows():
+                        dept_code = str(row['部門コード']).strip()
+                        indicator = str(row[indicator_col_name]).strip()
+                        period = str(row[period_col_name]).strip()
+                        key = (dept_code, indicator, period)
+                        st.session_state._target_dict[key] = row['目標値']
             
-            if filter_code_for_target == "全体":
-                key_all_1 = ("000", METRIC_FOR_CHART, '全日')
-                key_all_2 = ("全体", METRIC_FOR_CHART, '全日')
-                target_val_all = st.session_state._target_dict.get(key_all_1, st.session_state._target_dict.get(key_all_2))
-                key_weekday_1 = ("000", METRIC_FOR_CHART, '平日')
-                key_weekday_2 = ("全体", METRIC_FOR_CHART, '平日')
-                target_val_weekday = st.session_state._target_dict.get(key_weekday_1, st.session_state._target_dict.get(key_weekday_2))
-                key_holiday_1 = ("000", METRIC_FOR_CHART, '休日')
-                key_holiday_2 = ("全体", METRIC_FOR_CHART, '休日')
-                target_val_holiday = st.session_state._target_dict.get(key_holiday_1, st.session_state._target_dict.get(key_holiday_2))
-            else:
-                # 診療科の場合は、適切な部門コードを見つける処理を追加
-                actual_dept_code = filter_code_for_target
-                
-                # 診療科の場合、目標値辞書から対応する部門コードを探す
-                selected_depts = (filter_config.get('selected_departments', []) or 
-                                filter_config.get('selected_depts', []))
-                if filter_config and selected_depts:
-                    dept_code_found, target_exists = find_department_code_in_targets(
-                        filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
-                    )
-                    if dept_code_found:
-                        actual_dept_code = dept_code_found
-                
-                key_all = (str(actual_dept_code), METRIC_FOR_CHART, '全日')
-                target_val_all = st.session_state._target_dict.get(key_all)
-                key_weekday = (str(actual_dept_code), METRIC_FOR_CHART, '平日')
-                target_val_weekday = st.session_state._target_dict.get(key_weekday)
-                key_holiday = (str(actual_dept_code), METRIC_FOR_CHART, '休日')
-                target_val_holiday = st.session_state._target_dict.get(key_holiday)
+            # 目標値の検索
+            if st.session_state._target_dict:
+                if filter_code_for_target == "全体":
+                    # 全体の目標値を検索
+                    key_all_1 = ("000", METRIC_FOR_CHART, '全日')
+                    key_all_2 = ("全体", METRIC_FOR_CHART, '全日')
+                    target_val_all = st.session_state._target_dict.get(key_all_1, st.session_state._target_dict.get(key_all_2))
+                    
+                    key_weekday_1 = ("000", METRIC_FOR_CHART, '平日')
+                    key_weekday_2 = ("全体", METRIC_FOR_CHART, '平日')
+                    target_val_weekday = st.session_state._target_dict.get(key_weekday_1, st.session_state._target_dict.get(key_weekday_2))
+                    
+                    key_holiday_1 = ("000", METRIC_FOR_CHART, '休日')
+                    key_holiday_2 = ("全体", METRIC_FOR_CHART, '休日')
+                    target_val_holiday = st.session_state._target_dict.get(key_holiday_1, st.session_state._target_dict.get(key_holiday_2))
+                else:
+                    # 診療科/病棟固有の目標値を検索
+                    actual_dept_code = filter_code_for_target
+                    
+                    # 診療科の場合、目標値辞書から対応する部門コードを探す
+                    selected_depts = (filter_config.get('selected_departments', []) or 
+                                    filter_config.get('selected_depts', []))
+                    if selected_depts:
+                        dept_code_found, target_exists = find_department_code_in_targets(
+                            filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
+                        )
+                        if dept_code_found:
+                            actual_dept_code = dept_code_found
+                    
+                    key_all = (str(actual_dept_code), METRIC_FOR_CHART, '全日')
+                    target_val_all = st.session_state._target_dict.get(key_all)
+                    key_weekday = (str(actual_dept_code), METRIC_FOR_CHART, '平日')
+                    target_val_weekday = st.session_state._target_dict.get(key_weekday)
+                    key_holiday = (str(actual_dept_code), METRIC_FOR_CHART, '休日')
+                    target_val_holiday = st.session_state._target_dict.get(key_holiday)
 
-            if target_val_all is not None:
-                try: target_val_all = float(target_val_all)
-                except (ValueError, TypeError): target_val_all = None
-            if target_val_weekday is not None:
-                try: target_val_weekday = float(target_val_weekday)
-                except (ValueError, TypeError): target_val_weekday = None
-            if target_val_holiday is not None:
-                try: target_val_holiday = float(target_val_holiday)
-                except (ValueError, TypeError): target_val_holiday = None
+                # 目標値の型変換
+                for target_val in [target_val_all, target_val_weekday, target_val_holiday]:
+                    if target_val is not None:
+                        try: 
+                            target_val = float(target_val)
+                        except (ValueError, TypeError): 
+                            target_val = None
 
+        # デバッグ機能（簡略版）
         if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
             st.markdown("---")
-            st.subheader("詳細デバッグ: 目標値辞書と検索キーの比較")
+            st.subheader("目標値設定デバッグ")
 
-            # フィルター設定のデバッグ情報を追加
-            st.markdown("##### 0. フィルター設定デバッグ")
-            if filter_config:
-                st.write("**フィルター設定:**")
-                st.json(filter_config)
-                
-                # 複数のキー名に対応
-                selected_departments = (filter_config.get('selected_departments', []) or 
-                                      filter_config.get('selected_depts', []))
-                selected_wards = (filter_config.get('selected_wards', []) or 
-                                filter_config.get('selected_ward', []))
-                
-                st.write(f"**検出された診療科:** {selected_departments} (数: {len(selected_departments) if selected_departments else 0})")
-                st.write(f"**検出された病棟:** {selected_wards} (数: {len(selected_wards) if selected_wards else 0})")
-                st.write(f"**最終的なfilter_code_for_target:** `{filter_code_for_target}`")
-                
-                # キー名の確認
-                if 'selected_depts' in filter_config:
-                    st.info("ℹ️ フィルター設定は `selected_depts` キーを使用しています")
-                if 'selected_departments' in filter_config:
-                    st.info("ℹ️ フィルター設定は `selected_departments` キーを使用しています")
-                
-                # なぜ「全体」になったかの判定ロジックを表示
-                if selected_departments and len(selected_departments) == 1:
-                    st.success("✅ 診療科が単一選択されています")
-                elif selected_departments and len(selected_departments) > 1:
-                    st.warning("⚠️ 診療科が複数選択されているため、全体扱いになります")
-                elif not selected_departments:
-                    st.info("ℹ️ 診療科が選択されていません")
-                
-                if selected_wards and len(selected_wards) == 1:
-                    st.success("✅ 病棟が単一選択されています")
-                elif selected_wards and len(selected_wards) > 1:
-                    st.warning("⚠️ 病棟が複数選択されているため、全体扱いになります")
-                elif not selected_wards:
-                    st.info("ℹ️ 病棟が選択されていません")
-            else:
-                st.error("❌ フィルター設定が取得できませんでした")
-
-            st.markdown("##### 1. プログラムが使用している検索キー")
+            st.markdown("##### フィルター状況")
+            st.write(f"**分析対象:** {current_filter_title_display}")
+            st.write(f"**検索キー:** `('{filter_code_for_target}', '{METRIC_FOR_CHART}', '全日')`")
             
-            # 診療科の場合の部門コード変換状況を表示
-            selected_depts_for_debug = (filter_config.get('selected_departments', []) or 
-                                      filter_config.get('selected_depts', []))
-            if filter_config and selected_depts_for_debug:
-                original_dept_name = filter_code_for_target
-                dept_code_found, target_exists = find_department_code_in_targets(
-                    filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
-                )
-                
-                st.info(f"**選択された診療科名:** `{original_dept_name}`")
-                if dept_code_found:
-                    st.success(f"**対応する部門コード:** `{dept_code_found}` (変換成功)")
-                    search_key_all = (str(dept_code_found), METRIC_FOR_CHART, '全日')
-                else:
-                    st.warning(f"**部門コード変換:** 失敗。元の診療科名を使用")
-                    search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
+            if target_val_all is not None:
+                st.success(f"✅ 目標値が見つかりました: {target_val_all}")
             else:
-                search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
-            
-            st.info(f"**全日用検索キー:** `{search_key_all}`")
-
-            if '_target_dict' in st.session_state:
-                st.markdown("##### 2. 検索キーの存在チェック結果")
-                if search_key_all in st.session_state._target_dict:
-                    st.success(f"✅ 検索キーは目標値辞書内に **存在します**。")
-                    st.write(f"取得された目標値: `{st.session_state._target_dict.get(search_key_all)}`")
-                else:
-                    st.error(f"❌ 検索キーは目標値辞書内に **存在しません**。")
-                    st.write("**原因：** フィルターで選択された診療科名と、目標値ファイルの「部門コード」列のテキストが完全一致していません（余分なスペース等も不一致の原因となります）。")
-                    st.write("**解決策：**")
-                    st.write("1. 以下の「利用可能なキー」のリストから、対応する正しい「部門コード」のテキストをコピーしてください。")
-                    st.write("2. 日々の実績データ（入退院クロス.csvなど）の「診療科名」列を、コピーしたテキストに修正・統一してください。")
-
-                st.markdown("##### 3. 目標値ファイルから読み込まれた利用可能なキー（部門コード）のリスト")
-                st.caption(f"指標タイプが「{METRIC_FOR_CHART}」のものに絞って表示しています。")
+                st.warning("❌ 目標値が見つかりませんでした")
                 
-                available_keys = {k: v for k, v in st.session_state._target_dict.items() if k[1] == METRIC_FOR_CHART}
-                
-                if not available_keys:
-                    st.warning(f"辞書内に「{METRIC_FOR_CHART}」の指標を持つキーが見つかりませんでした。")
-                else:
-                    key_df_data = []
-                    for key, value in available_keys.items():
-                        key_df_data.append({
-                            "部門コード (キー)": key[0],
-                            "期間区分 (キー)": key[2],
-                            "目標値": value
-                        })
-                    key_df = pd.DataFrame(key_df_data)
-                    st.dataframe(key_df, use_container_width=True)
-                    
-                    # 診療科名との一致候補を表示
-                    selected_depts_for_debug = (filter_config.get('selected_departments', []) or 
-                                              filter_config.get('selected_depts', []))
-                    if filter_config and selected_depts_for_debug:
-                        st.markdown("##### 4. 診療科名との一致候補")
-                        dept_name = filter_code_for_target
-                        candidates = []
-                        for key in available_keys.keys():
-                            dept_code = key[0]
-                            if str(dept_name).strip() in str(dept_code) or str(dept_code) in str(dept_name).strip():
-                                candidates.append(dept_code)
-                        
-                        if candidates:
-                            st.success(f"部分一致候補: {candidates}")
-                        else:
-                            st.warning("部分一致する候補が見つかりませんでした。")
-            else:
-                st.error("目標値辞書(_target_dict)が作成されていません。")
+                if '_target_dict' in st.session_state:
+                    st.markdown("##### 利用可能な部門コード")
+                    available_keys = {k: v for k, v in st.session_state._target_dict.items() if k[1] == METRIC_FOR_CHART and k[2] == '全日'}
+                    if available_keys:
+                        key_df_data = [{"部門コード": key[0], "目標値": value} for key, value in available_keys.items()]
+                        key_df = pd.DataFrame(key_df_data)
+                        st.dataframe(key_df, use_container_width=True)
 
+        # グラフ表示
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
         
         with graph_tab1:
