@@ -1,4 +1,8 @@
-# config.py - アプリケーション設定値の管理（更新版）
+# 1. config.py に追加
+PDF_DEBUG_MODE = False  # 本番環境ではFalse
+PDF_CACHE_SIZE_MB = 500  # キャッシュサイズ制限
+PDF_MAX_WORKERS = 4  # 最大ワーカー数制限
+
 
 # ===== 基本設定 =====
 APP_VERSION = "1.1"  # バージョンアップ

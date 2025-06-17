@@ -19,8 +19,10 @@ from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 import matplotlib.font_manager
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')  # 非インタラクティブバックエンド
+import matplotlib.pyplot as plt
+plt.ioff()  # インタラクティブモードをオフ
 
 # --- フォント設定 ---
 FONT_DIR = 'fonts'
@@ -30,6 +32,10 @@ REPORTLAB_FONT_NAME = 'NotoSansJP_RL'
 MATPLOTLIB_FONT_NAME_FALLBACK = 'sans-serif'
 MATPLOTLIB_FONT_NAME = None
 
+def debug_print(message):
+    if PDF_DEBUG_MODE:
+        print(message)
+
 def register_fonts():
     global MATPLOTLIB_FONT_NAME
     font_registered_rl = False
@@ -38,10 +44,10 @@ def register_fonts():
     if os.path.exists(FONT_PATH):
         try:
             pdfmetrics.registerFont(TTFont(REPORTLAB_FONT_NAME, FONT_PATH))
-            print(f"ReportLab font '{REPORTLAB_FONT_NAME}' ({FONT_PATH}) registered.")
+            debug_print(f"ReportLab font '{REPORTLAB_FONT_NAME}' ({FONT_PATH}) registered.")
             font_registered_rl = True
         except Exception as e:
-            print(f"Failed to register ReportLab font '{FONT_PATH}': {e}")
+            debug_print(f"Failed to register ReportLab font '{FONT_PATH}': {e}")
 
         try:
             font_entry = matplotlib.font_manager.FontEntry(
@@ -51,19 +57,25 @@ def register_fonts():
                  matplotlib.font_manager.fontManager.ttflist.insert(0, font_entry)
 
             MATPLOTLIB_FONT_NAME = font_entry.name
-            print(f"Matplotlib font '{MATPLOTLIB_FONT_NAME}' prepared for use from {FONT_PATH}.")
+            debug_print(f"Matplotlib font '{MATPLOTLIB_FONT_NAME}' prepared for use from {FONT_PATH}.")
             font_registered_mpl = True
         except Exception as e:
-            print(f"Failed to prepare Matplotlib font '{FONT_PATH}' for pdf_generator: {e}")
+            debug_print(f"Failed to prepare Matplotlib font '{FONT_PATH}' for pdf_generator: {e}")
             MATPLOTLIB_FONT_NAME = None
     else:
-        print(f"Font file not found at '{FONT_PATH}'. Using fallback fonts for Matplotlib.")
+        debug_print(f"Font file not found at '{FONT_PATH}'. Using fallback fonts for Matplotlib.")
         MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK
 
     if not font_registered_rl:
-        print(f"ReportLab will use its default font or Helvetica if '{REPORTLAB_FONT_NAME}' was intended as NotoSansJP.")
+        debug_print(f"ReportLab will use its default font or Helvetica if '{REPORTLAB_FONT_NAME}' was intended as NotoSansJP.")
 
 register_fonts()
+
+def cleanup_memory():
+    """メモリの積極的な解放"""
+    plt.close('all')  # すべてのmatplotlib図を閉じる
+    gc.collect()  # ガベージコレクション実行
+    return
 
 # --- キャッシュ設定 ---
 def get_chart_cache():
@@ -99,7 +111,7 @@ def filter_excluded_wards(data):
         filtered_data = data[~data['病棟コード'].isin(EXCLUDED_WARDS)]
         removed_count = original_count - len(filtered_data)
         if removed_count > 0:
-            print(f"PDF生成: 除外病棟フィルタリングで{removed_count}件のレコードを除外")
+            debug_print(f"PDF生成: 除外病棟フィルタリングで{removed_count}件のレコードを除外")
         return filtered_data
     
     return data
@@ -183,11 +195,12 @@ def create_alos_chart_for_pdf(
         buf.seek(0)
         return buf
     except Exception as e:
-        print(f"Error in create_alos_chart_for_pdf for {title_prefix}: {e}")
-        import traceback; print(traceback.format_exc())
+        debug_print(f"Error in create_alos_chart_for_pdf for {title_prefix}: {e}")
+        import traceback; debug_print(traceback.format_exc())
         return None
     finally:
         if fig: plt.close(fig)
+        plt.close('all')  # ← これを追加
         gc.collect()
 
 def create_patient_chart_with_target_wrapper(
@@ -229,14 +242,14 @@ def create_patient_chart_with_target_wrapper(
             try:
                 target_val_float = float(target_value)
                 if target_val_float > 0:  # 0より大きい場合のみ表示
-                    print(f"PDF目標値ライン追加: {target_val_float} (グラフ: {title})")
+                    debug_print(f"PDF目標値ライン追加: {target_val_float} (グラフ: {title})")
                     ax.axhline(y=target_val_float, color='#9b59b6', linestyle='-.', linewidth=1.2, label=f'目標値: {target_val_float:.1f}')
                     caution_threshold = target_val_float * 0.97
                     ax.fill_between(grouped["日付"], caution_threshold, target_val_float, color='orange', alpha=0.15, label='注意ゾーン(目標未達)')
                 else:
-                    print(f"PDF: 目標値が0以下のためスキップ: {target_val_float}")
+                    debug_print(f"PDF: 目標値が0以下のためスキップ: {target_val_float}")
             except (ValueError, TypeError): 
-                print(f"Warning: Target value '{target_value}' for {title} not convertible to float.")
+                debug_print(f"Warning: Target value '{target_value}' for {title} not convertible to float.")
 
         ax.set_title(title, fontproperties=font_prop, fontsize=11)
         ax.set_xlabel('日付', fontproperties=font_prop, fontsize=9)
@@ -257,11 +270,12 @@ def create_patient_chart_with_target_wrapper(
         buf.seek(0)
         return buf
     except Exception as e:
-        print(f"Error in create_patient_chart_with_target_wrapper ('{title}'): {e}")
-        import traceback; print(traceback.format_exc())
+        debug_print(f"Error in create_patient_chart_with_target_wrapper ('{title}'): {e}")
+        import traceback; debug_print(traceback.format_exc())
         return None
     finally:
         if fig: plt.close(fig)
+        plt.close('all')  # ← これを追加
         gc.collect()
 
 def create_dual_axis_chart_for_pdf(
@@ -329,11 +343,12 @@ def create_dual_axis_chart_for_pdf(
         buf.seek(0)
         return buf
     except Exception as e:
-        print(f"Error in create_dual_axis_chart_for_pdf ('{title}'): {e}")
-        import traceback; print(traceback.format_exc())
+        debug_print(f"Error in create_dual_axis_chart_for_pdf ('{title}'): {e}")
+        import traceback; debug_print(traceback.format_exc())
         return None
     finally:
         if fig: plt.close(fig)
+        plt.close('all')  # ← これを追加
         gc.collect()
 
 # --- 目標値取得関数（強化版） ---
@@ -346,12 +361,12 @@ def get_target_values_for_pdf(target_data, filter_code="全体", metric_name="�
     }
     
     if target_data is None or target_data.empty:
-        print(f"目標値データが空です。filter_code: {filter_code}")
+        debug_print(f"目標値データが空です。filter_code: {filter_code}")
         return target_values
     
     try:
-        print(f"目標値検索開始 - filter_code: {filter_code}, metric: {metric_name}")
-        print(f"目標データ列: {list(target_data.columns)}")
+        debug_print(f"目標値検索開始 - filter_code: {filter_code}, metric: {metric_name}")
+        debug_print(f"目標データ列: {list(target_data.columns)}")
         
         # 目標値辞書の構築（複数の列名パターンに対応）
         target_dict = {}
@@ -376,7 +391,7 @@ def get_target_values_for_pdf(target_data, filter_code="全体", metric_name="�
         # 基本的な列の存在確認
         required_cols = ['部門コード', '目標値']
         if not all(col in target_data.columns for col in required_cols):
-            print(f"必要な列が不足: {required_cols}")
+            debug_print(f"必要な列が不足: {required_cols}")
             return target_values
         
         # 目標値辞書の構築
@@ -397,9 +412,9 @@ def get_target_values_for_pdf(target_data, filter_code="全体", metric_name="�
                 
                 key = (dept_code, indicator, period)
                 target_dict[key] = target_val
-                print(f"目標値登録: {key} = {target_val}")
+                debug_print(f"目標値登録: {key} = {target_val}")
         
-        print(f"構築された目標値辞書: {len(target_dict)}件")
+        debug_print(f"構築された目標値辞書: {len(target_dict)}件")
         
         # 目標値の検索（拡張版）
         if target_dict:
@@ -423,7 +438,7 @@ def get_target_values_for_pdf(target_data, filter_code="全体", metric_name="�
                             if key in target_dict:
                                 try:
                                     target_values[period_type] = float(target_dict[key])
-                                    print(f"目標値発見: {key} = {target_values[period_type]}")
+                                    debug_print(f"目標値発見: {key} = {target_values[period_type]}")
                                     break
                                 except (ValueError, TypeError):
                                     continue
@@ -437,14 +452,14 @@ def get_target_values_for_pdf(target_data, filter_code="全体", metric_name="�
         # 結果のログ出力
         for period_type, value in target_values.items():
             if value is not None:
-                print(f"最終目標値 ({period_type}): {value}")
+                debug_print(f"最終目標値 ({period_type}): {value}")
             else:
-                print(f"目標値未発見 ({period_type})")
+                debug_print(f"目標値未発見 ({period_type})")
                     
     except Exception as e:
-        print(f"目標値取得エラー: {e}")
+        debug_print(f"目標値取得エラー: {e}")
         import traceback
-        print(traceback.format_exc())
+        debug_print(traceback.format_exc())
     
     return target_values
 
@@ -471,7 +486,7 @@ def create_pdf(
         ward_codes = chart_data['病棟コード'].astype(str).unique()
         excluded_found = [ward for ward in ward_codes if ward in EXCLUDED_WARDS]
         if excluded_found:
-            print(f"PDF生成スキップ: 除外病棟 {excluded_found} が残存しています")
+            debug_print(f"PDF生成スキップ: 除外病棟 {excluded_found} が残存しています")
             return None
         
         # 除外病棟の検出をタイトルからも確認
@@ -485,15 +500,15 @@ def create_pdf(
                 ward_variants = [ward_code_from_title, f"0{ward_code_from_title}", f"00{ward_code_from_title}"]
                 for variant in ward_variants:
                     if variant in EXCLUDED_WARDS:
-                        print(f"PDF生成スキップ: タイトルから除外病棟 {variant} を検出")
+                        debug_print(f"PDF生成スキップ: タイトルから除外病棟 {variant} を検出")
                         return None
         
         if original_count > filtered_count:
-            print(f"除外病棟フィルタリング: {original_count - filtered_count}件除外")
+            debug_print(f"除外病棟フィルタリング: {original_count - filtered_count}件除外")
     
     # ===== 目標値取得（強化版） =====
     target_values = get_target_values_for_pdf(target_data, filter_code)
-    print(f"取得した目標値: {target_values}")
+    debug_print(f"取得した目標値: {target_values}")
     
     pdf_start_time = time.time()
     elements = []
@@ -697,6 +712,7 @@ def create_pdf(
     doc.build(elements)
     buffer.seek(0)
     gc.collect()
+    cleanup_memory()  # ← これを追加
     return buffer
 
 def create_landscape_pdf(
@@ -718,7 +734,7 @@ def create_landscape_pdf(
         ward_codes = chart_data['病棟コード'].astype(str).unique()
         excluded_found = [ward for ward in ward_codes if ward in EXCLUDED_WARDS]
         if excluded_found:
-            print(f"PDF生成スキップ: 除外病棟 {excluded_found} が残存しています")
+            debug_print(f"PDF生成スキップ: 除外病棟 {excluded_found} が残存しています")
             return None
         if "病棟別" in title_prefix:
             import re
@@ -728,10 +744,10 @@ def create_landscape_pdf(
                 ward_variants = [ward_code_from_title, f"0{ward_code_from_title}", f"00{ward_code_from_title}"]
                 for variant in ward_variants:
                     if variant in EXCLUDED_WARDS:
-                        print(f"PDF生成スキップ: タイトルから除外病棟 {variant} を検出")
+                        debug_print(f"PDF生成スキップ: タイトルから除外病棟 {variant} を検出")
                         return None
         if original_count > filtered_count:
-            print(f"除外病棟フィルタリング: {original_count - filtered_count}件除外")
+            debug_print(f"除外病棟フィルタリング: {original_count - filtered_count}件除外")
     
     # ===== 目標値取得（強化版） =====
     target_values = get_target_values_for_pdf(target_data, filter_code)
@@ -830,6 +846,7 @@ def create_landscape_pdf(
     doc.build(elements)
     buffer.seek(0)
     gc.collect()
+    cleanup_memory()  # ← これを追加
     return buffer
 
 def create_department_tables(chart_data, latest_date, target_data=None, filter_code=None, para_style=None):
@@ -842,7 +859,7 @@ def create_department_tables(chart_data, latest_date, target_data=None, filter_c
     chart_data_filtered = filter_excluded_wards(chart_data)
     
     if chart_data_filtered.empty:
-        print("除外病棟フィルタリング後、データが空になりました")
+        debug_print("除外病棟フィルタリング後、データが空になりました")
         return [], [], []
     
     # 既存の処理（chart_data_filteredを使用）

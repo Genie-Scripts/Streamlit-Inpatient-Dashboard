@@ -10,6 +10,7 @@ import tempfile
 import gc
 import psutil
 import re
+import matplotlib.pyplot as plt
 
 from forecast import generate_filtered_summaries, create_forecast_dataframe
 from config import EXCLUDED_WARDS  # 追加: 除外病棟設定をインポート
@@ -26,55 +27,168 @@ from pdf_generator import (
     filter_excluded_wards  # 追加: 除外病棟フィルタリング関数
 )
 
-def should_skip_ward(ward_code, display_name):
-    """病棟が除外対象かどうかを判定する（修正版）"""
-    if not EXCLUDED_WARDS:
+EXCLUDED_WARDS_SET = set(EXCLUDED_WARDS) if EXCLUDED_WARDS else set()
+
+def cleanup_memory():
+    """メモリの積極的な解放"""
+    plt.close('all')
+    gc.collect()
+
+def should_skip_ward_optimized(ward_code, display_name=None):
+    """最適化された除外病棟チェック"""
+    if not EXCLUDED_WARDS_SET:
         return False
     
-    # 文字列として扱い、先頭の0を保持
     ward_str = str(ward_code).strip()
     
-    # 直接的な一致チェック
-    if ward_str in EXCLUDED_WARDS:
-        print(f"除外病棟検出（直接一致）: {ward_str}")
+    # 直接チェック（O(1)）
+    if ward_str in EXCLUDED_WARDS_SET:
         return True
     
-    # 表示名からの抽出チェック（正規表現を修正）
+    # 0パディングバリエーションチェック
+    if not ward_str.startswith('0'):
+        if f"0{ward_str}" in EXCLUDED_WARDS_SET or f"00{ward_str}" in EXCLUDED_WARDS_SET:
+            return True
+    
+    # 表示名からの抽出（必要な場合のみ）
     if display_name and "病棟" in display_name:
-        # 数字とアルファベットを含む病棟コードを抽出（先頭の0も保持）
         match = re.search(r'(\d+[A-Za-z]*?)病棟', display_name)
         if match:
-            ward_code_from_name = match.group(1)
-            
-            # 抽出された病棟コードと除外リストを比較
-            if ward_code_from_name in EXCLUDED_WARDS:
-                print(f"除外病棟検出（表示名から）: {ward_code_from_name} in {display_name}")
-                return True
-            
-            # 先頭に0を追加したパターンもチェック
-            for i in range(1, 3):  # 最大2つの0を追加してチェック
-                padded_code = ward_code_from_name.zfill(len(ward_code_from_name) + i)
-                if padded_code in EXCLUDED_WARDS:
-                    print(f"除外病棟検出（0パディング）: {padded_code} matches {ward_code_from_name}")
-                    return True
-            
-            # 逆に先頭の0を削除したパターンもチェック
-            if ward_code_from_name.startswith('0'):
-                stripped_code = ward_code_from_name.lstrip('0')
-                if f"0{stripped_code}" in EXCLUDED_WARDS or f"00{stripped_code}" in EXCLUDED_WARDS:
-                    print(f"除外病棟検出（0削除パターン）: {stripped_code} related to excluded")
-                    return True
-    
-    # 病棟コード自体の0パディングバリエーションをチェック
-    # 例：3B -> 03B, 003B
-    if not ward_str.startswith('0'):
-        for i in range(1, 3):
-            padded = ward_str.zfill(len(ward_str) + i)
-            if padded in EXCLUDED_WARDS:
-                print(f"除外病棟検出（コードパディング）: {padded} matches {ward_str}")
+            extracted = match.group(1)
+            if extracted in EXCLUDED_WARDS_SET:
                 return True
     
     return False
+
+
+# 2. グラフ生成の並列化改善
+def prepare_graph_buffers_parallel(task_definitions, df_main, target_index, latest_date, graph_days, progress_callback=None):
+    """グラフバッファの並列準備"""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    
+    total_tasks = len(task_definitions)
+    completed = 0
+    
+    # ワーカー数の最適化
+    max_workers = min(multiprocessing.cpu_count(), 4)
+    
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        
+        for task_def in task_definitions:
+            if task_def["type"] == "ward" and should_skip_ward_optimized(task_def["value"], task_def["display_name"]):
+                continue
+            
+            future = executor.submit(
+                generate_task_graphs,
+                task_def,
+                target_index,
+                latest_date,
+                graph_days
+            )
+            futures[future] = task_def
+        
+        results = []
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    results.append(result)
+                
+                completed += 1
+                if progress_callback and total_tasks > 0:
+                    progress = 0.1 + (completed / total_tasks) * 0.15
+                    progress_callback(progress, f"グラフ準備中: {completed}/{total_tasks}")
+                    
+            except Exception as e:
+                print(f"グラフ生成エラー: {e}")
+        
+        return results
+
+
+# 3. メモリ効率の改善
+def process_pdf_batch_optimized(df_main, mode="all", landscape=False, target_data=None, 
+                               progress_callback=None, max_workers=None, fast_mode=True):
+    """最適化されたバッチPDF生成"""
+    
+    # 早期の除外病棟フィルタリング
+    if df_main is not None and not df_main.empty:
+        df_main = df_main[~df_main['病棟コード'].astype(str).isin(EXCLUDED_WARDS_SET)]
+        
+        if df_main.empty:
+            if progress_callback:
+                progress_callback(1.0, "除外病棟フィルタリング後データなし")
+            return BytesIO()
+    
+    # 目標値インデックスの作成（一度だけ）
+    target_index = batch_create_target_index(target_data) if target_data is not None else {}
+    
+    # タスク定義の準備
+    task_definitions = prepare_task_definitions(df_main, mode)
+    
+    # グラフの並列生成
+    graph_days = ["90"] if fast_mode else ["90", "180"]
+    graph_results = prepare_graph_buffers_parallel(
+        task_definitions, 
+        df_main, 
+        target_index, 
+        pd.Timestamp.now(), 
+        graph_days,
+        progress_callback
+    )
+    
+    # PDFの並列生成
+    pdf_results = generate_pdfs_parallel(
+        graph_results, 
+        df_main, 
+        target_data, 
+        landscape, 
+        max_workers,
+        progress_callback
+    )
+    
+    # ZIP作成
+    return create_zip_archive(pdf_results, progress_callback)
+
+
+# 4. キャッシュ効率の改善
+class OptimizedChartCache:
+    """最適化されたグラフキャッシュ"""
+    def __init__(self, max_size_mb=500):
+        self.cache = {}
+        self.max_size_bytes = max_size_mb * 1024 * 1024
+        self.current_size = 0
+        self.access_count = {}
+        
+    def get(self, key):
+        if key in self.cache:
+            self.access_count[key] = self.access_count.get(key, 0) + 1
+            return self.cache[key]
+        return None
+    
+    def put(self, key, value):
+        if not value:
+            return
+            
+        value_size = len(value) if isinstance(value, bytes) else 0
+        
+        # サイズ制限チェック
+        while self.current_size + value_size > self.max_size_bytes and self.cache:
+            # LRU削除
+            lru_key = min(self.access_count.items(), key=lambda x: x[1])[0]
+            self._remove(lru_key)
+        
+        self.cache[key] = value
+        self.current_size += value_size
+        self.access_count[key] = 1
+    
+    def _remove(self, key):
+        if key in self.cache:
+            value = self.cache[key]
+            value_size = len(value) if isinstance(value, bytes) else 0
+            self.current_size -= value_size
+            del self.cache[key]
+            del self.access_count[key]
 
 def process_pdf_in_worker_revised(
     df_path, filter_type, filter_value, display_name, latest_date_str, landscape,
@@ -92,7 +206,7 @@ def process_pdf_in_worker_revised(
         # ===== 除外病棟の早期チェック =====
         if filter_type == "ward":
             if should_skip_ward(filter_value, display_name):
-                print(f"PID {pid}: 除外病棟のためスキップ - {filter_value} ({display_name})")
+                debug_print(f"PID {pid}: 除外病棟のためスキップ - {filter_value} ({display_name})")
                 return None
 
         df_worker = pd.read_feather(df_path)
@@ -122,7 +236,7 @@ def process_pdf_in_worker_revised(
             current_data_for_tables_worker = filter_excluded_wards(current_data_for_tables_worker)
             
             if current_data_for_tables_worker.empty:
-                print(f"PID {pid}: 除外病棟フィルタリング後データが空 - {title_prefix_for_pdf}")
+                debug_print(f"PID {pid}: 除外病棟フィルタリング後データが空 - {title_prefix_for_pdf}")
                 return None
             
             # 除外病棟の残存チェック
@@ -130,11 +244,11 @@ def process_pdf_in_worker_revised(
                 remaining_wards = current_data_for_tables_worker['病棟コード'].astype(str).unique()
                 excluded_found = [ward for ward in remaining_wards if ward in EXCLUDED_WARDS]
                 if excluded_found:
-                    print(f"PID {pid}: 除外病棟が残存 - {excluded_found} in {title_prefix_for_pdf}")
+                    debug_print(f"PID {pid}: 除外病棟が残存 - {excluded_found} in {title_prefix_for_pdf}")
                     return None
         
         if current_data_for_tables_worker.empty:
-            print(f"PID {pid}: フィルタ後データが空 - {title_prefix_for_pdf}")
+            debug_print(f"PID {pid}: フィルタ後データが空 - {title_prefix_for_pdf}")
             return None
             
         summaries_worker = generate_filtered_summaries(
@@ -144,7 +258,7 @@ def process_pdf_in_worker_revised(
         )
         
         if not summaries_worker:
-            print(f"PID {pid}: 集計データ生成失敗 - {title_prefix_for_pdf}")
+            debug_print(f"PID {pid}: 集計データ生成失敗 - {title_prefix_for_pdf}")
             return None
 
         forecast_df_for_pdf = create_forecast_dataframe(
@@ -174,15 +288,20 @@ def process_pdf_in_worker_revised(
         
         # メモリ解放
         del df_worker, current_data_for_tables_worker, summaries_worker, forecast_df_for_pdf, target_data_worker
+        cleanup_memory()  # ← これを追加
         gc.collect()
         
         return (title_prefix_for_pdf, pdf_bytes_io_result) if pdf_bytes_io_result else None
 
     except Exception as e:
-        print(f"PID {os.getpid()}: Error in worker for {filter_type} {filter_value} ('{display_name}'): {e}")
+        debug_print(f"PID {os.getpid()}: Error in worker for {filter_type} {filter_value} ('{display_name}'): {e}")
         import traceback
-        print(traceback.format_exc())
+        cleanup_memory()  # ← これを追加
+        debug_print(traceback.format_exc())
         return None
+    finally:
+        cleanup_memory()  # ← finally節を追加
+
 
 def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, target_data_main=None, 
                                     progress_callback=None, max_workers=None, fast_mode=True):
@@ -197,10 +316,10 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
         filtered_count = len(df_main)
         
         if original_count > filtered_count:
-            print(f"バッチ処理: {original_count - filtered_count}件の除外病棟データを削除")
+            debug_print(f"バッチ処理: {original_count - filtered_count}件の除外病棟データを削除")
         
         if df_main.empty:
-            print("バッチ処理: 除外病棟フィルタリング後、データが空になりました")
+            debug_print("バッチ処理: 除外病棟フィルタリング後、データが空になりました")
             if progress_callback: progress_callback(1.0, "除外病棟フィルタリング後データなし")
             return BytesIO()
 
@@ -242,7 +361,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             if not should_skip_ward(ward, display_name):
                 unique_wards_filtered.append(ward)
             else:
-                print(f"バッチ処理: 除外病棟をスキップ - {ward} ({display_name})")
+                debug_print(f"バッチ処理: 除外病棟をスキップ - {ward} ({display_name})")
         unique_wards = unique_wards_filtered
         
         for ward in unique_wards:
@@ -279,7 +398,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                 for ward_val in unique_wards:
                     # ===== 除外病棟の再チェック（改善版） =====
                     if should_skip_ward(ward_val, ward_display_map.get(ward_val, ward_val)):
-                        print(f"バッチ処理: 除外病棟をスキップ - {ward_val}")
+                        debug_print(f"バッチ処理: 除外病棟をスキップ - {ward_val}")
                         continue
                         
                     task_definitions_list.append({
@@ -307,13 +426,13 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                 if task_type == "ward" and not str(task_value).startswith('0'):
                     search_codes.extend([f"0{task_value}", f"00{task_value}"])
             
-            print(f"目標値検索: type={task_type}, value={task_value}, search_codes={search_codes}")
+            debug_print(f"目標値検索: type={task_type}, value={task_value}, search_codes={search_codes}")
             
             for search_code in search_codes:
                 # 部門コードを文字列として比較
                 target_rows_df = target_data_df[target_data_df['部門コード'].astype(str).str.strip() == search_code.strip()]
                 if not target_rows_df.empty:
-                    print(f"目標値発見: {search_code} -> {len(target_rows_df)}行")
+                    debug_print(f"目標値発見: {search_code} -> {len(target_rows_df)}行")
                     for _, row_t in target_rows_df.iterrows():
                         val_t = row_t.get('目標値')
                         if pd.notna(val_t):
@@ -322,13 +441,13 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                                 period_str = str(row_t.get('区分', ''))
                                 if '全日' in period_str or '全て' in period_str: 
                                     t_all = val_float
-                                    print(f"  全日目標値: {val_float}")
+                                    debug_print(f"  全日目標値: {val_float}")
                                 elif '平日' in period_str: 
                                     t_wd = val_float
-                                    print(f"  平日目標値: {val_float}")
+                                    debug_print(f"  平日目標値: {val_float}")
                                 elif '休日' in period_str or '祝日' in period_str: 
                                     t_hd = val_float
-                                    print(f"  休日目標値: {val_float}")
+                                    debug_print(f"  休日目標値: {val_float}")
                             except (ValueError, TypeError):
                                 continue
                     break  # 一つでも見つかったら終了
@@ -340,7 +459,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             # ===== 除外病棟の最終チェック =====
             if task_def_item["type"] == "ward":
                 if should_skip_ward(task_def_item["value"], task_def_item["display_name"]):
-                    print(f"グラフ生成段階で除外病棟をスキップ - {task_def_item['value']}")
+                    debug_print(f"グラフ生成段階で除外病棟をスキップ - {task_def_item['value']}")
                     continue
                     
             graph_buffers_for_task = {"alos": {}, "patient_all": {}, "patient_weekday": {}, "patient_holiday": {}, "dual_axis": {}}
@@ -348,7 +467,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             
             # データが空の場合はスキップ
             if data_for_current_task_graphs.empty:
-                print(f"グラフ生成: データが空のためスキップ - {task_def_item['display_name']}")
+                debug_print(f"グラフ生成: データが空のためスキップ - {task_def_item['display_name']}")
                 continue
                 
             display_name_for_graphs = task_def_item["display_name"]
@@ -386,7 +505,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                     key = get_pdf_gen_chart_cache_key(f"Patient_{type_key}_{display_name_for_graphs}", days_val_int, target_val, f"patient_{type_key}_pdf", compute_pdf_gen_data_hash(data_subset))
                     buffer_val = main_process_chart_cache.get(key)
                     if buffer_val is None and not data_subset.empty:
-                        print(f"グラフ生成: {display_name_for_graphs} {type_key} (目標値: {target_val})")
+                        debug_print(f"グラフ生成: {display_name_for_graphs} {type_key} (目標値: {target_val})")
                         img_buf = create_patient_chart_with_target_wrapper(
                             data_subset, 
                             title=f"{display_name_for_graphs} {type_key.capitalize()}推移({days_val_int}日)", 
@@ -443,7 +562,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             if total_tasks_to_process == 0:
                 if progress_callback: 
                     progress_callback(1.0, "処理対象なし（除外病棟等により全て除外）")
-                print("一括PDF生成: 処理対象なし")
+                debug_print("一括PDF生成: 処理対象なし")
                 zip_archive_buffer.seek(0)
                 return zip_archive_buffer
 
@@ -478,9 +597,9 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
         return zip_archive_buffer
 
     except Exception as e_main_batch:
-        print(f"一括PDF生成(MP)のメイン処理でエラー: {e_main_batch}")
+        debug_print(f"一括PDF生成(MP)のメイン処理でエラー: {e_main_batch}")
         import traceback
-        print(traceback.format_exc())
+        debug_print(traceback.format_exc())
         if progress_callback: 
             progress_callback(1.0, f"エラーが発生しました: {str(e_main_batch)}")
         return BytesIO()
@@ -489,7 +608,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             import shutil
             shutil.rmtree(temp_dir_main, ignore_errors=True)
         except Exception as e_cleanup:
-            print(f"一時ディレクトリの削除に失敗: {e_cleanup}")
+            debug_print(f"一時ディレクトリの削除に失敗: {e_cleanup}")
 
 
 def batch_generate_pdfs_full_optimized(
@@ -499,7 +618,7 @@ def batch_generate_pdfs_full_optimized(
     if df is None or df.empty:
         if progress_callback: 
             progress_callback(0, "データがありません。")
-        print("batch_generate_pdfs_full_optimized: 分析対象のデータフレームが空です。")
+        debug_print("batch_generate_pdfs_full_optimized: 分析対象のデータフレームが空です。")
         return BytesIO()
 
     if progress_callback: 
@@ -509,5 +628,5 @@ def batch_generate_pdfs_full_optimized(
         return batch_generate_pdfs_mp_optimized(df, mode, landscape, target_data, progress_callback, max_workers, fast_mode)
     else:
         # シングルプロセス版（簡略化のため省略）
-        print("Sequential processing not fully implemented in this version.")
+        debug_print("Sequential processing not fully implemented in this version.")
         return BytesIO()
