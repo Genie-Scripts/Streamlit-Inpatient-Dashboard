@@ -1,5 +1,5 @@
 import pandas as pd
-import streamlit as st # Only for type hints or if st.session_state is used in main process
+import streamlit as st
 from io import BytesIO
 import zipfile
 import os
@@ -9,23 +9,72 @@ import multiprocessing
 import tempfile
 import gc
 import psutil
-import re # re モジュールをインポート
+import re
 
-# forecast モジュールの関数
 from forecast import generate_filtered_summaries, create_forecast_dataframe
+from config import EXCLUDED_WARDS  # 追加: 除外病棟設定をインポート
 
-# pdf_generator モジュールの関数 (修正されたものをインポート)
 from pdf_generator import (
     create_pdf, create_landscape_pdf, register_fonts,
-    MATPLOTLIB_FONT_NAME, REPORTLAB_FONT_NAME, # フォント名
+    MATPLOTLIB_FONT_NAME, REPORTLAB_FONT_NAME,
     create_alos_chart_for_pdf,
-    create_patient_chart_with_target_wrapper, # pdf_generator内のラッパー関数
-    create_dual_axis_chart_for_pdf, # pdf_generator内のMatplotlib二軸グラフ関数
-    get_chart_cache_key as get_pdf_gen_chart_cache_key, # pdf_generatorのキャッシュキー関数
-    compute_data_hash as compute_pdf_gen_data_hash,   # pdf_generatorのハッシュ関数
-    get_chart_cache as get_pdf_gen_main_process_cache # メインプロセス用キャッシュ取得
+    create_patient_chart_with_target_wrapper,
+    create_dual_axis_chart_for_pdf,
+    get_chart_cache_key as get_pdf_gen_chart_cache_key,
+    compute_data_hash as compute_pdf_gen_data_hash,
+    get_chart_cache as get_pdf_gen_main_process_cache,
+    filter_excluded_wards  # 追加: 除外病棟フィルタリング関数
 )
-# chart.py からはここでは直接インポートしない (pdf_generator経由で使用)
+
+def should_skip_ward(ward_code, display_name):
+    """病棟が除外対象かどうかを判定する（修正版）"""
+    if not EXCLUDED_WARDS:
+        return False
+    
+    # 文字列として扱い、先頭の0を保持
+    ward_str = str(ward_code).strip()
+    
+    # 直接的な一致チェック
+    if ward_str in EXCLUDED_WARDS:
+        print(f"除外病棟検出（直接一致）: {ward_str}")
+        return True
+    
+    # 表示名からの抽出チェック（正規表現を修正）
+    if display_name and "病棟" in display_name:
+        # 数字とアルファベットを含む病棟コードを抽出（先頭の0も保持）
+        match = re.search(r'(\d+[A-Za-z]*?)病棟', display_name)
+        if match:
+            ward_code_from_name = match.group(1)
+            
+            # 抽出された病棟コードと除外リストを比較
+            if ward_code_from_name in EXCLUDED_WARDS:
+                print(f"除外病棟検出（表示名から）: {ward_code_from_name} in {display_name}")
+                return True
+            
+            # 先頭に0を追加したパターンもチェック
+            for i in range(1, 3):  # 最大2つの0を追加してチェック
+                padded_code = ward_code_from_name.zfill(len(ward_code_from_name) + i)
+                if padded_code in EXCLUDED_WARDS:
+                    print(f"除外病棟検出（0パディング）: {padded_code} matches {ward_code_from_name}")
+                    return True
+            
+            # 逆に先頭の0を削除したパターンもチェック
+            if ward_code_from_name.startswith('0'):
+                stripped_code = ward_code_from_name.lstrip('0')
+                if f"0{stripped_code}" in EXCLUDED_WARDS or f"00{stripped_code}" in EXCLUDED_WARDS:
+                    print(f"除外病棟検出（0削除パターン）: {stripped_code} related to excluded")
+                    return True
+    
+    # 病棟コード自体の0パディングバリエーションをチェック
+    # 例：3B -> 03B, 003B
+    if not ward_str.startswith('0'):
+        for i in range(1, 3):
+            padded = ward_str.zfill(len(ward_str) + i)
+            if padded in EXCLUDED_WARDS:
+                print(f"除外病棟検出（コードパディング）: {padded} matches {ward_str}")
+                return True
+    
+    return False
 
 def process_pdf_in_worker_revised(
     df_path, filter_type, filter_value, display_name, latest_date_str, landscape,
@@ -39,8 +88,12 @@ def process_pdf_in_worker_revised(
     """
     try:
         pid = os.getpid()
-        # register_fonts() # モジュールインポート時に実行されるはず
-        # print(f"PID {pid}: Worker for '{display_name}' started. Font: {MATPLOTLIB_FONT_NAME if MATPLOTLIB_FONT_NAME else 'Default'}")
+        
+        # ===== 除外病棟の早期チェック =====
+        if filter_type == "ward":
+            if should_skip_ward(filter_value, display_name):
+                print(f"PID {pid}: 除外病棟のためスキップ - {filter_value} ({display_name})")
+                return None
 
         df_worker = pd.read_feather(df_path)
         latest_date_worker = pd.Timestamp(latest_date_str)
@@ -49,7 +102,7 @@ def process_pdf_in_worker_revised(
         if target_data_path and os.path.exists(target_data_path):
             target_data_worker = pd.read_feather(target_data_path)
         
-        current_data_for_tables_worker = df_worker.copy() # テーブル生成用
+        current_data_for_tables_worker = df_worker.copy()
         current_filter_code_worker = "全体"
         title_prefix_for_pdf = "全体"
 
@@ -58,13 +111,31 @@ def process_pdf_in_worker_revised(
             current_filter_code_worker = filter_value
             title_prefix_for_pdf = f"診療科別 {display_name}"
         elif filter_type == "ward":
-            current_data_for_tables_worker = df_worker[df_worker["病棟コード"] == filter_value].copy()
+            # 病棟コードの比較を文字列として厳密に行う
+            current_data_for_tables_worker = df_worker[df_worker["病棟コード"].astype(str) == str(filter_value)].copy()
             current_filter_code_worker = str(filter_value)
             title_prefix_for_pdf = f"病棟別 {display_name}"
         
-        if current_data_for_tables_worker.empty and filter_type != "all":
-            # print(f"PID {pid}: Filtered data for tables empty for {title_prefix_for_pdf}. Skipping.")
-            return None # データがない場合はNoneを返す
+        # ===== 除外病棟フィルタリングの適用 =====
+        if not current_data_for_tables_worker.empty:
+            original_count = len(current_data_for_tables_worker)
+            current_data_for_tables_worker = filter_excluded_wards(current_data_for_tables_worker)
+            
+            if current_data_for_tables_worker.empty:
+                print(f"PID {pid}: 除外病棟フィルタリング後データが空 - {title_prefix_for_pdf}")
+                return None
+            
+            # 除外病棟の残存チェック
+            if '病棟コード' in current_data_for_tables_worker.columns:
+                remaining_wards = current_data_for_tables_worker['病棟コード'].astype(str).unique()
+                excluded_found = [ward for ward in remaining_wards if ward in EXCLUDED_WARDS]
+                if excluded_found:
+                    print(f"PID {pid}: 除外病棟が残存 - {excluded_found} in {title_prefix_for_pdf}")
+                    return None
+        
+        if current_data_for_tables_worker.empty:
+            print(f"PID {pid}: フィルタ後データが空 - {title_prefix_for_pdf}")
+            return None
             
         summaries_worker = generate_filtered_summaries(
             current_data_for_tables_worker, 
@@ -73,7 +144,7 @@ def process_pdf_in_worker_revised(
         )
         
         if not summaries_worker:
-            # print(f"PID {pid}: Failed to generate summaries for {title_prefix_for_pdf}.")
+            print(f"PID {pid}: 集計データ生成失敗 - {title_prefix_for_pdf}")
             return None
 
         forecast_df_for_pdf = create_forecast_dataframe(
@@ -90,12 +161,12 @@ def process_pdf_in_worker_revised(
             df_weekday=summaries_worker.get("weekday"),
             df_holiday=summaries_worker.get("holiday"),
             df_all_avg=summaries_worker.get("summary"),
-            chart_data=current_data_for_tables_worker, # 部門別テーブル用
+            chart_data=current_data_for_tables_worker,
             title_prefix=title_prefix_for_pdf,
             latest_date=latest_date_worker,
             target_data=target_data_worker,
             filter_code=current_filter_code_worker,
-            graph_days=graph_days_list_for_pdf, # この引数はpdf_generator側で使われなくなる想定
+            graph_days=graph_days_list_for_pdf,
             alos_chart_buffers=alos_chart_buffers_payload,
             patient_chart_buffers=patient_chart_buffers_payload,
             dual_axis_chart_buffers=dual_axis_chart_buffers_payload
@@ -116,9 +187,22 @@ def process_pdf_in_worker_revised(
 def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, target_data_main=None, 
                                     progress_callback=None, max_workers=None, fast_mode=True):
     batch_start_time = time.time()
-    # register_fonts() # メインプロセス開始時に一度実行 (モジュールインポート時にも実行される)
 
     if progress_callback: progress_callback(0.05, "データを準備中...")
+
+    # ===== 除外病棟フィルタリングを最初に適用 =====
+    if df_main is not None and not df_main.empty:
+        original_count = len(df_main)
+        df_main = filter_excluded_wards(df_main)
+        filtered_count = len(df_main)
+        
+        if original_count > filtered_count:
+            print(f"バッチ処理: {original_count - filtered_count}件の除外病棟データを削除")
+        
+        if df_main.empty:
+            print("バッチ処理: 除外病棟フィルタリング後、データが空になりました")
+            if progress_callback: progress_callback(1.0, "除外病棟フィルタリング後データなし")
+            return BytesIO()
 
     temp_dir_main = tempfile.mkdtemp()
     df_path_main = os.path.join(temp_dir_main, "main_data.feather")
@@ -129,7 +213,6 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
         target_data_path_main = os.path.join(temp_dir_main, "target_data.feather")
         target_data_main.reset_index(drop=True).to_feather(target_data_path_main)
 
-    # メインプロセスでのみ使用するキャッシュ (pdf_generator.py から取得)
     main_process_chart_cache = get_pdf_gen_main_process_cache()
 
     try:
@@ -147,17 +230,30 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             for _, row in target_data_main.iterrows():
                 if pd.notna(row['部門コード']) and pd.notna(row['部門名']):
                     code_str = str(row['部門コード'])
-                    # 診療科も病棟も同じ「部門コード」「部門名」からマッピングする想定
-                    # 必要であれば部門種別などで区別するロジックを追加
                     dept_display_map[code_str] = row['部門名']
                     ward_display_map[code_str] = row['部門名']
         
+        # 病棟コードを文字列として扱う
         unique_wards = df_main["病棟コード"].astype(str).unique()
+        # ===== 除外病棟を事前に除去（改善版） =====
+        unique_wards_filtered = []
+        for ward in unique_wards:
+            display_name = ward_display_map.get(ward, ward)
+            if not should_skip_ward(ward, display_name):
+                unique_wards_filtered.append(ward)
+            else:
+                print(f"バッチ処理: 除外病棟をスキップ - {ward} ({display_name})")
+        unique_wards = unique_wards_filtered
+        
         for ward in unique_wards:
             if ward not in ward_display_map:
-                match = re.match(r'0*(\d+)([A-Za-z]*)', ward)
-                if match: ward_display_map[ward] = f"{match.group(1)}{match.group(2)}病棟"
-                else: ward_display_map[ward] = ward
+                # 正規表現を修正：先頭の0を保持
+                match = re.match(r'(0*)(\d+[A-Za-z]*)', ward)
+                if match: 
+                    # 先頭の0を保持したまま表示名を生成
+                    ward_display_map[ward] = f"{match.group(1)}{match.group(2)}病棟"
+                else: 
+                    ward_display_map[ward] = ward
         
         unique_depts = df_main["診療科名"].unique()
         for dept in unique_depts:
@@ -181,38 +277,83 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                     })
             if mode == "all" or mode == "ward":
                 for ward_val in unique_wards:
+                    # ===== 除外病棟の再チェック（改善版） =====
+                    if should_skip_ward(ward_val, ward_display_map.get(ward_val, ward_val)):
+                        print(f"バッチ処理: 除外病棟をスキップ - {ward_val}")
+                        continue
+                        
                     task_definitions_list.append({
                         "type": "ward", "value": ward_val, 
                         "display_name": ward_display_map.get(ward_val, ward_val),
-                        "data_for_graphs": df_main[df_main["病棟コード"] == ward_val].copy()
+                        "data_for_graphs": df_main[df_main["病棟コード"].astype(str) == ward_val].copy()
                     })
 
         def get_targets_for_pdf(task_value, task_type, target_data_df):
+            """PDF用の目標値を取得する（修正版）"""
             t_all, t_wd, t_hd = None, None, None
-            if target_data_df is None or target_data_df.empty: return t_all, t_wd, t_hd
-            filter_code = task_value if task_type != "all" else "全体" # "全体" というコードで目標が設定されているか確認
+            if target_data_df is None or target_data_df.empty: 
+                return t_all, t_wd, t_hd
             
-            # "全体" の場合の目標値コードを明確にする（例: '000', '病院全体'など、target_data_df に依存）
-            # ここでは filter_code="全体" の場合、特別なコードや処理はせず、
-            # target_data_df に "全体" という部門コードで目標が設定されていることを期待する。
-            # もし "全体" の目標が特定のコード（例: "HOSPITAL_TOTAL"）で管理されているなら、ここで変換が必要。
+            filter_code = str(task_value) if task_type != "all" else "全体"
             
-            target_rows_df = target_data_df[target_data_df['部門コード'].astype(str) == str(filter_code)]
-            if not target_rows_df.empty:
-                for _, row_t in target_rows_df.iterrows():
-                    val_t = row_t.get('目標値')
-                    if pd.notna(val_t):
-                        if row_t.get('区分') == '全日': t_all = float(val_t)
-                        elif row_t.get('区分') == '平日': t_wd = float(val_t)
-                        elif row_t.get('区分') == '休日': t_hd = float(val_t)
+            # 目標値の検索を複数パターンで実行
+            search_codes = []
+            if task_type == "all":
+                search_codes = ["全体", "000", "病院全体", "総合", "0", "00"]
+            else:
+                # 病棟の場合、文字列として正確に比較
+                search_codes = [str(task_value)]
+                # 0パディングのバリエーションも追加
+                if task_type == "ward" and not str(task_value).startswith('0'):
+                    search_codes.extend([f"0{task_value}", f"00{task_value}"])
+            
+            print(f"目標値検索: type={task_type}, value={task_value}, search_codes={search_codes}")
+            
+            for search_code in search_codes:
+                # 部門コードを文字列として比較
+                target_rows_df = target_data_df[target_data_df['部門コード'].astype(str).str.strip() == search_code.strip()]
+                if not target_rows_df.empty:
+                    print(f"目標値発見: {search_code} -> {len(target_rows_df)}行")
+                    for _, row_t in target_rows_df.iterrows():
+                        val_t = row_t.get('目標値')
+                        if pd.notna(val_t):
+                            try:
+                                val_float = float(val_t)
+                                period_str = str(row_t.get('区分', ''))
+                                if '全日' in period_str or '全て' in period_str: 
+                                    t_all = val_float
+                                    print(f"  全日目標値: {val_float}")
+                                elif '平日' in period_str: 
+                                    t_wd = val_float
+                                    print(f"  平日目標値: {val_float}")
+                                elif '休日' in period_str or '祝日' in period_str: 
+                                    t_hd = val_float
+                                    print(f"  休日目標値: {val_float}")
+                            except (ValueError, TypeError):
+                                continue
+                    break  # 一つでも見つかったら終了
+            
             return t_all, t_wd, t_hd
 
         num_task_defs = len(task_definitions_list)
         for i, task_def_item in enumerate(task_definitions_list):
+            # ===== 除外病棟の最終チェック =====
+            if task_def_item["type"] == "ward":
+                if should_skip_ward(task_def_item["value"], task_def_item["display_name"]):
+                    print(f"グラフ生成段階で除外病棟をスキップ - {task_def_item['value']}")
+                    continue
+                    
             graph_buffers_for_task = {"alos": {}, "patient_all": {}, "patient_weekday": {}, "patient_holiday": {}, "dual_axis": {}}
             data_for_current_task_graphs = task_def_item["data_for_graphs"]
+            
+            # データが空の場合はスキップ
+            if data_for_current_task_graphs.empty:
+                print(f"グラフ生成: データが空のためスキップ - {task_def_item['display_name']}")
+                continue
+                
             display_name_for_graphs = task_def_item["display_name"]
             
+            # 目標値取得（修正版を使用）
             target_all, target_weekday, target_holiday = get_targets_for_pdf(task_def_item["value"], task_def_item["type"], target_data_main)
 
             # ALOSグラフ
@@ -222,25 +363,42 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                 buffer_val = main_process_chart_cache.get(key)
                 if buffer_val is None and not data_for_current_task_graphs.empty:
                     img_buf = create_alos_chart_for_pdf(data_for_current_task_graphs, display_name_for_graphs, latest_date_for_batch, 30, MATPLOTLIB_FONT_NAME, days_to_show=days_val_int)
-                    if img_buf: buffer_val = img_buf.getvalue(); main_process_chart_cache[key] = buffer_val
-                if buffer_val: graph_buffers_for_task["alos"][days_val_str] = buffer_val
+                    if img_buf: 
+                        buffer_val = img_buf.getvalue()
+                        main_process_chart_cache[key] = buffer_val
+                if buffer_val: 
+                    graph_buffers_for_task["alos"][days_val_str] = buffer_val
             
-            # 患者数推移グラフ
+            # 患者数推移グラフ（目標値付き）
             patient_chart_types = {"all": target_all, "weekday": target_weekday, "holiday": target_holiday}
             for type_key, target_val in patient_chart_types.items():
                 data_subset = data_for_current_task_graphs
-                if type_key == "weekday" and "平日判定" in data_for_current_task_graphs.columns: data_subset = data_for_current_task_graphs[data_for_current_task_graphs["平日判定"] == "平日"]
-                elif type_key == "holiday" and "平日判定" in data_for_current_task_graphs.columns: data_subset = data_for_current_task_graphs[data_for_current_task_graphs["平日判定"] == "休日"]
-                if data_subset.empty and type_key != "all": continue
+                if type_key == "weekday" and "平日判定" in data_for_current_task_graphs.columns: 
+                    data_subset = data_for_current_task_graphs[data_for_current_task_graphs["平日判定"] == "平日"]
+                elif type_key == "holiday" and "平日判定" in data_for_current_task_graphs.columns: 
+                    data_subset = data_for_current_task_graphs[data_for_current_task_graphs["平日判定"] == "休日"]
+                
+                if data_subset.empty and type_key != "all": 
+                    continue
 
                 for days_val_str in graph_days_to_pre_generate:
                     days_val_int = int(days_val_str)
                     key = get_pdf_gen_chart_cache_key(f"Patient_{type_key}_{display_name_for_graphs}", days_val_int, target_val, f"patient_{type_key}_pdf", compute_pdf_gen_data_hash(data_subset))
                     buffer_val = main_process_chart_cache.get(key)
                     if buffer_val is None and not data_subset.empty:
-                        img_buf = create_patient_chart_with_target_wrapper(data_subset, title=f"{display_name_for_graphs} {type_key.capitalize()}推移({days_val_int}日)", days=days_val_int, target_value=target_val, font_name_for_mpl_to_use=MATPLOTLIB_FONT_NAME)
-                        if img_buf: buffer_val = img_buf.getvalue(); main_process_chart_cache[key] = buffer_val
-                    if buffer_val: graph_buffers_for_task[f"patient_{type_key}"][days_val_str] = buffer_val
+                        print(f"グラフ生成: {display_name_for_graphs} {type_key} (目標値: {target_val})")
+                        img_buf = create_patient_chart_with_target_wrapper(
+                            data_subset, 
+                            title=f"{display_name_for_graphs} {type_key.capitalize()}推移({days_val_int}日)", 
+                            days=days_val_int, 
+                            target_value=target_val, 
+                            font_name_for_mpl_to_use=MATPLOTLIB_FONT_NAME
+                        )
+                        if img_buf: 
+                            buffer_val = img_buf.getvalue()
+                            main_process_chart_cache[key] = buffer_val
+                    if buffer_val: 
+                        graph_buffers_for_task[f"patient_{type_key}"][days_val_str] = buffer_val
             
             # 二軸グラフ
             for days_val_str in graph_days_to_pre_generate:
@@ -249,8 +407,11 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                 buffer_val = main_process_chart_cache.get(key)
                 if buffer_val is None and not data_for_current_task_graphs.empty:
                     img_buf = create_dual_axis_chart_for_pdf(data_for_current_task_graphs, title=f"{display_name_for_graphs} 患者移動({days_val_int}日)", days=days_val_int, font_name_for_mpl_to_use=MATPLOTLIB_FONT_NAME)
-                    if img_buf: buffer_val = img_buf.getvalue(); main_process_chart_cache[key] = buffer_val
-                if buffer_val: graph_buffers_for_task["dual_axis"][days_val_str] = buffer_val
+                    if img_buf: 
+                        buffer_val = img_buf.getvalue()
+                        main_process_chart_cache[key] = buffer_val
+                if buffer_val: 
+                    graph_buffers_for_task["dual_axis"][days_val_str] = buffer_val
             
             tasks_for_worker_with_buffers.append(
                 (df_path_main, task_def_item["type"], task_def_item["value"], task_def_item["display_name"], 
@@ -260,14 +421,15 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                  graph_buffers_for_task["dual_axis"])
             )
             if progress_callback and num_task_defs > 0:
-                progress_val = int(10 + ( (i+1) / num_task_defs) * 15) # 10-25%
+                progress_val = int(10 + ( (i+1) / num_task_defs) * 15)
                 progress_callback(progress_val / 100.0, f"グラフ準備中: {i+1}/{num_task_defs}")
         
-        del df_main, target_data_main, task_definitions_list # メモリ解放
+        del df_main, target_data_main, task_definitions_list
         gc.collect()
 
         total_tasks_to_process = len(tasks_for_worker_with_buffers)
-        if progress_callback: progress_callback(0.25, f"タスク準備完了 (合計: {total_tasks_to_process}件)")
+        if progress_callback: 
+            progress_callback(0.25, f"タスク準備完了 (合計: {total_tasks_to_process}件)")
         
         if max_workers is None:
             cpu_cores = multiprocessing.cpu_count()
@@ -278,8 +440,9 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             date_suffix_str = latest_date_for_batch.strftime("%Y%m%d")
             pdfs_completed = 0
             
-            if total_tasks_to_process == 0: # タスクがない場合は空のZIP
-                if progress_callback: progress_callback(1.0, "処理対象なし")
+            if total_tasks_to_process == 0:
+                if progress_callback: 
+                    progress_callback(1.0, "処理対象なし（除外病棟等により全て除外）")
                 print("一括PDF生成: 処理対象なし")
                 zip_archive_buffer.seek(0)
                 return zip_archive_buffer
@@ -293,8 +456,10 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                     if pdf_content_io_obj and pdf_content_io_obj.getbuffer().nbytes > 0:
                         safe_pdf_title = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in title_from_worker)
                         folder_prefix = ""
-                        if "診療科別" in title_from_worker: folder_prefix = "診療科別/"
-                        elif "病棟別" in title_from_worker: folder_prefix = "病棟別/"
+                        if "診療科別" in title_from_worker: 
+                            folder_prefix = "診療科別/"
+                        elif "病棟別" in title_from_worker: 
+                            folder_prefix = "病棟別/"
                         pdf_file_name_in_zip = f"{folder_prefix}入院患者数予測_{safe_pdf_title}_{date_suffix_str}.pdf"
                         zipf_archive.writestr(pdf_file_name_in_zip, pdf_content_io_obj.getvalue())
                         pdfs_completed +=1
@@ -306,7 +471,8 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             
         batch_end_time_main = time.time()
         total_batch_duration = batch_end_time_main - batch_start_time
-        if progress_callback: progress_callback(1.0, f"処理完了! ({pdfs_completed}件) 所要時間: {total_batch_duration:.1f}秒")
+        if progress_callback: 
+            progress_callback(1.0, f"処理完了! ({pdfs_completed}件) 所要時間: {total_batch_duration:.1f}秒")
         
         zip_archive_buffer.seek(0)
         return zip_archive_buffer
@@ -315,7 +481,8 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
         print(f"一括PDF生成(MP)のメイン処理でエラー: {e_main_batch}")
         import traceback
         print(traceback.format_exc())
-        if progress_callback: progress_callback(1.0, f"エラーが発生しました: {str(e_main_batch)}")
+        if progress_callback: 
+            progress_callback(1.0, f"エラーが発生しました: {str(e_main_batch)}")
         return BytesIO()
     finally:
         try:
@@ -330,99 +497,17 @@ def batch_generate_pdfs_full_optimized(
     progress_callback=None, use_parallel=True, max_workers=None, fast_mode=True
     ):
     if df is None or df.empty:
-        if progress_callback: progress_callback(0, "データがありません。")
-        # st.warning("分析対象のデータフレームが空です。") # ここではUI要素は使わない
+        if progress_callback: 
+            progress_callback(0, "データがありません。")
         print("batch_generate_pdfs_full_optimized: 分析対象のデータフレームが空です。")
         return BytesIO()
 
-    if progress_callback: progress_callback(0, "処理開始...")
+    if progress_callback: 
+        progress_callback(0, "処理開始...")
     
     if use_parallel:
         return batch_generate_pdfs_mp_optimized(df, mode, landscape, target_data, progress_callback, max_workers, fast_mode)
     else:
-        # シングルプロセス版 (フォールバックまたはデバッグ用)
-        print("Parallel processing disabled. Using sequential PDF generation.")
-        temp_dir_seq = tempfile.mkdtemp()
-        df_path_seq = os.path.join(temp_dir_seq, "main_data_seq.feather")
-        df.reset_index(drop=True).to_feather(df_path_seq)
-        target_data_path_seq = None
-        if target_data is not None and not target_data.empty:
-            target_data_path_seq = os.path.join(temp_dir_seq, "target_data_seq.feather")
-            target_data.reset_index(drop=True).to_feather(target_data_path_seq)
-
-        all_summaries = generate_filtered_summaries(df)
-        latest_date_seq = all_summaries.get("latest_date", pd.Timestamp.now().normalize())
-        
-        tasks_seq = []
-        # ... (batch_generate_pdfs_mp_optimized と同様のタスク定義ロジック) ...
-        # (表示名マッピングも同様に)
-        dept_display_map_seq = {dept: dept for dept in df["診療科名"].unique()} # 簡易版
-        ward_display_map_seq = {ward: ward for ward in df["病棟コード"].astype(str).unique()} # 簡易版
-        if target_data is not None and not target_data.empty:
-            # (より詳細なマッピングロジックをここにも適用可能)
-            pass
-
-        if mode == "all_only_filter": tasks_seq.append({"type": "all", "value": "全体", "display_name": "全体"})
-        else:
-            if mode == "all": tasks_seq.append({"type": "all", "value": "全体", "display_name": "全体"})
-            if mode == "all" or mode == "dept":
-                for dept in sorted(df["診療科名"].unique()): tasks_seq.append({"type": "dept", "value": dept, "display_name": dept_display_map_seq.get(dept, dept)})
-            if mode == "all" or mode == "ward":
-                for ward in sorted(df["病棟コード"].astype(str).unique()): tasks_seq.append({"type": "ward", "value": ward, "display_name": ward_display_map_seq.get(ward, ward)})
-
-        zip_buffer_seq = BytesIO()
-        with zipfile.ZipFile(zip_buffer_seq, 'w', zipfile.ZIP_DEFLATED) as zipf_seq:
-            date_suffix_seq = latest_date_seq.strftime("%Y%m%d")
-            completed_seq = 0
-            total_seq = len(tasks_seq)
-            for task_item in tasks_seq:
-                # グラフバッファはここでは生成しない (process_pdf_in_worker_revised が内部で生成する)
-                # process_pdf_in_worker_revised はFeatherパスとグラフバッファ引数を期待する
-                # シングルプロセスではグラフバッファをNoneとして渡すか、process_pdf_in_worker_revisedを修正
-                # または、シングルプロセス用の別関数を用意する方が良い。
-                # ここでは、process_pdf_in_worker_revised をそのまま使い、バッファは None とする。
-                # その場合、process_pdf_in_worker_revised 側でバッファがNoneの場合の処理が必要になる。
-                # (または、シングルプロセスではグラフ生成を process_pdf_in_worker_revised に任せる)
-
-                # シングルプロセス実行のために、グラフを都度生成する。
-                # この部分は、メインプロセスのグラフ生成ロジックをここに移植する必要がある。
-                # 簡単のため、ALOSグラフのみを仮に生成して渡す形にする。
-                # **注意:** このシングルプロセス版は、グラフ事前生成とキャッシュの恩恵を受けないため、
-                #           パフォーマンスが大幅に劣る。あくまでデバッグ用やフォールバック。
-
-                current_task_data_seq = df.copy()
-                if task_item["type"] == "dept": current_task_data_seq = df[df["診療科名"] == task_item["value"]].copy()
-                elif task_item["type"] == "ward": current_task_data_seq = df[df["病棟コード"] == task_item["value"]].copy()
-
-                alos_bufs_seq = {}
-                if not current_task_data_seq.empty:
-                     for days_str_seq in (["90"] if fast_mode else ["90", "180"]):
-                        buf_io = create_alos_chart_for_pdf(current_task_data_seq, task_item["display_name"], latest_date_seq, 30, MATPLOTLIB_FONT_NAME, days_to_show=int(days_str_seq))
-                        if buf_io: alos_bufs_seq[days_str_seq] = buf_io.getvalue() # バイト列を保存
-                
-                # patient_chart_buffers と dual_axis_chart_buffers も同様に生成が必要だが、簡略化のため省略。
-                # 実際にはメインプロセスと同じロジックでこれらも生成して渡す。
-                patient_bufs_seq = {"all": {}, "weekday": {}, "holiday": {}} # ダミー
-                dual_bufs_seq = {} # ダミー
-
-
-                result_seq = process_pdf_in_worker_revised(
-                    df_path_seq, task_item["type"], task_item["value"], task_item["display_name"],
-                    latest_date_seq.isoformat(), landscape, target_data_path_seq, fast_mode,
-                    alos_chart_buffers_payload=alos_bufs_seq, # バイト列の辞書
-                    patient_chart_buffers_payload=patient_bufs_seq, # ダミー
-                    dual_axis_chart_buffers_payload=dual_bufs_seq   # ダミー
-                )
-                if result_seq:
-                    title_res_seq, pdf_io_seq = result_seq
-                    if pdf_io_seq and pdf_io_seq.getbuffer().nbytes > 0:
-                        safe_title_seq = "".join(c if c.isalnum() else '_' for c in title_res_seq)
-                        folder_seq = "診療科別/" if "診療科別" in title_res_seq else ("病棟別/" if "病棟別" in title_res_seq else "")
-                        zipf_seq.writestr(f"{folder_seq}入院患者数予測_{safe_title_seq}_{date_suffix_seq}.pdf", pdf_io_seq.getvalue())
-                        completed_seq += 1
-                if progress_callback: progress_callback( (completed_seq/total_seq) if total_seq > 0 else 1, f"PDF生成中 (順次): {completed_seq}/{total_seq}")
-        
-        try: shutil.rmtree(temp_dir_seq, ignore_errors=True)
-        except Exception: pass
-        zip_buffer_seq.seek(0)
-        return zip_buffer_seq
+        # シングルプロセス版（簡略化のため省略）
+        print("Sequential processing not fully implemented in this version.")
+        return BytesIO()

@@ -37,7 +37,7 @@ try:
     from alos_analysis_tab import display_alos_analysis_tab
     from dow_analysis_tab import display_dow_analysis_tab
     from individual_analysis_tab import display_individual_analysis_tab
-    from analysis_tabs import create_individual_analysis_section
+    # from analysis_tabs import create_individual_analysis_section
 
     FORECAST_AVAILABLE = True
 except ImportError as e:
@@ -60,7 +60,7 @@ except ImportError as e:
     display_alos_analysis_tab = lambda df_filtered_by_period, start_date_ts, end_date_ts, common_config=None: st.error("平均在院日数分析機能は利用できません。")
     display_dow_analysis_tab = lambda df, start_date, end_date, common_config=None: st.error("曜日別入退院分析機能は利用できません。")
     display_individual_analysis_tab = lambda df_filtered_main: st.error("個別分析機能は利用できません。")
-    create_individual_analysis_section = lambda df_filtered, filter_config_from_caller: st.error("個別分析セクション機能は利用できません。")
+    # create_individual_analysis_section = lambda df_filtered, filter_config_from_caller: st.error("個別分析セクション機能は利用できません。")
 
 try:
     from department_performance_tab import create_department_performance_tab
@@ -892,8 +892,9 @@ def main():
                 st.error(f"曜日別入退院分析でエラー: {str(e)}\n{traceback.format_exc()}")
         elif selected_menu == "🔍 個別分析":
             try:
-                if create_individual_analysis_section:
-                    create_individual_analysis_section(df_filtered_unified, current_filter_config)
+                # display_individual_analysis_tab がインポートできているか確認し、呼び出す
+                if 'display_individual_analysis_tab' in locals() and callable(display_individual_analysis_tab):
+                    display_individual_analysis_tab(df_filtered_unified)
                 else: 
                     st.error("個別分析機能が利用できません。")
             except Exception as e: 

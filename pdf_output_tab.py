@@ -1,4 +1,4 @@
-# pdf_output_tab.py (修正版 - フィルター制御対応)
+# pdf_output_tab.py (修正版 - 除外病棟・目標値デバッグ対応)
 
 import streamlit as st
 import pandas as pd
@@ -7,8 +7,8 @@ import os
 import gc
 import traceback
 import multiprocessing
+from config import EXCLUDED_WARDS
 
-# batch_processor と pdf_generator のインポート
 try:
     from batch_processor import batch_generate_pdfs_full_optimized
 except ImportError as e:
@@ -18,17 +18,6 @@ except ImportError as e:
 def get_pdf_output_data(apply_current_filters=False):
     """
     PDF出力用のデータを取得
-    
-    Parameters:
-    -----------
-    apply_current_filters : bool
-        Trueの場合、現在のフィルター設定を適用
-        Falseの場合、元データ（フィルター未適用）を返す
-    
-    Returns:
-    --------
-    pd.DataFrame
-        PDF出力用のデータフレーム
     """
     original_df = st.session_state.get('df')
     
@@ -36,7 +25,6 @@ def get_pdf_output_data(apply_current_filters=False):
         return pd.DataFrame()
     
     if apply_current_filters:
-        # 現在のフィルター設定を適用
         try:
             from unified_filters import apply_unified_filters
             return apply_unified_filters(original_df)
@@ -44,8 +32,52 @@ def get_pdf_output_data(apply_current_filters=False):
             st.warning("フィルター機能が利用できません。元データを使用します。")
             return original_df.copy()
     else:
-        # 元データをそのまま返す
         return original_df.copy()
+
+def check_excluded_wards_in_data(df):
+    """データ内の除外病棟をチェックし、情報を返す"""
+    excluded_info = {
+        'has_excluded': False,
+        'excluded_wards_found': [],
+        'excluded_count': 0,
+        'total_count': 0
+    }
+    
+    if df is None or df.empty or '病棟コード' in df.columns is False:
+        return excluded_info
+    
+    excluded_info['total_count'] = len(df)
+    
+    if EXCLUDED_WARDS:
+        ward_codes = df['病棟コード'].astype(str)
+        excluded_mask = ward_codes.isin(EXCLUDED_WARDS)
+        excluded_info['excluded_count'] = excluded_mask.sum()
+        excluded_info['excluded_wards_found'] = ward_codes[excluded_mask].unique().tolist()
+        excluded_info['has_excluded'] = excluded_info['excluded_count'] > 0
+    
+    return excluded_info
+
+def check_target_data_availability():
+    """目標値データの利用可能性をチェック"""
+    target_data = st.session_state.get('target_data')
+    target_info = {
+        'available': False,
+        'record_count': 0,
+        'columns': [],
+        'sample_data': None,
+        'dept_codes': []
+    }
+    
+    if target_data is not None and not target_data.empty:
+        target_info['available'] = True
+        target_info['record_count'] = len(target_data)
+        target_info['columns'] = list(target_data.columns)
+        target_info['sample_data'] = target_data.head(3).to_dict('records')
+        
+        if '部門コード' in target_data.columns:
+            target_info['dept_codes'] = target_data['部門コード'].astype(str).unique().tolist()
+    
+    return target_info
 
 def create_pdf_output_tab():
     """
@@ -68,6 +100,38 @@ def create_pdf_output_tab():
         st.error("一括PDF生成機能が利用できません。batch_processor.pyを確認してください。")
         return
 
+    # === デバッグ情報セクション ===
+    with st.expander("🔍 データ・設定確認", expanded=False):
+        st.subheader("除外病棟設定")
+        if EXCLUDED_WARDS:
+            st.info(f"📋 除外病棟: {', '.join(EXCLUDED_WARDS)}")
+            
+            # 元データでの除外病棟チェック
+            excluded_info = check_excluded_wards_in_data(original_df)
+            if excluded_info['has_excluded']:
+                st.warning(f"⚠️ 元データに除外病棟が含まれています:")
+                st.write(f"- 除外対象: {excluded_info['excluded_wards_found']}")
+                st.write(f"- 除外レコード数: {excluded_info['excluded_count']:,}件")
+                st.write(f"- 総レコード数: {excluded_info['total_count']:,}件")
+            else:
+                st.success("✅ 元データに除外病棟は含まれていません")
+        else:
+            st.info("📋 除外病棟は設定されていません")
+        
+        st.subheader("目標値データ")
+        target_info = check_target_data_availability()
+        if target_info['available']:
+            st.success(f"✅ 目標値データあり: {target_info['record_count']}行")
+            st.write(f"📊 列: {', '.join(target_info['columns'])}")
+            if target_info['dept_codes']:
+                st.write(f"🏥 部門コード: {', '.join(target_info['dept_codes'][:10])}{'...' if len(target_info['dept_codes']) > 10 else ''}")
+            
+            # サンプルデータ表示
+            if st.checkbox("サンプルデータを表示", key="show_target_sample"):
+                st.dataframe(pd.DataFrame(target_info['sample_data']), use_container_width=True)
+        else:
+            st.warning("⚠️ 目標値データが設定されていません")
+
     # 一括PDF出力セクション
     create_batch_pdf_section(original_df, target_data)
 
@@ -81,16 +145,14 @@ def create_batch_pdf_section(original_df, target_data):
         col_filter1, col_filter2 = st.columns(2)
         
         with col_filter1:
-            # フィルター適用設定
             apply_filters = st.checkbox(
                 "現在のフィルター設定を適用",
-                value=False,  # デフォルトは全期間
+                value=False,
                 help="チェックを入れると、サイドバーの分析フィルター（期間・部門等）が適用されます",
                 key="pdf_apply_filters_checkbox"
             )
         
         with col_filter2:
-            # 現在のフィルター状況表示
             try:
                 from unified_filters import get_unified_filter_summary
                 filter_summary = get_unified_filter_summary()
@@ -107,6 +169,21 @@ def create_batch_pdf_section(original_df, target_data):
     if df_for_pdf.empty:
         st.error("PDF出力用のデータがありません。フィルター設定を確認してください。")
         return
+    
+    # === 除外病棟フィルタリング後の状況確認 ===
+    if EXCLUDED_WARDS:
+        excluded_info_filtered = check_excluded_wards_in_data(df_for_pdf)
+        if excluded_info_filtered['has_excluded']:
+            st.warning(f"⚠️ フィルタ適用後データに除外病棟が残存しています:")
+            st.write(f"除外対象: {excluded_info_filtered['excluded_wards_found']}")
+            
+            # 除外病棟を手動で除去
+            if '病棟コード' in df_for_pdf.columns:
+                original_count = len(df_for_pdf)
+                df_for_pdf = df_for_pdf[~df_for_pdf['病棟コード'].astype(str).isin(EXCLUDED_WARDS)]
+                removed_count = original_count - len(df_for_pdf)
+                if removed_count > 0:
+                    st.success(f"✅ 除外病棟を手動で除去: {removed_count}件削除")
     
     # データ期間とレコード数の表示
     if '日付' in df_for_pdf.columns and not df_for_pdf['日付'].empty:
@@ -186,6 +263,12 @@ def create_batch_pdf_section(original_df, target_data):
         if not df_for_pdf.empty:
             num_depts_batch = df_for_pdf['診療科名'].nunique() if '診療科名' in df_for_pdf.columns else 0
             num_wards_batch = df_for_pdf['病棟コード'].nunique() if '病棟コード' in df_for_pdf.columns else 0
+            
+            # 除外病棟を考慮した病棟数計算
+            if EXCLUDED_WARDS and '病棟コード' in df_for_pdf.columns:
+                ward_codes = df_for_pdf['病棟コード'].astype(str).unique()
+                filtered_wards = [ward for ward in ward_codes if ward not in EXCLUDED_WARDS]
+                num_wards_batch = len(filtered_wards)
         else:
             num_depts_batch = 0
             num_wards_batch = 0
@@ -220,7 +303,8 @@ def create_batch_pdf_section(original_df, target_data):
             st.metric("推定処理時間", f"{estimated_total_time_sec:.1f}秒")
         with col_stat3:
             if num_depts_batch > 0 or num_wards_batch > 0:
-                st.metric("対象部門数", f"診療科:{num_depts_batch} 病棟:{num_wards_batch}")
+                excluded_note = f" (除外: {len(EXCLUDED_WARDS)})" if EXCLUDED_WARDS else ""
+                st.metric("対象部門数", f"診療科:{num_depts_batch} 病棟:{num_wards_batch}{excluded_note}")
             else:
                 st.metric("対象部門数", "全体のみ")
 
@@ -233,7 +317,7 @@ def create_batch_pdf_section(original_df, target_data):
     else:
         # 実行前の最終確認情報
         with st.container():
-            st.info(
+            info_text = (
                 f"📋 **実行内容確認**\n\n"
                 f"• 出力対象: {batch_pdf_mode_ui}\n"
                 f"• レポート数: {reports_to_generate}件\n"
@@ -243,6 +327,14 @@ def create_batch_pdf_section(original_df, target_data):
                 f"• 処理方式: {'並列処理' if use_parallel_processing_ui else '順次処理'}\n"
                 f"• 推定時間: {estimated_total_time_sec:.1f}秒"
             )
+            if EXCLUDED_WARDS:
+                info_text += f"\n• 除外病棟: {', '.join(EXCLUDED_WARDS)}"
+            if target_data is not None and not target_data.empty:
+                info_text += f"\n• 目標値データ: 利用あり ({len(target_data)}行)"
+            else:
+                info_text += f"\n• 目標値データ: なし"
+            
+            st.info(info_text)
         
         if st.button("📦 一括PDF出力実行", key="execute_batch_pdf_button_final", use_container_width=True, type="primary"):
             execute_batch_pdf_generation(
@@ -260,7 +352,6 @@ def execute_batch_pdf_generation(df_for_batch, target_data, batch_pdf_mode_ui, p
         st.warning("出力対象が選択されていないか、対象データがありません。")
         return
 
-    # 空データの場合の警告
     if df_for_batch.empty:
         st.warning("対象データが0件です。空のPDFが出力される可能性があります。")
 
@@ -275,6 +366,10 @@ def execute_batch_pdf_generation(df_for_batch, target_data, batch_pdf_mode_ui, p
 
     try:
         # 実行情報の表示
+        excluded_info = ""
+        if EXCLUDED_WARDS:
+            excluded_info = f" (除外病棟: {', '.join(EXCLUDED_WARDS)})"
+        
         execution_info = (
             f"📦 **一括PDF生成開始**\n\n"
             f"• 出力対象: {batch_pdf_mode_ui}\n"
@@ -282,7 +377,8 @@ def execute_batch_pdf_generation(df_for_batch, target_data, batch_pdf_mode_ui, p
             f"• 並列処理: {'有効' if use_parallel_processing_ui else '無効'} "
             f"(ワーカー: {max_pdf_workers_ui})\n"
             f"• 高速モード: {'有効' if fast_mode_enabled_ui else '無効'}\n"
-            f"• データ件数: {len(df_for_batch):,}件"
+            f"• データ件数: {len(df_for_batch):,}件{excluded_info}\n"
+            f"• 目標値データ: {'あり' if target_data is not None and not target_data.empty else 'なし'}"
         )
         status_text_placeholder.info(execution_info)
         
@@ -308,11 +404,12 @@ def execute_batch_pdf_generation(df_for_batch, target_data, batch_pdf_mode_ui, p
         status_text_placeholder.empty()
 
         # 結果の処理
-        if zip_file_bytes_io and zip_file_bytes_io.getbuffer().nbytes > 22:  # ZIPファイルが空でないかチェック
+        if zip_file_bytes_io and zip_file_bytes_io.getbuffer().nbytes > 22:
             # ファイル名の生成
             timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
             orientation_suffix = '_横' if pdf_orientation_landscape_ui else '_縦'
-            zip_filename = f"入院患者数予測_一括_{timestamp}{orientation_suffix}.zip"
+            excluded_suffix = '_除外病棟適用' if EXCLUDED_WARDS else ''
+            zip_filename = f"入院患者数予測_一括_{timestamp}{orientation_suffix}{excluded_suffix}.zip"
             
             # 成功時の表示
             st.success(f"🎉 一括PDF生成が完了しました！")
@@ -326,6 +423,10 @@ def execute_batch_pdf_generation(df_for_batch, target_data, batch_pdf_mode_ui, p
                 st.metric("ファイルサイズ", f"{file_size_mb:.2f} MB")
             with col_result3:
                 st.metric("出力レポート数", f"{reports_to_generate}件")
+            
+            # 除外病棟の情報表示
+            if EXCLUDED_WARDS:
+                st.info(f"📋 除外病棟適用済み: {', '.join(EXCLUDED_WARDS)}")
             
             # ダウンロードボタン
             st.download_button(
@@ -347,7 +448,7 @@ def execute_batch_pdf_generation(df_for_batch, target_data, batch_pdf_mode_ui, p
             
         else:
             st.error("❌ PDFファイルの生成に失敗しました")
-            st.error("ZIPファイルが空か無効です。フィルター条件やデータを確認してください。")
+            st.error("ZIPファイルが空か無効です。除外病棟設定により全ての対象が除外された可能性があります。")
 
     except Exception as ex:
         st.error(f"❌ 一括PDF生成でエラーが発生しました: {ex}")
