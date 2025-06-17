@@ -845,8 +845,25 @@ def main():
         df_filtered_unified = filter_data_by_analysis_period(df_original_main)
         current_filter_config = get_unified_filter_config()
 
+        # --- ▼▼▼ ここにデータクレンジング処理を追加 ▼▼▼ ---
+        if df_filtered_unified is not None and not df_filtered_unified.empty:
+            df_cleaned = df_filtered_unified.copy()
+            # 分析に使用する主要な数値列を定義
+            numeric_cols = [
+                '入院患者数（在院）', '新入院患者数', '緊急入院患者数', '退院患者数', '死亡患者数'
+            ]
+            for col in numeric_cols:
+                if col in df_cleaned.columns:
+                    # errors='coerce'で数値に変換できないものをNaN (Not a Number) にする
+                    df_cleaned[col] = pd.to_numeric(df_cleaned[col], errors='coerce')
+                    # NaNになった値を0で埋める
+                    df_cleaned[col] = df_cleaned[col].fillna(0)
+            # クレンジング済みのデータフレームを以降の処理で使用
+            df_filtered_unified = df_cleaned
+        # --- ▲▲▲ クレンジング処理終了 ▲▲▲ ---
+
         if selected_menu == "📊 主要指標":
-            try: 
+            try:
                 create_management_dashboard_tab()
             except Exception as e: 
                 st.error(f"主要指標でエラー: {str(e)}\n{traceback.format_exc()}")
