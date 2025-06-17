@@ -7,7 +7,19 @@ import time
 import hashlib
 import gc
 import numpy as np
-from config import EXCLUDED_WARDS
+
+# configからインポート（エラーハンドリング付き）
+try:
+    from config import EXCLUDED_WARDS, PDF_DEBUG_MODE
+except ImportError:
+    EXCLUDED_WARDS = []
+    PDF_DEBUG_MODE = False  # デフォルト値
+
+# matplotlib設定（メモリ効率改善）
+import matplotlib
+matplotlib.use('Agg')  # 非インタラクティブバックエンド
+import matplotlib.pyplot as plt
+plt.ioff()  # インタラクティブモードをオフ
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -19,10 +31,6 @@ from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 import matplotlib.font_manager
-import matplotlib
-matplotlib.use('Agg')  # 非インタラクティブバックエンド
-import matplotlib.pyplot as plt
-plt.ioff()  # インタラクティブモードをオフ
 
 # --- フォント設定 ---
 FONT_DIR = 'fonts'
@@ -33,7 +41,10 @@ MATPLOTLIB_FONT_NAME_FALLBACK = 'sans-serif'
 MATPLOTLIB_FONT_NAME = None
 
 def debug_print(message):
-    if PDF_DEBUG_MODE:
+    """デバッグモード時のみ出力"""
+    # PDF_DEBUG_MODEが定義されていない場合のフォールバック
+    debug_mode = globals().get('PDF_DEBUG_MODE', False)
+    if debug_mode:
         print(message)
 
 def register_fonts():
@@ -44,10 +55,10 @@ def register_fonts():
     if os.path.exists(FONT_PATH):
         try:
             pdfmetrics.registerFont(TTFont(REPORTLAB_FONT_NAME, FONT_PATH))
-            debug_print(f"ReportLab font '{REPORTLAB_FONT_NAME}' ({FONT_PATH}) registered.")
+            print(f"ReportLab font '{REPORTLAB_FONT_NAME}' ({FONT_PATH}) registered.")  # 一時的に戻す
             font_registered_rl = True
         except Exception as e:
-            debug_print(f"Failed to register ReportLab font '{FONT_PATH}': {e}")
+            print(f"Failed to register ReportLab font '{FONT_PATH}': {e}")  # 一時的に戻す
 
         try:
             font_entry = matplotlib.font_manager.FontEntry(
@@ -57,18 +68,18 @@ def register_fonts():
                  matplotlib.font_manager.fontManager.ttflist.insert(0, font_entry)
 
             MATPLOTLIB_FONT_NAME = font_entry.name
-            debug_print(f"Matplotlib font '{MATPLOTLIB_FONT_NAME}' prepared for use from {FONT_PATH}.")
+            print(f"Matplotlib font '{MATPLOTLIB_FONT_NAME}' prepared for use from {FONT_PATH}.")  # 一時的に戻す
             font_registered_mpl = True
         except Exception as e:
-            debug_print(f"Failed to prepare Matplotlib font '{FONT_PATH}' for pdf_generator: {e}")
+            print(f"Failed to prepare Matplotlib font '{FONT_PATH}' for pdf_generator: {e}")  # 一時的に戻す
             MATPLOTLIB_FONT_NAME = None
     else:
-        debug_print(f"Font file not found at '{FONT_PATH}'. Using fallback fonts for Matplotlib.")
+        print(f"Font file not found at '{FONT_PATH}'. Using fallback fonts for Matplotlib.")  # 一時的に戻す
         MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK
 
     if not font_registered_rl:
-        debug_print(f"ReportLab will use its default font or Helvetica if '{REPORTLAB_FONT_NAME}' was intended as NotoSansJP.")
-
+        print(f"ReportLab will use its default font or Helvetica if '{REPORTLAB_FONT_NAME}' was intended as NotoSansJP.")  # 一時的に戻す
+        
 register_fonts()
 
 def cleanup_memory():
@@ -76,6 +87,7 @@ def cleanup_memory():
     plt.close('all')  # すべてのmatplotlib図を閉じる
     gc.collect()  # ガベージコレクション実行
     return
+
 
 # --- キャッシュ設定 ---
 def get_chart_cache():

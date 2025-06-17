@@ -1,9 +1,3 @@
-# 1. config.py に追加
-PDF_DEBUG_MODE = False  # 本番環境ではFalse
-PDF_CACHE_SIZE_MB = 500  # キャッシュサイズ制限
-PDF_MAX_WORKERS = 4  # 最大ワーカー数制限
-
-
 # ===== 基本設定 =====
 APP_VERSION = "1.1"  # バージョンアップ
 APP_TITLE = "入退院分析ダッシュボード"
@@ -108,3 +102,9 @@ SESSION_SETTINGS = {
     ],
     'auto_clear_on_new_data': False,  # 新データ時の自動クリア
 }
+
+PDF_DEBUG_MODE = False  # デバッグ出力の有効/無効
+PDF_CACHE_SIZE_MB = 500  # キャッシュサイズ制限
+PDF_MAX_WORKERS = 2  # 最大ワーカー数制限
+PDF_DPI = 120  # PDF画像のDPI設定
+PDF_FAST_MODE_DEFAULT = True  # 高速モードのデフォルト値
