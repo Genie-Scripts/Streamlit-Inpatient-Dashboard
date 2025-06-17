@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (クレンジング処理を削除した最終版)
+# individual_analysis_tab.py (目標値読取を強化した最終版)
 
 import streamlit as st
 import pandas as pd
@@ -26,7 +26,7 @@ except ImportError as e:
 def display_dataframe_with_title(title, df_data, key_suffix=""):
     if df_data is not None and not df_data.empty:
         st.markdown(f"##### {title}")
-        # .fillna('-') を削除。st.dataframeはNaN（Not a Number）を適切に処理できます。
+        # .fillna('-') を削除し、NaNはStreamlitのデフォルト（空白）で表示
         st.dataframe(df_data, use_container_width=True)
     else:
         st.markdown(f"##### {title}")
@@ -41,10 +41,8 @@ def display_individual_analysis_tab(df_filtered_main):
         st.error("個別分析タブの実行に必要な機能の一部が読み込めませんでした。アプリケーションのログを確認し、インポートエラーを解決してください。")
         return
 
-    # クレンジングは呼び出し元のapp.pyで行うため、このファイル内の処理は削除
     df = df_filtered_main
 
-    # 除外病棟をフィルタリング
     if df is not None and not df.empty and '病棟コード' in df.columns and EXCLUDED_WARDS:
         df = df[~df['病棟コード'].isin(EXCLUDED_WARDS)]
     target_data = st.session_state.get('target_data')
@@ -87,9 +85,6 @@ def display_individual_analysis_tab(df_filtered_main):
         st.error(f"最新データ日付の処理中にエラーが発生しました。予測基準日として本日の日付を使用します。")
         latest_data_date = pd.Timestamp.now().normalize()
 
-    # =================================================================
-    # 統一フィルター範囲全体での分析
-    # =================================================================
     current_filter_title_display = "統一フィルター適用範囲全体" if unified_filter_applied else "全体"
     current_results_data = all_results
     chart_data_for_graphs = df.copy()
@@ -139,15 +134,25 @@ def display_individual_analysis_tab(df_filtered_main):
             st.markdown(f"##### グラフ表示期間: フィルター適用期間全体 ({selected_days_for_graph}日間)")
 
         target_val_all, target_val_weekday, target_val_holiday = None, None, None
+        
+        # --- ▼▼▼ ここから目標値取得ロジックを修正 ▼▼▼ ---
+        period_col_name = None
+        if target_data is not None and not target_data.empty:
+            if '区分' in target_data.columns:
+                period_col_name = '区分'
+            elif '期間区分' in target_data.columns:
+                period_col_name = '期間区分'
+
         if target_data is not None and not target_data.empty and \
-           all(col in target_data.columns for col in ['部門コード', '区分', '目標値']):
+           period_col_name is not None and \
+           all(col in target_data.columns for col in ['部門コード', '目標値']):
+            
             if '_target_dict' not in st.session_state:
                 st.session_state._target_dict = {}
                 for _, row in target_data.iterrows():
-                    st.session_state._target_dict[(str(row['部門コード']), str(row['区分']))] = row['目標値']
-
+                    st.session_state._target_dict[(str(row['部門コード']), str(row[period_col_name]))] = row['目標値']
+            
             if filter_code_for_target == "全体":
-                # "000" を優先的に試し、見つからなければ "全体" も試すように修正
                 target_val_all = st.session_state._target_dict.get(("000", '全日'))
                 if target_val_all is None:
                     target_val_all = st.session_state._target_dict.get(("全体", '全日'))
@@ -163,6 +168,7 @@ def display_individual_analysis_tab(df_filtered_main):
                 target_val_all = st.session_state._target_dict.get((str(filter_code_for_target), '全日'))
                 target_val_weekday = st.session_state._target_dict.get((str(filter_code_for_target), '平日'))
                 target_val_holiday = st.session_state._target_dict.get((str(filter_code_for_target), '休日'))
+        # --- ▲▲▲ 目標値取得ロジックの修正終了 ▲▲▲ ---
 
             if target_val_all is not None:
                 try: target_val_all = float(target_val_all)
@@ -179,12 +185,10 @@ def display_individual_analysis_tab(df_filtered_main):
                 st.write(f"- 全日目標値: `{target_val_all}` (型: {type(target_val_all).__name__})")
                 st.write(f"- 平日目標値: `{target_val_weekday}` (型: {type(target_val_weekday).__name__})")
                 st.write(f"- 休日目標値: `{target_val_holiday}` (型: {type(target_val_holiday).__name__})")
-                if filter_code_for_target == "全体" and '_target_dict' in st.session_state:
+                if '_target_dict' in st.session_state:
                     st.write("---")
-                    st.write("**_target_dict['000']の詳細:**")
-                    for key, value in st.session_state._target_dict.items():
-                        if key[0] == "000":
-                            st.write(f"- `{key}`: `{value}` (型: {type(value).__name__})")
+                    st.write("**_target_dictにロードされたデータ（一部抜粋）:**")
+                    st.json({f"{k[0]}, {k[1]}": v for k, v in list(st.session_state._target_dict.items())[:10]})
 
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
 
