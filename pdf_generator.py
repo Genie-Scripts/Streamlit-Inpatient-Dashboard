@@ -93,6 +93,21 @@ def get_chart_cache_key(title, days, target_value=None, chart_type="default", da
     key_string = "_".join(components)
     return hashlib.md5(key_string.encode()).hexdigest()
 
+# --- データフィルタリング関数（除外病棟対応） ---
+def filter_excluded_wards(data):
+    """除外病棟をフィルタリングする共通関数"""
+    if data is None or data.empty:
+        return data
+    
+    if '病棟コード' in data.columns and EXCLUDED_WARDS:
+        original_count = len(data)
+        filtered_data = data[~data['病棟コード'].isin(EXCLUDED_WARDS)]
+        removed_count = original_count - len(filtered_data)
+        if removed_count > 0:
+            print(f"PDF生成: 除外病棟フィルタリングで{removed_count}件のレコードを除外")
+        return filtered_data
+    
+    return data
 
 # --- グラフ生成関数 ---
 def create_alos_chart_for_pdf(
