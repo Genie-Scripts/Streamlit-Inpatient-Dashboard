@@ -26,7 +26,8 @@ except ImportError as e:
 def display_dataframe_with_title(title, df_data, key_suffix=""):
     if df_data is not None and not df_data.empty:
         st.markdown(f"##### {title}")
-        st.dataframe(df_data.fillna('-'), use_container_width=True)
+        # .fillna('-') を削除。st.dataframeはNaN（Not a Number）を適切に処理できます。
+        st.dataframe(df_data, use_container_width=True)
     else:
         st.markdown(f"##### {title}")
         st.warning(f"{title} データがありません。")
@@ -146,9 +147,18 @@ def display_individual_analysis_tab(df_filtered_main):
                     st.session_state._target_dict[(str(row['部門コード']), str(row['区分']))] = row['目標値']
 
             if filter_code_for_target == "全体":
+                # "000" を優先的に試し、見つからなければ "全体" も試すように修正
                 target_val_all = st.session_state._target_dict.get(("000", '全日'))
+                if target_val_all is None:
+                    target_val_all = st.session_state._target_dict.get(("全体", '全日'))
+                
                 target_val_weekday = st.session_state._target_dict.get(("000", '平日'))
+                if target_val_weekday is None:
+                    target_val_weekday = st.session_state._target_dict.get(("全体", '平日'))
+
                 target_val_holiday = st.session_state._target_dict.get(("000", '休日'))
+                if target_val_holiday is None:
+                    target_val_holiday = st.session_state._target_dict.get(("全体", '休日'))
             else:
                 target_val_all = st.session_state._target_dict.get((str(filter_code_for_target), '全日'))
                 target_val_weekday = st.session_state._target_dict.get((str(filter_code_for_target), '平日'))
