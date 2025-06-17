@@ -74,7 +74,7 @@ def display_individual_analysis_tab(df_filtered_main):
         """強化された目標値取得関数"""
         target_values = {'all': None, 'weekday': None, 'holiday': None}
         
-        if not target_data or target_data.empty:
+        if target_data is None or target_data.empty:
             print(f"目標値データが空 - filter_code: {filter_code}")
             return target_values
         
