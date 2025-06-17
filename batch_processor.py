@@ -27,6 +27,40 @@ from pdf_generator import (
 )
 # chart.py からはここでは直接インポートしない (pdf_generator経由で使用)
 
+def find_department_code_in_targets_for_pdf(dept_name, target_data_df, metric_name='日平均在院患者数'):
+    """診療科名に対応する部門コードを目標値データから探す（PDF用）"""
+    if target_data_df is None or target_data_df.empty:
+        return None, False
+    
+    # 直接一致をチェック
+    test_rows = target_data_df[
+        (target_data_df['部門コード'].astype(str) == str(dept_name).strip()) |
+        (target_data_df.get('部門名', pd.Series()).astype(str) == str(dept_name).strip())
+    ]
+    if not test_rows.empty:
+        return str(test_rows.iloc[0]['部門コード']), True
+    
+    # 部分一致をチェック
+    dept_name_clean = str(dept_name).strip()
+    for _, row in target_data_df.iterrows():
+        dept_code = str(row['部門コード'])
+        dept_name_in_target = str(row.get('部門名', ''))
+        if dept_name_clean in dept_code or dept_code in dept_name_clean:
+            return dept_code, True
+        if dept_name_clean in dept_name_in_target or dept_name_in_target in dept_name_clean:
+            return dept_code, True
+    
+    # 正規化一致をチェック（スペースや特殊文字を無視）
+    dept_name_normalized = re.sub(r'[^\w]', '', dept_name_clean)
+    for _, row in target_data_df.iterrows():
+        dept_code = str(row['部門コード'])
+        dept_code_normalized = re.sub(r'[^\w]', '', dept_code)
+        if dept_name_normalized and dept_code_normalized:
+            if dept_name_normalized == dept_code_normalized:
+                return dept_code, True
+    
+    return None, False
+
 def process_pdf_in_worker_revised(
     df_path, filter_type, filter_value, display_name, latest_date_str, landscape,
     target_data_path=None, reduced_graphs=True,
@@ -188,23 +222,90 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                     })
 
         def get_targets_for_pdf(task_value, task_type, target_data_df):
+            """PDF用の目標値を取得（改善版）"""
             t_all, t_wd, t_hd = None, None, None
-            if target_data_df is None or target_data_df.empty: return t_all, t_wd, t_hd
-            filter_code = task_value if task_type != "all" else "全体" # "全体" というコードで目標が設定されているか確認
+            if target_data_df is None or target_data_df.empty: 
+                return t_all, t_wd, t_hd
             
-            # "全体" の場合の目標値コードを明確にする（例: '000', '病院全体'など、target_data_df に依存）
-            # ここでは filter_code="全体" の場合、特別なコードや処理はせず、
-            # target_data_df に "全体" という部門コードで目標が設定されていることを期待する。
-            # もし "全体" の目標が特定のコード（例: "HOSPITAL_TOTAL"）で管理されているなら、ここで変換が必要。
+            # 指標タイプの列名を特定
+            indicator_col_name = '指標タイプ' if '指標タイプ' in target_data_df.columns else None
+            period_col_name = '区分' if '区分' in target_data_df.columns else '期間区分' if '期間区分' in target_data_df.columns else None
             
-            target_rows_df = target_data_df[target_data_df['部門コード'].astype(str) == str(filter_code)]
-            if not target_rows_df.empty:
-                for _, row_t in target_rows_df.iterrows():
-                    val_t = row_t.get('目標値')
-                    if pd.notna(val_t):
-                        if row_t.get('区分') == '全日': t_all = float(val_t)
-                        elif row_t.get('区分') == '平日': t_wd = float(val_t)
-                        elif row_t.get('区分') == '休日': t_hd = float(val_t)
+            if not indicator_col_name or not period_col_name:
+                # 旧形式の目標値データの場合
+                filter_code = task_value if task_type != "all" else "全体"
+                
+                # 全体の場合、複数の可能性をチェック
+                if task_type == "all":
+                    possible_codes = ["000", "全体", "病院全体", "病院", "総合", "0"]
+                    for code in possible_codes:
+                        target_rows_df = target_data_df[
+                            (target_data_df['部門コード'].astype(str) == code) |
+                            (target_data_df.get('部門名', pd.Series()).astype(str) == code)
+                        ]
+                        if not target_rows_df.empty:
+                            break
+                else:
+                    # 診療科・病棟の場合は柔軟に検索
+                    if task_type == "dept":
+                        actual_code, found = find_department_code_in_targets_for_pdf(task_value, target_data_df)
+                        if found:
+                            filter_code = actual_code
+                    
+                    target_rows_df = target_data_df[target_data_df['部門コード'].astype(str) == str(filter_code)]
+                
+                if not target_rows_df.empty:
+                    for _, row_t in target_rows_df.iterrows():
+                        val_t = row_t.get('目標値')
+                        if pd.notna(val_t):
+                            period = row_t.get('区分', row_t.get('期間区分', ''))
+                            if period == '全日': t_all = float(val_t)
+                            elif period == '平日': t_wd = float(val_t)
+                            elif period == '休日': t_hd = float(val_t)
+            else:
+                # 新形式の目標値データの場合
+                metric_name = '日平均在院患者数'
+                
+                # 全体の場合
+                if task_type == "all":
+                    possible_codes = ["000", "全体", "病院全体", "病院", "総合", "0"]
+                    for code in possible_codes:
+                        mask = (
+                            ((target_data_df['部門コード'].astype(str) == code) |
+                            (target_data_df.get('部門名', pd.Series()).astype(str) == code)) &
+                            (target_data_df[indicator_col_name] == metric_name)
+                        )
+                        filtered_rows = target_data_df[mask]
+                        if not filtered_rows.empty:
+                            for _, row in filtered_rows.iterrows():
+                                period = row[period_col_name]
+                                value = row.get('目標値')
+                                if pd.notna(value):
+                                    if period == '全日': t_all = float(value)
+                                    elif period == '平日': t_wd = float(value)
+                                    elif period == '休日': t_hd = float(value)
+                            break
+                else:
+                    # 診療科・病棟の場合
+                    actual_code = task_value
+                    if task_type == "dept":
+                        found_code, found = find_department_code_in_targets_for_pdf(task_value, target_data_df, metric_name)
+                        if found:
+                            actual_code = found_code
+                    
+                    mask = (
+                        (target_data_df['部門コード'].astype(str) == str(actual_code)) &
+                        (target_data_df[indicator_col_name] == metric_name)
+                    )
+                    filtered_rows = target_data_df[mask]
+                    for _, row in filtered_rows.iterrows():
+                        period = row[period_col_name]
+                        value = row.get('目標値')
+                        if pd.notna(value):
+                            if period == '全日': t_all = float(value)
+                            elif period == '平日': t_wd = float(value)
+                            elif period == '休日': t_hd = float(value)
+            
             return t_all, t_wd, t_hd
 
         num_task_defs = len(task_definitions_list)
