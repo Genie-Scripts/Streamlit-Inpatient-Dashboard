@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (目標値検索を厳密化した最終版)
+# individual_analysis_tab.py (診療科コード検索機能を追加した最終版)
 
 import streamlit as st
 import pandas as pd
@@ -91,15 +91,33 @@ def display_individual_analysis_tab(df_filtered_main):
     filter_code_for_target = None
     filter_config = get_unified_filter_config() if get_unified_filter_config else {}
 
+    # --- ▼▼▼ 診療科コードを検索するロジックに修正 ▼▼▼ ---
     if filter_config:
         if filter_config.get('selected_departments') and len(filter_config['selected_departments']) == 1:
-            selected_dept = filter_config['selected_departments'][0]
-            filter_code_for_target = selected_dept
-            current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept)}"
+            selected_dept_name = filter_config.get('selected_departments')[0]
+            
+            # 選択された診療科名から部門コードを目標値データから検索
+            dept_code = None
+            if target_data is not None and not target_data.empty:
+                # '部門名'が診療科名と一致し、'部門種別'が'診療科'の行を探す
+                dept_row = target_data[
+                    (target_data['部門名'] == selected_dept_name) & 
+                    (target_data['部門種別'] == '診療科')
+                ]
+                if not dept_row.empty:
+                    # 見つかった行から部門コードを取得
+                    dept_code = dept_row['部門コード'].iloc[0]
+
+            # 検索で見つかった部門コードを目標値検索のキーとして使用
+            filter_code_for_target = dept_code
+            current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_name)}"
+        
         elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
+            # 病棟のロジックは正常に動作しているので変更なし
             selected_ward = filter_config['selected_wards'][0]
             filter_code_for_target = selected_ward
             current_filter_title_display = f"病棟: {selected_ward}"
+    # --- ▲▲▲ 修正終了 ▲▲▲ ---
 
     if filter_code_for_target is None:
         filter_code_for_target = "全体"
@@ -134,7 +152,6 @@ def display_individual_analysis_tab(df_filtered_main):
 
         target_val_all, target_val_weekday, target_val_holiday = None, None, None
         
-        # --- ▼▼▼ ここから目標値取得ロジックを全面的に修正 ▼▼▼ ---
         period_col_name = None
         indicator_col_name = None
         
@@ -151,14 +168,12 @@ def display_individual_analysis_tab(df_filtered_main):
            period_col_name and indicator_col_name and \
            all(col in target_data.columns for col in ['部門コード', '目標値']):
             
-            # 辞書のキーを (部門コード, 指標タイプ, 期間区分) の3要素に変更
             if '_target_dict' not in st.session_state:
                 st.session_state._target_dict = {}
                 for _, row in target_data.iterrows():
                     key = (str(row['部門コード']), str(row[indicator_col_name]), str(row[period_col_name]))
                     st.session_state._target_dict[key] = row['目標値']
             
-            # このグラフで対象とする指標を明示
             METRIC_FOR_CHART = '日平均在院患者数'
 
             if filter_code_for_target == "全体":
@@ -194,7 +209,7 @@ def display_individual_analysis_tab(df_filtered_main):
                 except (ValueError, TypeError): target_val_holiday = None
 
         if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
-            st.write(f"- 検索キー: `{filter_code_for_target}`")
+            st.write(f"- 検索キー(部門名→コード変換後): `{filter_code_for_target}`")
             st.write(f"- 検索指標: `{METRIC_FOR_CHART if 'METRIC_FOR_CHART' in locals() else 'N/A'}`")
             st.write(f"- 全日目標値: `{target_val_all}` (型: {type(target_val_all).__name__})")
             st.write(f"- 平日目標値: `{target_val_weekday}` (型: {type(target_val_weekday).__name__})")
@@ -203,7 +218,6 @@ def display_individual_analysis_tab(df_filtered_main):
                 st.write("---")
                 st.write("**_target_dictにロードされたデータ（一部抜粋）:**")
                 st.json({f"({k[0]}, {k[1]}, {k[2]})": v for k, v in list(st.session_state._target_dict.items())[:15]})
-        # --- ▲▲▲ 目標値取得ロジックの修正終了 ▲▲▲ ---
 
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
 
