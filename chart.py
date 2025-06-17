@@ -172,7 +172,7 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
             y_min = data_min * 0.9 if data_min > 0 else 0
             
             # 上限：データの最大値と目標値の大きい方に20%のマージン
-            y_max = max(data_max, target_value) * 1.2
+            y_max = max(data_max, target_value) * 1.1
             
             # 達成ゾーン（目標値以上）- 薄い緑色
             fig.add_trace(go.Scatter(
