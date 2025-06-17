@@ -222,10 +222,19 @@ def create_patient_chart_with_target_wrapper(
             try:
                 target_val_float = float(target_value)
                 
-                # Y軸の範囲を取得/設定
-                y_min, y_max = ax.get_ylim()
-                y_max = max(y_max, target_val_float * 1.2)
-                ax.set_ylim(bottom=0, top=y_max)
+                # データの範囲を取得
+                data_min = grouped["入院患者数（在院）"].min()
+                data_max = grouped["入院患者数（在院）"].max()
+                
+                # 適切なY軸範囲を計算
+                # 下限：データ最小値の90%（ただし0未満にはしない）
+                y_min = max(0, data_min * 0.9)
+                
+                # 上限：データ最大値と目標値の大きい方に20%のマージン
+                y_max = max(data_max, target_val_float) * 1.2
+                
+                # Y軸の範囲を設定
+                ax.set_ylim(bottom=y_min, top=y_max)
                 
                 # 達成ゾーン（目標値以上）を先に描画
                 ax.fill_between(grouped["日付"], 
@@ -253,6 +262,7 @@ def create_patient_chart_with_target_wrapper(
                 
             except ValueError: 
                 print(f"Warning: Target value '{target_value}' for {title} not float.")
+
 
         ax.set_title(title, fontproperties=font_prop, fontsize=11)
         ax.set_xlabel('日付', fontproperties=font_prop, fontsize=9)
