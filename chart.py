@@ -11,9 +11,6 @@ import gc
 import time
 import hashlib
 import logging
-import matplotlib
-matplotlib.use('Agg')  # バックエンドを非インタラクティブに設定
-plt.ioff()  # インタラクティブモードをオフ
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +65,7 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
             try:
                 target_val_float = float(target_value)
                 if target_val_float > 0:  # 0より大きい値のみ表示
-                    debug_print(f"目標値ライン追加: {target_val_float} (グラフ: {title})")
+                    print(f"目標値ライン追加: {target_val_float} (グラフ: {title})")
                     
                     # 日付範囲の取得
                     date_min = grouped["日付"].min()
@@ -92,9 +89,9 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
                                        color='lightgreen', alpha=0.1, 
                                        label='目標達成ゾーン')
                 else:
-                    debug_print(f"目標値が0以下のためスキップ: {target_val_float}")
+                    print(f"目標値が0以下のためスキップ: {target_val_float}")
             except (ValueError, TypeError) as e:
-                debug_print(f"目標値の変換エラー '{target_value}' for {title}: {e}")
+                print(f"目標値の変換エラー '{target_value}' for {title}: {e}")
 
         # フォント設定
         font_kwargs = {}
@@ -130,8 +127,8 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
         return None
     finally:
         if fig: plt.close(fig)
-        plt.close('all')  # ← これを追加
         gc.collect()
+
 
 def create_interactive_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, 
                                     target_value=None, chart_type="全日"):
@@ -200,7 +197,7 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
                 try:
                     target_val_float = float(target_value)
                     if target_val_float > 0:
-                        debug_print(f"Plotlyグラフに目標値追加: {target_val_float} (グラフ: {title})")
+                        print(f"Plotlyグラフに目標値追加: {target_val_float} (グラフ: {title})")
                         
                         # 目標値ライン
                         fig.add_trace(go.Scatter(
@@ -232,9 +229,9 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
                                 name='目標達成ゾーン', hoverinfo='none'
                             ))
                     else:
-                        debug_print(f"Plotly: 目標値が0以下のためスキップ: {target_val_float}")
+                        print(f"Plotly: 目標値が0以下のためスキップ: {target_val_float}")
                 except (ValueError, TypeError) as e:
-                    debug_print(f"Plotly: 目標値変換エラー '{target_value}' for {title}: {e}")
+                    print(f"Plotly: 目標値変換エラー '{target_value}' for {title}: {e}")
 
         fig.update_layout(
             title=title, 
@@ -417,9 +414,8 @@ def create_dual_axis_chart(data, title="入院患者数と患者移動の推移"
         return None
     finally:
         if fig: plt.close(fig)
-        plt.close('all')  # ← これを追加
         gc.collect()
-        
+
 @st.cache_data(ttl=1800)
 def create_forecast_comparison_chart(actual_series, forecast_results, title="年度患者数予測比較", 
                                     display_days_past=365, display_days_future=365):

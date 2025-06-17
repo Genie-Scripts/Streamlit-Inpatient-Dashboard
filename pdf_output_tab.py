@@ -238,7 +238,7 @@ def create_batch_pdf_section(original_df, target_data):
             )
 
             num_cpu_cores = multiprocessing.cpu_count()
-            default_workers = min(2, multiprocessing.cpu_count() - 1)
+            default_workers = max(1, min(num_cpu_cores - 1 if num_cpu_cores > 1 else 1, 4))
 
             if use_parallel_processing_ui:
                 max_pdf_workers_ui = st.slider(

@@ -25,7 +25,6 @@ from data_persistence import (
 
 # カスタムモジュールのインポート
 try:
-    # analysis_tabs.py からは create_data_tables_tab のみインポート
     from analysis_tabs import create_data_tables_tab
     from data_processing_tab import create_data_processing_tab
     import pdf_output_tab
@@ -35,10 +34,10 @@ try:
     from unified_filters import (create_unified_filter_sidebar, apply_unified_filters,
                                  get_unified_filter_summary, initialize_unified_filters,
                                  get_unified_filter_config, validate_unified_filters)
-    # 各分析タブを直接インポート
     from alos_analysis_tab import display_alos_analysis_tab
     from dow_analysis_tab import display_dow_analysis_tab
-    from individual_analysis_tab import display_individual_analysis_tab # ← これを直接使う
+    from individual_analysis_tab import display_individual_analysis_tab
+    # from analysis_tabs import create_individual_analysis_section
 
     FORECAST_AVAILABLE = True
 except ImportError as e:
@@ -893,8 +892,8 @@ def main():
                 st.error(f"曜日別入退院分析でエラー: {str(e)}\n{traceback.format_exc()}")
         elif selected_menu == "🔍 個別分析":
             try:
-                # display_individual_analysis_tab を直接呼び出す
-                if display_individual_analysis_tab:
+                # display_individual_analysis_tab がインポートできているか確認し、呼び出す
+                if 'display_individual_analysis_tab' in locals() and callable(display_individual_analysis_tab):
                     display_individual_analysis_tab(df_filtered_unified)
                 else: 
                     st.error("個別分析機能が利用できません。")

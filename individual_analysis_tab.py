@@ -70,20 +70,13 @@ def display_individual_analysis_tab(df_filtered_main):
         print(f"目標値未発見: {dept_name_clean} (検索対象: {len(target_dict)}件)")
         return None, False
     
-    def get_enhanced_target_values_fast(target_data, filter_code, current_filter_config, metric_name='日平均在院患者数'):
-        """高速化された目標値取得関数"""
+    def get_enhanced_target_values(target_data, filter_code, current_filter_config, metric_name='日平均在院患者数'):
+        """強化された目標値取得関数"""
         target_values = {'all': None, 'weekday': None, 'holiday': None}
         
-        if target_data is None or target_data.empty:
+        if not target_data or target_data.empty:
+            print(f"目標値データが空 - filter_code: {filter_code}")
             return target_values
-        
-        # インデックスをセッションステートにキャッシュ
-        cache_key = f"target_index_{id(target_data)}"
-        if cache_key not in st.session_state:
-            st.session_state[cache_key] = create_target_value_index(target_data)
-        
-        target_index = st.session_state[cache_key]
-        return get_target_values_optimized(target_index, filter_code, metric_name)
         
         try:
             print(f"=== 目標値検索開始 ===")
