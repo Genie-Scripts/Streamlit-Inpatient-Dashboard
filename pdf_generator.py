@@ -262,7 +262,7 @@ def create_patient_chart_with_target_wrapper(
                 
             except ValueError: 
                 print(f"Warning: Target value '{target_value}' for {title} not float.")
-
+        # ここにelseは不要 - 目標値がない場合はMatplotlibのデフォルトの自動スケーリングが使用される
 
         ax.set_title(title, fontproperties=font_prop, fontsize=11)
         ax.set_xlabel('日付', fontproperties=font_prop, fontsize=9)

@@ -90,71 +90,117 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
         if fig: plt.close(fig)
         gc.collect()
 
-
 def create_interactive_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, target_value=None, chart_type="全日"):
     """
     インタラクティブな患者数推移グラフを作成する (Plotly)
     """
     try:
-        # ... (前半のコードは同じ) ...
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            logger.warning(f"create_interactive_patient_chart: '{title}' のデータが空です。")
+            return None
+        if "日付" not in data.columns or "入院患者数（在院）" not in data.columns:
+            logger.warning(f"create_interactive_patient_chart: '{title}' のデータに必要な列（日付, 入院患者数（在院））がありません。")
+            return None
 
-        if not grouped.empty:
-            # 平均線
+        data_copy = data.copy()
+        if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
+            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
+            data_copy.dropna(subset=['日付'], inplace=True)
+
+        grouped = data_copy.groupby("日付")["入院患者数（在院）"].sum().reset_index().sort_values("日付")
+        
+        if grouped.empty:
+            logger.warning(f"create_interactive_patient_chart: '{title}' のグループ化後データが空です。")
+            return None
+            
+        if len(grouped) > days and days > 0:
+            grouped = grouped.tail(days)
+
+        if grouped.empty:
+            logger.warning(f"create_interactive_patient_chart: '{title}' の期間絞り込み後データが空です（days: {days}）。")
+            return None
+
+        avg = grouped["入院患者数（在院）"].mean()
+        if len(grouped) >= 7: 
+            grouped['7日移動平均'] = grouped["入院患者数（在院）"].rolling(window=7, min_periods=1).mean()
+
+        fig = make_subplots()
+        
+        # 基本的なグラフ要素
+        fig.add_trace(go.Scatter(
+            x=grouped["日付"], 
+            y=grouped["入院患者数（在院）"], 
+            mode='lines+markers', 
+            name='入院患者数', 
+            line=dict(color='#3498db', width=2), 
+            marker=dict(size=6)
+        ))
+        
+        if show_moving_average and '7日移動平均' in grouped.columns:
+            fig.add_trace(go.Scatter(
+                x=grouped["日付"], 
+                y=grouped['7日移動平均'], 
+                mode='lines', 
+                name='7日移動平均', 
+                line=dict(color='#2ecc71', width=2)
+            ))
+        
+        # 平均線
+        fig.add_trace(go.Scatter(
+            x=[grouped["日付"].min(), grouped["日付"].max()], 
+            y=[avg, avg], 
+            mode='lines', 
+            name=f'平均: {avg:.1f}', 
+            line=dict(color='#e74c3c', width=2, dash='dash')
+        ))
+
+        if target_value is not None and pd.notna(target_value):
+            # 目標線
             fig.add_trace(go.Scatter(
                 x=[grouped["日付"].min(), grouped["日付"].max()], 
-                y=[avg, avg], 
+                y=[target_value, target_value], 
                 mode='lines', 
-                name=f'平均: {avg:.1f}', 
-                line=dict(color='#e74c3c', width=2, dash='dash')
+                name=f'目標値: {target_value:.1f}', 
+                line=dict(color='#9b59b6', width=2, dash='dot')
             ))
-
-            if target_value is not None and pd.notna(target_value):
-                # 目標線
-                fig.add_trace(go.Scatter(
-                    x=[grouped["日付"].min(), grouped["日付"].max()], 
-                    y=[target_value, target_value], 
-                    mode='lines', 
-                    name=f'目標値: {target_value:.1f}', 
-                    line=dict(color='#9b59b6', width=2, dash='dot')
-                ))
-                
-                # データの範囲を取得して適切なY軸範囲を計算
-                data_min = grouped["入院患者数（在院）"].min()
-                data_max = grouped["入院患者数（在院）"].max()
-                
-                # 下限：データの最小値から10%のマージン
-                y_min = data_min * 0.9 if data_min > 0 else 0
-                
-                # 上限：データの最大値と目標値の大きい方に20%のマージン
-                y_max = max(data_max, target_value) * 1.2
-                
-                # 達成ゾーン（目標値以上）- 薄い緑色
-                fig.add_trace(go.Scatter(
-                    x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
-                    y=[target_value, target_value, y_max, y_max], 
-                    fill='toself', 
-                    fillcolor='rgba(46, 204, 113, 0.15)',  # 薄い緑色
-                    line=dict(color='rgba(46, 204, 113, 0)', width=0), 
-                    name='達成ゾーン',
-                    showlegend=True,
-                    hoverinfo='skip'
-                ))
-                
-                # 注意ゾーン（目標値の97%～目標値）- 薄いオレンジ色
-                caution_threshold = target_value * 0.97
-                fig.add_trace(go.Scatter(
-                    x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
-                    y=[caution_threshold, caution_threshold, target_value, target_value], 
-                    fill='toself', 
-                    fillcolor='rgba(255, 165, 0, 0.15)',  # 薄いオレンジ色
-                    line=dict(color='rgba(255, 165, 0, 0)', width=0), 
-                    name='注意ゾーン',
-                    showlegend=True,
-                    hoverinfo='skip'
-                ))
-                
-                # Y軸の範囲を設定
-                fig.update_yaxes(range=[y_min, y_max])
+            
+            # データの範囲を取得して適切なY軸範囲を計算
+            data_min = grouped["入院患者数（在院）"].min()
+            data_max = grouped["入院患者数（在院）"].max()
+            
+            # 下限：データの最小値から10%のマージン
+            y_min = data_min * 0.9 if data_min > 0 else 0
+            
+            # 上限：データの最大値と目標値の大きい方に20%のマージン
+            y_max = max(data_max, target_value) * 1.2
+            
+            # 達成ゾーン（目標値以上）- 薄い緑色
+            fig.add_trace(go.Scatter(
+                x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
+                y=[target_value, target_value, y_max, y_max], 
+                fill='toself', 
+                fillcolor='rgba(46, 204, 113, 0.15)',  # 薄い緑色
+                line=dict(color='rgba(46, 204, 113, 0)', width=0), 
+                name='達成ゾーン',
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+            
+            # 注意ゾーン（目標値の97%～目標値）- 薄いオレンジ色
+            caution_threshold = target_value * 0.97
+            fig.add_trace(go.Scatter(
+                x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
+                y=[caution_threshold, caution_threshold, target_value, target_value], 
+                fill='toself', 
+                fillcolor='rgba(255, 165, 0, 0.15)',  # 薄いオレンジ色
+                line=dict(color='rgba(255, 165, 0, 0)', width=0), 
+                name='注意ゾーン',
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+            
+            # Y軸の範囲を設定
+            fig.update_yaxes(range=[y_min, y_max])
 
         fig.update_layout(
             title=title, 
