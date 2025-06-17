@@ -99,6 +99,14 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
         if not isinstance(data, pd.DataFrame) or data.empty:
             logger.warning(f"create_interactive_patient_chart: '{title}' のデータが空です。")
             return None
+            
+        data_copy = data.copy()
+
+        # --- ▼▼▼ ここに関数内クレンジング処理を追加 ▼▼▼ ---
+        if "入院患者数（在院）" in data_copy.columns:
+            data_copy["入院患者数（在院）"] = pd.to_numeric(data_copy["入院患者数（在院）"], errors='coerce').fillna(0)
+        # --- ▲▲▲ クレンジング処理終了 ▲▲▲ ---
+            
         if "日付" not in data.columns or "入院患者数（在院）" not in data.columns:
             logger.warning(f"create_interactive_patient_chart: '{title}' のデータに必要な列（日付, 入院患者数（在院））がありません。")
             return None
@@ -168,6 +176,13 @@ def create_interactive_dual_axis_chart(data, title="入院患者数と患者移�
             return None
         
         data_copy = data.copy()
+        
+        # --- ▼▼▼ ここに関数内クレンジング処理を追加 ▼▼▼ ---
+        for col in required_columns:
+            if col != '日付' and col in data_copy.columns:
+                 data_copy[col] = pd.to_numeric(data_copy[col], errors='coerce').fillna(0)
+        # --- ▲▲▲ クレンジング処理終了 ▲▲▲ ---
+        
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
