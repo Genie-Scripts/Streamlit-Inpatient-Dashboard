@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (修正版 - 統一フィルター専用)
+# individual_analysis_tab.py (クリーンアップ版)
 
 import streamlit as st
 import pandas as pd
@@ -23,10 +23,39 @@ except ImportError as e:
     get_unified_filter_summary = None
     get_unified_filter_config = None
 
+def find_department_code_in_targets(dept_name, target_dict, metric_name):
+    """診療科名に対応する部門コードを目標値辞書から探す"""
+    if not target_dict:
+        return None, False
+    
+    # 直接一致をチェック
+    test_key = (str(dept_name).strip(), metric_name, '全日')
+    if test_key in target_dict:
+        return str(dept_name).strip(), True
+    
+    # 部分一致をチェック
+    dept_name_clean = str(dept_name).strip()
+    for (dept_code, indicator, period), value in target_dict.items():
+        if indicator == metric_name and period == '全日':
+            if dept_name_clean in str(dept_code) or str(dept_code) in dept_name_clean:
+                return str(dept_code), True
+    
+    # 正規化一致をチェック（スペースや特殊文字を無視）
+    import re
+    dept_name_normalized = re.sub(r'[^\w]', '', dept_name_clean)
+    for (dept_code, indicator, period), value in target_dict.items():
+        if indicator == metric_name and period == '全日':
+            dept_code_normalized = re.sub(r'[^\w]', '', str(dept_code))
+            if dept_name_normalized and dept_code_normalized:
+                if dept_name_normalized == dept_code_normalized:
+                    return str(dept_code), True
+    
+    return None, False
+
 def display_dataframe_with_title(title, df_data, key_suffix=""):
     if df_data is not None and not df_data.empty:
         st.markdown(f"##### {title}")
-        st.dataframe(df_data.fillna('-'), use_container_width=True)
+        st.dataframe(df_data, use_container_width=True)
     else:
         st.markdown(f"##### {title}")
         st.warning(f"{title} データがありません。")
@@ -34,14 +63,16 @@ def display_dataframe_with_title(title, df_data, key_suffix=""):
 def display_individual_analysis_tab(df_filtered_main):
     st.header("📊 個別分析")
 
+    METRIC_FOR_CHART = '日平均在院患者数'
+
     if not all([generate_filtered_summaries, create_forecast_dataframe, create_interactive_patient_chart,
-                create_interactive_dual_axis_chart, get_display_name_for_dept, 
+                create_interactive_dual_axis_chart, get_display_name_for_dept,
                 get_unified_filter_summary, get_unified_filter_config]):
         st.error("個別分析タブの実行に必要な機能の一部が読み込めませんでした。アプリケーションのログを確認し、インポートエラーを解決してください。")
         return
 
     df = df_filtered_main
-    # 除外病棟をフィルタリング
+
     if df is not None and not df.empty and '病棟コード' in df.columns and EXCLUDED_WARDS:
         df = df[~df['病棟コード'].isin(EXCLUDED_WARDS)]
     target_data = st.session_state.get('target_data')
@@ -78,19 +109,36 @@ def display_individual_analysis_tab(df_filtered_main):
             latest_data_date = pd.Timestamp(latest_data_date_from_df).normalize()
         else:
             latest_data_date = pd.to_datetime(latest_data_date_str_from_session, format="%Y年%m月%d日").normalize()
-        logger.info(f"個別分析: 予測基準日として {latest_data_date.strftime('%Y-%m-%d')} を使用します。")
     except Exception as e:
         logger.error(f"最新データ日付の処理中にエラー: {e}", exc_info=True)
         st.error(f"最新データ日付の処理中にエラーが発生しました。予測基準日として本日の日付を使用します。")
         latest_data_date = pd.Timestamp.now().normalize()
 
-    # =================================================================
-    # 統一フィルター範囲全体での分析（選択機能削除）
-    # =================================================================
     current_filter_title_display = "統一フィルター適用範囲全体" if unified_filter_applied else "全体"
     current_results_data = all_results
     chart_data_for_graphs = df.copy()
-    filter_code_for_target = "全体"
+
+    filter_code_for_target = None
+    filter_config = get_unified_filter_config() if get_unified_filter_config else {}
+
+    # フィルター設定から対象コードを決定（複数のキー名に対応）
+    if filter_config:
+        selected_departments = (filter_config.get('selected_departments', []) or 
+                              filter_config.get('selected_depts', []))
+        selected_wards = (filter_config.get('selected_wards', []) or 
+                         filter_config.get('selected_ward', []))
+        
+        if selected_departments and len(selected_departments) == 1:
+            selected_dept_identifier = str(selected_departments[0]).strip()
+            filter_code_for_target = selected_dept_identifier
+            current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_identifier)}"
+        elif selected_wards and len(selected_wards) == 1:
+            selected_ward = str(selected_wards[0]).strip()
+            filter_code_for_target = selected_ward
+            current_filter_title_display = f"病棟: {selected_ward}"
+
+    if filter_code_for_target is None:
+        filter_code_for_target = "全体"
 
     st.markdown(f"#### 分析結果: {current_filter_title_display}")
 
@@ -99,7 +147,7 @@ def display_individual_analysis_tab(df_filtered_main):
         return
 
     selected_days_for_graph = 90
-    
+
     if chart_data_for_graphs is not None and not chart_data_for_graphs.empty:
         data_period_info = ""
         min_date_chart_obj = None
@@ -114,36 +162,113 @@ def display_individual_analysis_tab(df_filtered_main):
             calculated_days = (max_date_chart_obj - min_date_chart_obj).days + 1
             if calculated_days > 0:
                 selected_days_for_graph = calculated_days
-        
+
         if min_date_chart_obj and max_date_chart_obj:
             st.markdown(f"##### グラフ表示期間: フィルター適用期間全体 ({min_date_chart_obj.strftime('%Y/%m/%d')} - {max_date_chart_obj.strftime('%Y/%m/%d')}, {selected_days_for_graph}日間)")
         else:
             st.markdown(f"##### グラフ表示期間: フィルター適用期間全体 ({selected_days_for_graph}日間)")
 
         target_val_all, target_val_weekday, target_val_holiday = None, None, None
-        if target_data is not None and not target_data.empty and \
-           all(col in target_data.columns for col in ['部門コード', '区分', '目標値']):
+        
+        # 目標値の取得
+        if target_data is not None and not target_data.empty:
+            # 目標値辞書の構築
             if '_target_dict' not in st.session_state:
                 st.session_state._target_dict = {}
-                for _, row in target_data.iterrows():
-                    st.session_state._target_dict[(str(row['部門コード']), str(row['区分']))] = row['目標値']
-            target_val_all = st.session_state._target_dict.get((str(filter_code_for_target), '全日'))
-            target_val_weekday = st.session_state._target_dict.get((str(filter_code_for_target), '平日'))
-            target_val_holiday = st.session_state._target_dict.get((str(filter_code_for_target), '休日'))
+                period_col_name = '区分' if '区分' in target_data.columns else '期間区分'
+                indicator_col_name = '指標タイプ'
+                
+                if all(col in target_data.columns for col in ['部門コード', '目標値', period_col_name, indicator_col_name]):
+                    for _, row in target_data.iterrows():
+                        dept_code = str(row['部門コード']).strip()
+                        indicator = str(row[indicator_col_name]).strip()
+                        period = str(row[period_col_name]).strip()
+                        key = (dept_code, indicator, period)
+                        st.session_state._target_dict[key] = row['目標値']
+            
+            # 目標値の検索
+            if st.session_state._target_dict:
+                if filter_code_for_target == "全体":
+                    # 全体の目標値を検索
+                    key_all_1 = ("000", METRIC_FOR_CHART, '全日')
+                    key_all_2 = ("全体", METRIC_FOR_CHART, '全日')
+                    target_val_all = st.session_state._target_dict.get(key_all_1, st.session_state._target_dict.get(key_all_2))
+                    
+                    key_weekday_1 = ("000", METRIC_FOR_CHART, '平日')
+                    key_weekday_2 = ("全体", METRIC_FOR_CHART, '平日')
+                    target_val_weekday = st.session_state._target_dict.get(key_weekday_1, st.session_state._target_dict.get(key_weekday_2))
+                    
+                    key_holiday_1 = ("000", METRIC_FOR_CHART, '休日')
+                    key_holiday_2 = ("全体", METRIC_FOR_CHART, '休日')
+                    target_val_holiday = st.session_state._target_dict.get(key_holiday_1, st.session_state._target_dict.get(key_holiday_2))
+                else:
+                    # 診療科/病棟固有の目標値を検索
+                    actual_dept_code = filter_code_for_target
+                    
+                    # 診療科の場合、目標値辞書から対応する部門コードを探す
+                    selected_depts = (filter_config.get('selected_departments', []) or 
+                                    filter_config.get('selected_depts', []))
+                    if selected_depts:
+                        dept_code_found, target_exists = find_department_code_in_targets(
+                            filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
+                        )
+                        if dept_code_found:
+                            actual_dept_code = dept_code_found
+                    
+                    key_all = (str(actual_dept_code), METRIC_FOR_CHART, '全日')
+                    target_val_all = st.session_state._target_dict.get(key_all)
+                    key_weekday = (str(actual_dept_code), METRIC_FOR_CHART, '平日')
+                    target_val_weekday = st.session_state._target_dict.get(key_weekday)
+                    key_holiday = (str(actual_dept_code), METRIC_FOR_CHART, '休日')
+                    target_val_holiday = st.session_state._target_dict.get(key_holiday)
 
+                # 目標値の型変換
+                for target_val in [target_val_all, target_val_weekday, target_val_holiday]:
+                    if target_val is not None:
+                        try: 
+                            target_val = float(target_val)
+                        except (ValueError, TypeError): 
+                            target_val = None
+
+        # デバッグ機能（簡略版）
+        if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
+            st.markdown("---")
+            st.subheader("目標値設定デバッグ")
+
+            st.markdown("##### フィルター状況")
+            st.write(f"**分析対象:** {current_filter_title_display}")
+            st.write(f"**検索キー:** `('{filter_code_for_target}', '{METRIC_FOR_CHART}', '全日')`")
+            
+            if target_val_all is not None:
+                st.success(f"✅ 目標値が見つかりました: {target_val_all}")
+            else:
+                st.warning("❌ 目標値が見つかりませんでした")
+                
+                if '_target_dict' in st.session_state:
+                    st.markdown("##### 利用可能な部門コード")
+                    available_keys = {k: v for k, v in st.session_state._target_dict.items() if k[1] == METRIC_FOR_CHART and k[2] == '全日'}
+                    if available_keys:
+                        key_df_data = [{"部門コード": key[0], "目標値": value} for key, value in available_keys.items()]
+                        key_df = pd.DataFrame(key_df_data)
+                        st.dataframe(key_df, use_container_width=True)
+
+        # グラフ表示
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
-
+        
         with graph_tab1:
             if create_interactive_patient_chart:
                 st.markdown("##### 全日 入院患者数推移")
                 try:
                     fig_all_ind = create_interactive_patient_chart(
-                        chart_data_for_graphs, title=f"{current_filter_title_display} 全日", 
-                        days=selected_days_for_graph, target_value=target_val_all, chart_type="全日"
+                        chart_data_for_graphs,
+                        title=f"{current_filter_title_display} 全日",
+                        days=selected_days_for_graph,
+                        target_value=target_val_all,
+                        chart_type="全日"
                     )
-                    if fig_all_ind: 
+                    if fig_all_ind:
                         st.plotly_chart(fig_all_ind, use_container_width=True)
-                    else: 
+                    else:
                         st.warning("全日グラフの生成に失敗しました。")
                 except Exception as e:
                     logger.error(f"全日グラフ作成エラー: {e}", exc_info=True)
@@ -152,32 +277,38 @@ def display_individual_analysis_tab(df_filtered_main):
                 if "平日判定" in chart_data_for_graphs.columns:
                     weekday_data_ind = chart_data_for_graphs[chart_data_for_graphs["平日判定"] == "平日"]
                     holiday_data_ind = chart_data_for_graphs[chart_data_for_graphs["平日判定"] == "休日"]
-                    
+
                     st.markdown("##### 平日 入院患者数推移")
                     try:
                         fig_weekday_ind = create_interactive_patient_chart(
-                            weekday_data_ind, title=f"{current_filter_title_display} 平日", 
-                            days=selected_days_for_graph, show_moving_average=False, 
-                            target_value=target_val_weekday, chart_type="平日"
+                            weekday_data_ind,
+                            title=f"{current_filter_title_display} 平日",
+                            days=selected_days_for_graph,
+                            show_moving_average=False,
+                            target_value=target_val_weekday,
+                            chart_type="平日"
                         )
-                        if fig_weekday_ind: 
+                        if fig_weekday_ind:
                             st.plotly_chart(fig_weekday_ind, use_container_width=True)
-                        else: 
+                        else:
                             st.warning("平日グラフの生成に失敗しました。")
                     except Exception as e:
                         logger.error(f"平日グラフ作成エラー: {e}", exc_info=True)
                         st.error(f"平日グラフの作成中にエラーが発生しました: {e}")
-                    
+
                     st.markdown("##### 休日 入院患者数推移")
                     try:
                         fig_holiday_ind = create_interactive_patient_chart(
-                            holiday_data_ind, title=f"{current_filter_title_display} 休日", 
-                            days=selected_days_for_graph, show_moving_average=False, 
-                            target_value=target_val_holiday, chart_type="休日"
+                            holiday_data_ind,
+                            title=f"{current_filter_title_display} 休日",
+                            days=selected_days_for_graph,
+                            show_moving_average=False,
+                            target_value=target_val_holiday,
+                            chart_type="休日"
                         )
-                        if fig_holiday_ind: 
+                        if fig_holiday_ind:
                             st.plotly_chart(fig_holiday_ind, use_container_width=True)
-                        else: 
+                        else:
                             st.warning("休日グラフの生成に失敗しました。")
                     except Exception as e:
                         logger.error(f"休日グラフ作成エラー: {e}", exc_info=True)
@@ -190,12 +321,12 @@ def display_individual_analysis_tab(df_filtered_main):
                 st.markdown("##### 入院患者数と患者移動の推移（7日移動平均）")
                 try:
                     fig_dual_ind = create_interactive_dual_axis_chart(
-                        chart_data_for_graphs, title=f"{current_filter_title_display} 患者数と移動", 
+                        chart_data_for_graphs, title=f"{current_filter_title_display} 患者数と移動",
                         days=selected_days_for_graph
                     )
-                    if fig_dual_ind: 
+                    if fig_dual_ind:
                         st.plotly_chart(fig_dual_ind, use_container_width=True)
-                    else: 
+                    else:
                         st.warning("複合グラフの生成に失敗しました。")
                 except Exception as e:
                     logger.error(f"複合グラフ作成エラー: {e}", exc_info=True)
@@ -212,7 +343,7 @@ def display_individual_analysis_tab(df_filtered_main):
         current_results_data.get("holiday") is not None:
         try:
             forecast_df_ind = create_forecast_dataframe(
-                current_results_data.get("summary"), current_results_data.get("weekday"), 
+                current_results_data.get("summary"), current_results_data.get("weekday"),
                 current_results_data.get("holiday"), latest_data_date
             )
             if forecast_df_ind is not None and not forecast_df_ind.empty:
