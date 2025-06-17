@@ -22,190 +22,195 @@ except ImportError as e:
     get_unified_filter_summary = None
     get_unified_filter_config = None
 
-def find_department_code_in_targets_enhanced(dept_name, target_dict, metric_name):
-    """診療科名に対応する部門コードを目標値辞書から探す（強化版）"""
-    if not target_dict:
+
+
+def display_individual_analysis_tab(df_filtered_main):
+
+    # ▼▼▼▼▼ ここから内側のヘルパー関数として定義 ▼▼▼▼▼
+    def find_department_code_in_targets_enhanced(dept_name, target_dict, metric_name):
+        """診療科名に対応する部門コードを目標値辞書から探す（強化版）"""
+        if not target_dict:
+            return None, False
+        
+        dept_name_clean = str(dept_name).strip()
+        
+        # 1. 直接一致をチェック
+        test_key = (dept_name_clean, metric_name, '全日')
+        if test_key in target_dict:
+            print(f"目標値発見（直接一致）: {test_key} = {target_dict[test_key]}")
+            return dept_name_clean, True
+        
+        # 2. 部分一致をチェック
+        for (dept_code, indicator, period), value in target_dict.items():
+            if indicator == metric_name and period == '全日':
+                if dept_name_clean in str(dept_code) or str(dept_code) in dept_name_clean:
+                    print(f"目標値発見（部分一致）: ({dept_code}, {indicator}, {period}) = {value}")
+                    return str(dept_code), True
+        
+        # 3. 正規化一致をチェック（スペースや特殊文字を無視）
+        import re
+        dept_name_normalized = re.sub(r'[^\w]', '', dept_name_clean)
+        for (dept_code, indicator, period), value in target_dict.items():
+            if indicator == metric_name and period == '全日':
+                dept_code_normalized = re.sub(r'[^\w]', '', str(dept_code))
+                if dept_name_normalized and dept_code_normalized:
+                    if dept_name_normalized == dept_code_normalized:
+                        print(f"目標値発見（正規化一致）: ({dept_code}, {indicator}, {period}) = {value}")
+                        return str(dept_code), True
+        
+        # 4. 拡張検索（キーワード部分検索）
+        for (dept_code, indicator, period), value in target_dict.items():
+            if period == '全日':
+                # 指標名の部分一致もチェック
+                if any(keyword in indicator for keyword in ['在院', '患者', '人数']):
+                    if dept_name_clean in str(dept_code) or str(dept_code) in dept_name_clean:
+                        print(f"目標値発見（拡張検索）: ({dept_code}, {indicator}, {period}) = {value}")
+                        return str(dept_code), True
+        
+        print(f"目標値未発見: {dept_name_clean} (検索対象: {len(target_dict)}件)")
         return None, False
     
-    dept_name_clean = str(dept_name).strip()
-    
-    # 1. 直接一致をチェック
-    test_key = (dept_name_clean, metric_name, '全日')
-    if test_key in target_dict:
-        print(f"目標値発見（直接一致）: {test_key} = {target_dict[test_key]}")
-        return dept_name_clean, True
-    
-    # 2. 部分一致をチェック
-    for (dept_code, indicator, period), value in target_dict.items():
-        if indicator == metric_name and period == '全日':
-            if dept_name_clean in str(dept_code) or str(dept_code) in dept_name_clean:
-                print(f"目標値発見（部分一致）: ({dept_code}, {indicator}, {period}) = {value}")
-                return str(dept_code), True
-    
-    # 3. 正規化一致をチェック（スペースや特殊文字を無視）
-    import re
-    dept_name_normalized = re.sub(r'[^\w]', '', dept_name_clean)
-    for (dept_code, indicator, period), value in target_dict.items():
-        if indicator == metric_name and period == '全日':
-            dept_code_normalized = re.sub(r'[^\w]', '', str(dept_code))
-            if dept_name_normalized and dept_code_normalized:
-                if dept_name_normalized == dept_code_normalized:
-                    print(f"目標値発見（正規化一致）: ({dept_code}, {indicator}, {period}) = {value}")
-                    return str(dept_code), True
-    
-    # 4. 拡張検索（キーワード部分検索）
-    for (dept_code, indicator, period), value in target_dict.items():
-        if period == '全日':
-            # 指標名の部分一致もチェック
-            if any(keyword in indicator for keyword in ['在院', '患者', '人数']):
-                if dept_name_clean in str(dept_code) or str(dept_code) in dept_name_clean:
-                    print(f"目標値発見（拡張検索）: ({dept_code}, {indicator}, {period}) = {value}")
-                    return str(dept_code), True
-    
-    print(f"目標値未発見: {dept_name_clean} (検索対象: {len(target_dict)}件)")
-    return None, False
-
-def get_enhanced_target_values(target_data, filter_code, current_filter_config, metric_name='日平均在院患者数'):
-    """強化された目標値取得関数"""
-    target_values = {'all': None, 'weekday': None, 'holiday': None}
-    
-    if not target_data or target_data.empty:
-        print(f"目標値データが空 - filter_code: {filter_code}")
-        return target_values
-    
-    try:
-        print(f"=== 目標値検索開始 ===")
-        print(f"Filter code: {filter_code}")
-        print(f"Target data shape: {target_data.shape}")
-        print(f"Target data columns: {list(target_data.columns)}")
+    def get_enhanced_target_values(target_data, filter_code, current_filter_config, metric_name='日平均在院患者数'):
+        """強化された目標値取得関数"""
+        target_values = {'all': None, 'weekday': None, 'holiday': None}
         
-        # 目標値辞書の構築（複数列名パターンに対応）
-        target_dict = {}
-        
-        # 期間列の特定
-        period_cols = ['区分', '期間区分', '期間', '分類']
-        period_col = None
-        for col in period_cols:
-            if col in target_data.columns:
-                period_col = col
-                break
-        
-        # 指標列の特定
-        indicator_cols = ['指標タイプ', '指標名', '指標', 'メトリクス']
-        indicator_col = None
-        for col in indicator_cols:
-            if col in target_data.columns:
-                indicator_col = col
-                break
-        
-        print(f"期間列: {period_col}, 指標列: {indicator_col}")
-        
-        # 必須列の確認
-        if not all(col in target_data.columns for col in ['部門コード', '目標値']):
-            print(f"必須列不足 - 必要: ['部門コード', '目標値']")
+        if not target_data or target_data.empty:
+            print(f"目標値データが空 - filter_code: {filter_code}")
             return target_values
         
-        # 目標値辞書の構築
-        for _, row in target_data.iterrows():
-            dept_code = str(row['部門コード']).strip()
-            target_val = row['目標値']
+        try:
+            print(f"=== 目標値検索開始 ===")
+            print(f"Filter code: {filter_code}")
+            print(f"Target data shape: {target_data.shape}")
+            print(f"Target data columns: {list(target_data.columns)}")
             
-            if pd.notna(target_val):
-                # 期間の取得
-                period = '全日'  # デフォルト
-                if period_col and pd.notna(row[period_col]):
-                    period = str(row[period_col]).strip()
+            # 目標値辞書の構築（複数列名パターンに対応）
+            target_dict = {}
+            
+            # 期間列の特定
+            period_cols = ['区分', '期間区分', '期間', '分類']
+            period_col = None
+            for col in period_cols:
+                if col in target_data.columns:
+                    period_col = col
+                    break
+            
+            # 指標列の特定
+            indicator_cols = ['指標タイプ', '指標名', '指標', 'メトリクス']
+            indicator_col = None
+            for col in indicator_cols:
+                if col in target_data.columns:
+                    indicator_col = col
+                    break
+            
+            print(f"期間列: {period_col}, 指標列: {indicator_col}")
+            
+            # 必須列の確認
+            if not all(col in target_data.columns for col in ['部門コード', '目標値']):
+                print(f"必須列不足 - 必要: ['部門コード', '目標値']")
+                return target_values
+            
+            # 目標値辞書の構築
+            for _, row in target_data.iterrows():
+                dept_code = str(row['部門コード']).strip()
+                target_val = row['目標値']
                 
-                # 指標の取得
-                indicator = metric_name  # デフォルト
-                if indicator_col and pd.notna(row[indicator_col]):
-                    indicator = str(row[indicator_col]).strip()
-                
-                key = (dept_code, indicator, period)
-                target_dict[key] = float(target_val)
-                print(f"目標値登録: {key} = {target_val}")
-        
-        print(f"目標値辞書構築完了: {len(target_dict)}件")
-        
-        # 検索対象コードの決定
-        search_codes = []
-        
-        if filter_code == "全体":
-            search_codes = ["000", "全体", "病院全体", "総合", "病院"]
-        else:
-            # フィルター設定から詳細情報を取得
-            if current_filter_config:
-                selected_depts = (current_filter_config.get('selected_departments', []) or 
-                                current_filter_config.get('selected_depts', []))
-                selected_wards = (current_filter_config.get('selected_wards', []) or 
-                                current_filter_config.get('selected_ward', []))
-                
-                if selected_depts:
-                    # 診療科での検索
-                    dept_code, found = find_department_code_in_targets_enhanced(
-                        filter_code, target_dict, metric_name
-                    )
-                    if found:
-                        search_codes = [dept_code]
+                if pd.notna(target_val):
+                    # 期間の取得
+                    period = '全日'  # デフォルト
+                    if period_col and pd.notna(row[period_col]):
+                        period = str(row[period_col]).strip()
+                    
+                    # 指標の取得
+                    indicator = metric_name  # デフォルト
+                    if indicator_col and pd.notna(row[indicator_col]):
+                        indicator = str(row[indicator_col]).strip()
+                    
+                    key = (dept_code, indicator, period)
+                    target_dict[key] = float(target_val)
+                    print(f"目標値登録: {key} = {target_val}")
+            
+            print(f"目標値辞書構築完了: {len(target_dict)}件")
+            
+            # 検索対象コードの決定
+            search_codes = []
+            
+            if filter_code == "全体":
+                search_codes = ["000", "全体", "病院全体", "総合", "病院"]
+            else:
+                # フィルター設定から詳細情報を取得
+                if current_filter_config:
+                    selected_depts = (current_filter_config.get('selected_departments', []) or 
+                                    current_filter_config.get('selected_depts', []))
+                    selected_wards = (current_filter_config.get('selected_wards', []) or 
+                                    current_filter_config.get('selected_ward', []))
+                    
+                    if selected_depts:
+                        # 診療科での検索
+                        dept_code, found = find_department_code_in_targets_enhanced(
+                            filter_code, target_dict, metric_name
+                        )
+                        if found:
+                            search_codes = [dept_code]
+                        else:
+                            search_codes = [str(filter_code)]
+                    elif selected_wards:
+                        # 病棟での検索
+                        search_codes = [str(filter_code)]
                     else:
                         search_codes = [str(filter_code)]
-                elif selected_wards:
-                    # 病棟での検索
-                    search_codes = [str(filter_code)]
                 else:
                     search_codes = [str(filter_code)]
-            else:
-                search_codes = [str(filter_code)]
-        
-        print(f"検索対象コード: {search_codes}")
-        
-        # 目標値の検索（拡張版）
-        for period_type, period_names in [
-            ('all', ['全日', '全て', '全体']), 
-            ('weekday', ['平日']), 
-            ('holiday', ['休日', '祝日'])
-        ]:
-            for search_code in search_codes:
-                for period_name in period_names:
-                    # 複数の指標名パターンで検索
-                    for indicator in [metric_name, "日平均在院患者数", "在院患者数", "患者数", "入院患者数"]:
-                        key = (search_code, indicator, period_name)
-                        if key in target_dict:
-                            try:
-                                target_values[period_type] = float(target_dict[key])
-                                print(f"✅ 目標値発見: {key} = {target_values[period_type]}")
-                                break
-                            except (ValueError, TypeError):
-                                continue
+            
+            print(f"検索対象コード: {search_codes}")
+            
+            # 目標値の検索（拡張版）
+            for period_type, period_names in [
+                ('all', ['全日', '全て', '全体']), 
+                ('weekday', ['平日']), 
+                ('holiday', ['休日', '祝日'])
+            ]:
+                for search_code in search_codes:
+                    for period_name in period_names:
+                        # 複数の指標名パターンで検索
+                        for indicator in [metric_name, "日平均在院患者数", "在院患者数", "患者数", "入院患者数"]:
+                            key = (search_code, indicator, period_name)
+                            if key in target_dict:
+                                try:
+                                    target_values[period_type] = float(target_dict[key])
+                                    print(f"✅ 目標値発見: {key} = {target_values[period_type]}")
+                                    break
+                                except (ValueError, TypeError):
+                                    continue
+                        
+                        if target_values[period_type] is not None:
+                            break
                     
                     if target_values[period_type] is not None:
                         break
-                
-                if target_values[period_type] is not None:
-                    break
+            
+            # 結果の出力
+            print(f"=== 目標値検索結果 ===")
+            for period_type, value in target_values.items():
+                status = f"✅ {value}" if value is not None else "❌ 未発見"
+                print(f"{period_type}: {status}")
+            
+        except Exception as e:
+            print(f"目標値取得エラー: {e}")
+            import traceback
+            print(traceback.format_exc())
         
-        # 結果の出力
-        print(f"=== 目標値検索結果 ===")
-        for period_type, value in target_values.items():
-            status = f"✅ {value}" if value is not None else "❌ 未発見"
-            print(f"{period_type}: {status}")
-        
-    except Exception as e:
-        print(f"目標値取得エラー: {e}")
-        import traceback
-        print(traceback.format_exc())
+        return target_values
     
-    return target_values
+    def display_dataframe_with_title(title, df_data, key_suffix=""):
+        if df_data is not None and not df_data.empty:
+            st.markdown(f"##### {title}")
+            st.dataframe(df_data, use_container_width=True)
+        else:
+            st.markdown(f"##### {title}")
+            st.warning(f"{title} データがありません。")
+    # ▲▲▲▲▲ ここまで内側のヘルパー関数 ▲▲▲▲▲
 
-def display_dataframe_with_title(title, df_data, key_suffix=""):
-    if df_data is not None and not df_data.empty:
-        st.markdown(f"##### {title}")
-        st.dataframe(df_data, use_container_width=True)
-    else:
-        st.markdown(f"##### {title}")
-        st.warning(f"{title} データがありません。")
-
-def display_individual_analysis_tab(df_filtered_main):
     st.header("📊 個別分析")
 
     METRIC_FOR_CHART = '日平均在院患者数'
