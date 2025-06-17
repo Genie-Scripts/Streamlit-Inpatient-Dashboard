@@ -103,52 +103,114 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
             logger.warning(f"create_interactive_patient_chart: '{title}' のデータに必要な列（日付, 入院患者数（在院））がありません。")
             return None
 
-        data_copy = data.copy() # SettingWithCopyWarning回避のためコピー
+        data_copy = data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
 
         grouped = data_copy.groupby("日付")["入院患者数（在院）"].sum().reset_index().sort_values("日付")
         
-        # 日数制限を適用する前に、データが存在するか確認
         if grouped.empty:
             logger.warning(f"create_interactive_patient_chart: '{title}' のグループ化後データが空です。")
             return None
             
-        if len(grouped) > days: # days が0以下の場合も考慮（通常は正の整数）
-             if days > 0:
+        if len(grouped) > days:
+            if days > 0:
                 grouped = grouped.tail(days)
-             # days が0以下の場合は全期間表示とするか、エラーとするか。ここでは全期間とする。
-             # ただし、呼び出し元で適切なdaysが渡される想定。
 
         if grouped.empty:
             logger.warning(f"create_interactive_patient_chart: '{title}' の期間絞り込み後データが空です（days: {days}）。")
             return None
 
-
         avg = grouped["入院患者数（在院）"].mean()
-        if len(grouped) >= 7: grouped['7日移動平均'] = grouped["入院患者数（在院）"].rolling(window=7, min_periods=1).mean()
+        if len(grouped) >= 7: 
+            grouped['7日移動平均'] = grouped["入院患者数（在院）"].rolling(window=7, min_periods=1).mean()
 
         fig = make_subplots()
-        fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）"], mode='lines+markers', name='入院患者数', line=dict(color='#3498db', width=2), marker=dict(size=6)))
-        if show_moving_average and '7日移動平均' in grouped.columns:
-            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped['7日移動平均'], mode='lines', name='7日移動平均', line=dict(color='#2ecc71', width=2)))
         
-        # groupedが空でないことを確認してからmin/maxを取得
+        # 基本的なグラフ要素
+        fig.add_trace(go.Scatter(
+            x=grouped["日付"], 
+            y=grouped["入院患者数（在院）"], 
+            mode='lines+markers', 
+            name='入院患者数', 
+            line=dict(color='#3498db', width=2), 
+            marker=dict(size=6)
+        ))
+        
+        if show_moving_average and '7日移動平均' in grouped.columns:
+            fig.add_trace(go.Scatter(
+                x=grouped["日付"], 
+                y=grouped['7日移動平均'], 
+                mode='lines', 
+                name='7日移動平均', 
+                line=dict(color='#2ecc71', width=2)
+            ))
+        
         if not grouped.empty:
-            fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[avg, avg], mode='lines', name=f'平均: {avg:.1f}', line=dict(color='#e74c3c', width=2, dash='dash')))
+            # 平均線
+            fig.add_trace(go.Scatter(
+                x=[grouped["日付"].min(), grouped["日付"].max()], 
+                y=[avg, avg], 
+                mode='lines', 
+                name=f'平均: {avg:.1f}', 
+                line=dict(color='#e74c3c', width=2, dash='dash')
+            ))
 
             if target_value is not None and pd.notna(target_value):
-                fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[target_value, target_value], mode='lines', name=f'目標値: {target_value:.1f}', line=dict(color='#9b59b6', width=2, dash='dot')))
+                # 目標線
+                fig.add_trace(go.Scatter(
+                    x=[grouped["日付"].min(), grouped["日付"].max()], 
+                    y=[target_value, target_value], 
+                    mode='lines', 
+                    name=f'目標値: {target_value:.1f}', 
+                    line=dict(color='#9b59b6', width=2, dash='dot')
+                ))
+                
+                # Y軸の範囲を取得（達成ゾーン表示用）
+                y_max = max(grouped["入院患者数（在院）"].max() * 1.1, target_value * 1.2)
+                
+                # 達成ゾーン（目標値以上）- 薄い緑色
+                fig.add_trace(go.Scatter(
+                    x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
+                    y=[target_value, target_value, y_max, y_max], 
+                    fill='toself', 
+                    fillcolor='rgba(46, 204, 113, 0.15)',  # 薄い緑色
+                    line=dict(color='rgba(46, 204, 113, 0)', width=0), 
+                    name='達成ゾーン',
+                    showlegend=True,
+                    hoverinfo='skip'
+                ))
+                
+                # 注意ゾーン（目標値の97%～目標値）- 薄いオレンジ色
                 caution_threshold = target_value * 0.97
-                fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], y=[caution_threshold, caution_threshold, target_value, target_value], fill='toself', fillcolor='rgba(255, 165, 0, 0.2)', line=dict(color='rgba(255,165,0,0)', width=0), name='注意ゾーン', hoverinfo='none'))
-        else: # groupedが空の場合のフォールバック
-            logger.warning(f"create_interactive_patient_chart: '{title}' の最終データが空のため、平均線や目標線は描画されません。")
+                fig.add_trace(go.Scatter(
+                    x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
+                    y=[caution_threshold, caution_threshold, target_value, target_value], 
+                    fill='toself', 
+                    fillcolor='rgba(255, 165, 0, 0.15)',  # 薄いオレンジ色
+                    line=dict(color='rgba(255, 165, 0, 0)', width=0), 
+                    name='注意ゾーン',
+                    showlegend=True,
+                    hoverinfo='skip'
+                ))
+                
+                # Y軸の範囲を設定
+                fig.update_yaxes(range=[0, y_max])
 
-
-        fig.update_layout(title=title, xaxis_title='日付', yaxis_title='患者数', legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), hovermode='x unified', height=500, margin=dict(l=10, r=10, t=50, b=10))
+        fig.update_layout(
+            title=title, 
+            xaxis_title='日付', 
+            yaxis_title='患者数', 
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), 
+            hovermode='x unified', 
+            height=500, 
+            margin=dict(l=10, r=10, t=50, b=10)
+        )
         fig.update_xaxes(tickformat="%Y-%m-%d", tickangle=-45, tickmode='auto', nticks=10)
+        
         return fig
+        
     except Exception as e:
         logger.error(f"インタラクティブグラフ '{title}' 作成中にエラー: {e}", exc_info=True)
         return None

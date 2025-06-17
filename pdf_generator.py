@@ -204,36 +204,86 @@ def create_patient_chart_with_target_wrapper(
         if len(grouped) > days: grouped = grouped.tail(days)
         if grouped.empty: return None
 
-        ax.plot(grouped["日付"], grouped["入院患者数（在院）"], marker='o', linestyle='-', linewidth=1.5, markersize=3, color='#3498db', label='入院患者数')
+        # 基本的なグラフ要素
+        ax.plot(grouped["日付"], grouped["入院患者数（在院）"], 
+                marker='o', linestyle='-', linewidth=1.5, markersize=3, 
+                color='#3498db', label='入院患者数')
+        
         avg = grouped["入院患者数（在院）"].mean()
-        ax.axhline(y=avg, color='#e74c3c', linestyle='--', alpha=0.7, linewidth=1, label=f'平均: {avg:.1f}')
+        ax.axhline(y=avg, color='#e74c3c', linestyle='--', alpha=0.7, 
+                   linewidth=1, label=f'平均: {avg:.1f}')
 
         if show_moving_average and len(grouped) >= 7:
             grouped['7日移動平均'] = grouped["入院患者数（在院）"].rolling(window=7, min_periods=1).mean()
-            ax.plot(grouped["日付"], grouped['7日移動平均'], linestyle='-', linewidth=1.2, color='#2ecc71', label='7日移動平均')
+            ax.plot(grouped["日付"], grouped['7日移動平均'], 
+                    linestyle='-', linewidth=1.2, color='#2ecc71', label='7日移動平均')
 
         if target_value is not None and pd.notna(target_value):
             try:
                 target_val_float = float(target_value)
-                ax.axhline(y=target_val_float, color='#9b59b6', linestyle='-.', linewidth=1.2, label=f'目標値: {target_val_float:.1f}')
+                
+                # Y軸の範囲を取得/設定
+                y_min, y_max = ax.get_ylim()
+                y_max = max(y_max, target_val_float * 1.2)
+                ax.set_ylim(bottom=0, top=y_max)
+                
+                # 達成ゾーン（目標値以上）を先に描画
+                ax.fill_between(grouped["日付"], 
+                               target_val_float, 
+                               y_max, 
+                               color='#2ecc71',  # 緑色
+                               alpha=0.15, 
+                               label='達成ゾーン',
+                               zorder=1)  # 背景に描画
+                
+                # 注意ゾーン（目標値の97%～目標値）
                 caution_threshold = target_val_float * 0.97
-                ax.fill_between(grouped["日付"], caution_threshold, target_val_float, color='orange', alpha=0.15, label='注意ゾーン(目標未達)')
-            except ValueError: print(f"Warning: Target value '{target_value}' for {title} not float.")
+                ax.fill_between(grouped["日付"], 
+                               caution_threshold, 
+                               target_val_float, 
+                               color='orange', 
+                               alpha=0.15, 
+                               label='注意ゾーン',
+                               zorder=2)
+                
+                # 目標線（最前面に描画）
+                ax.axhline(y=target_val_float, color='#9b59b6', linestyle='-.', 
+                          linewidth=1.2, label=f'目標値: {target_val_float:.1f}',
+                          zorder=10)
+                
+            except ValueError: 
+                print(f"Warning: Target value '{target_value}' for {title} not float.")
 
         ax.set_title(title, fontproperties=font_prop, fontsize=11)
         ax.set_xlabel('日付', fontproperties=font_prop, fontsize=9)
         ax.set_ylabel('患者数', fontproperties=font_prop, fontsize=9)
-        ax.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
-        legend_font_prop = font_prop.copy(); legend_font_prop.set_size(8)
-        ax.legend(prop=legend_font_prop)
-        # fig.autofmt_xdate(rotation=30, ha='right') # tick_params で対応
+        ax.grid(True, linestyle=':', linewidth=0.5, alpha=0.7, zorder=0)
+        
+        # 凡例の順序を調整
+        handles, labels = ax.get_legend_handles_labels()
+        # 望ましい順序を定義
+        desired_order = ['入院患者数', '7日移動平均', '平均:', '目標値:', '達成ゾーン', '注意ゾーン']
+        ordered_handles = []
+        ordered_labels = []
+        
+        for desired_label in desired_order:
+            for i, label in enumerate(labels):
+                if desired_label in label or label.startswith(desired_label):
+                    ordered_handles.append(handles[i])
+                    ordered_labels.append(labels[i])
+                    break
+        
+        legend_font_prop = font_prop.copy()
+        legend_font_prop.set_size(8)
+        ax.legend(ordered_handles, ordered_labels, prop=legend_font_prop, loc='upper left')
+        
         ax.tick_params(axis='x', labelsize=7, rotation=30)
-        for label in ax.get_xticklabels(): # ha を個別に設定
+        for label in ax.get_xticklabels():
             label.set_fontproperties(font_prop)
             label.set_ha('right')
         ax.tick_params(axis='y', labelsize=7)
-        for label in ax.get_yticklabels(): label.set_fontproperties(font_prop)
-
+        for label in ax.get_yticklabels(): 
+            label.set_fontproperties(font_prop)
 
         plt.tight_layout(pad=0.5)
         buf = BytesIO()
@@ -242,7 +292,8 @@ def create_patient_chart_with_target_wrapper(
         return buf
     except Exception as e:
         print(f"Error in create_patient_chart_with_target_wrapper ('{title}'): {e}")
-        import traceback; print(traceback.format_exc())
+        import traceback
+        print(traceback.format_exc())
         return None
     finally:
         if fig: plt.close(fig)

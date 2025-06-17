@@ -10,6 +10,9 @@ import tempfile
 import gc
 import psutil
 import re # re モジュールをインポート
+import concurrent.futures
+from multiprocessing import Manager
+import pickle
 
 # forecast モジュールの関数
 from forecast import generate_filtered_summaries, create_forecast_dataframe
