@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (ユーザーの指摘に基づいた最終確定版)
+# individual_analysis_tab.py (文字列正規化処理を追加した最終確定版)
 
 import streamlit as st
 import pandas as pd
@@ -91,17 +91,15 @@ def display_individual_analysis_tab(df_filtered_main):
     filter_code_for_target = None
     filter_config = get_unified_filter_config() if get_unified_filter_config else {}
 
-    # --- ▼▼▼ 診療科の目標値検索ロジックをシンプルで直接的なものに修正 ▼▼▼ ---
+    # --- ▼▼▼ 検索キーから不要なスペース等を除去する処理を追加 ▼▼▼ ---
     if filter_config:
         if filter_config.get('selected_departments') and len(filter_config['selected_departments']) == 1:
-            # フィルターで選択された診療科名（例：「総合内科」）をそのまま検索キーとして使用する
-            selected_dept_identifier = filter_config.get('selected_departments')[0]
+            selected_dept_identifier = str(filter_config.get('selected_departments')[0]).strip()
             filter_code_for_target = selected_dept_identifier
             current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_identifier)}"
         
         elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
-            # 病棟は正常に動作
-            selected_ward = filter_config['selected_wards'][0]
+            selected_ward = str(filter_config['selected_wards'][0]).strip()
             filter_code_for_target = selected_ward
             current_filter_title_display = f"病棟: {selected_ward}"
     # --- ▲▲▲ 修正終了 ▲▲▲ ---
@@ -155,11 +153,17 @@ def display_individual_analysis_tab(df_filtered_main):
            period_col_name and indicator_col_name and \
            all(col in target_data.columns for col in ['部門コード', '目標値']):
             
+            # --- ▼▼▼ 辞書作成時にもキーから不要なスペース等を除去 ▼▼▼ ---
             if '_target_dict' not in st.session_state:
                 st.session_state._target_dict = {}
                 for _, row in target_data.iterrows():
-                    key = (str(row['部門コード']), str(row[indicator_col_name]), str(row[period_col_name]))
+                    dept_code = str(row['部門コード']).strip()
+                    indicator = str(row[indicator_col_name]).strip()
+                    period = str(row[period_col_name]).strip()
+                    
+                    key = (dept_code, indicator, period)
                     st.session_state._target_dict[key] = row['目標値']
+            # --- ▲▲▲ 修正終了 ▲▲▲ ---
             
             METRIC_FOR_CHART = '日平均在院患者数'
 
