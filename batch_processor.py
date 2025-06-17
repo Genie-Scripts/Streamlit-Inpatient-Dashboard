@@ -150,13 +150,115 @@ def process_pdf_in_worker_revised(
         print(traceback.format_exc())
         return None
 
-def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, target_data_main=None, 
-                                    progress_callback=None, max_workers=None, fast_mode=True):
+def generate_graph_batch_parallel(tasks, max_workers=None):
+    """グラフを並列で一括生成"""
+    if max_workers is None:
+        max_workers = min(multiprocessing.cpu_count(), 8)
+    
+    graph_results = {}
+    
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_task = {}
+        
+        for task_id, task_params in tasks.items():
+            future = executor.submit(generate_single_graph_set, task_params)
+            future_to_task[future] = task_id
+        
+        for future in concurrent.futures.as_completed(future_to_task):
+            task_id = future_to_task[future]
+            try:
+                result = future.result()
+                graph_results[task_id] = result
+            except Exception as e:
+                print(f"グラフ生成エラー (task_id: {task_id}): {e}")
+                graph_results[task_id] = None
+    
+    return graph_results
+
+def generate_single_graph_set(params):
+    """単一タスクのグラフセットを生成"""
+    data = params['data']
+    display_name = params['display_name']
+    latest_date = params['latest_date']
+    targets = params['targets']
+    days_list = params['days_list']
+    font_name = params.get('font_name', MATPLOTLIB_FONT_NAME)
+    
+    results = {
+        'alos': {},
+        'patient_all': {},
+        'patient_weekday': {},
+        'patient_holiday': {},
+        'dual_axis': {}
+    }
+    
+    # ALOSグラフ
+    for days in days_list:
+        buf = create_alos_chart_for_pdf(
+            data, display_name, latest_date, 30, 
+            font_name, days_to_show=days
+        )
+        if buf:
+            results['alos'][str(days)] = buf.getvalue()
+    
+    # 患者数グラフ（全日・平日・休日）
+    for chart_type, target_val in targets.items():
+        data_subset = data
+        if chart_type == 'weekday' and '平日判定' in data.columns:
+            data_subset = data[data['平日判定'] == '平日']
+        elif chart_type == 'holiday' and '平日判定' in data.columns:
+            data_subset = data[data['平日判定'] == '休日']
+        
+        if not data_subset.empty:
+            for days in days_list:
+                buf = create_patient_chart_with_target_wrapper(
+                    data_subset, 
+                    title=f"{display_name} {chart_type}推移({days}日)",
+                    days=days,
+                    target_value=target_val,
+                    font_name_for_mpl_to_use=font_name
+                )
+                if buf:
+                    results[f'patient_{chart_type}'][str(days)] = buf.getvalue()
+    
+    # 二軸グラフ
+    for days in days_list:
+        buf = create_dual_axis_chart_for_pdf(
+            data, 
+            title=f"{display_name} 患者移動({days}日)",
+            days=days,
+            font_name_for_mpl_to_use=font_name
+        )
+        if buf:
+            results['dual_axis'][str(days)] = buf.getvalue()
+    
+    return results
+
+def batch_generate_pdfs_mp_optimized(
+    df_main, mode="all", landscape=False, target_data_main=None,
+    progress_callback=None, max_workers=None, fast_mode=True,
+    graph_resolution='medium'  # 'low', 'medium', 'high'
+):
+    """高速化版PDF一括生成"""
     batch_start_time = time.time()
-    # register_fonts() # メインプロセス開始時に一度実行 (モジュールインポート時にも実行される)
-
-    if progress_callback: progress_callback(0.05, "データを準備中...")
-
+    
+    # 解像度設定
+    resolution_settings = {
+        'low': {'dpi': 100, 'days': [90]},
+        'medium': {'dpi': 120, 'days': [90, 180]},
+        'high': {'dpi': 150, 'days': [90, 180, 365]}
+    }
+    settings = resolution_settings.get(graph_resolution, resolution_settings['medium'])
+    
+    # CPUコア数に基づいてワーカー数を決定（より積極的に）
+    if max_workers is None:
+        cpu_count = multiprocessing.cpu_count()
+        max_workers = min(cpu_count, 16)  # 最大16プロセスまで拡張
+    
+    if progress_callback:
+        progress_callback(0.05, f"データ準備中... (使用プロセス数: {max_workers})")
+    
+    # データの準備
     temp_dir_main = tempfile.mkdtemp()
     df_path_main = os.path.join(temp_dir_main, "main_data.feather")
     df_main.reset_index(drop=True).to_feather(df_path_main)
@@ -165,17 +267,14 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
     if target_data_main is not None and not target_data_main.empty:
         target_data_path_main = os.path.join(temp_dir_main, "target_data.feather")
         target_data_main.reset_index(drop=True).to_feather(target_data_path_main)
-
-    # メインプロセスでのみ使用するキャッシュ (pdf_generator.py から取得)
-    main_process_chart_cache = get_pdf_gen_main_process_cache()
-
+    
     try:
+        # 最新日付の取得
         summaries_for_latest_date = generate_filtered_summaries(df_main)
         latest_date_for_batch = summaries_for_latest_date.get("latest_date", pd.Timestamp.now().normalize())
         
-        if progress_callback: progress_callback(0.10, "PDF生成タスクとグラフを準備中...")
-        
-        tasks_for_worker_with_buffers = []
+        if progress_callback:
+            progress_callback(0.10, "PDF生成タスクとグラフを準備中...")
         
         # 表示名マッピング準備
         dept_display_map = {}
@@ -184,8 +283,6 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
             for _, row in target_data_main.iterrows():
                 if pd.notna(row['部門コード']) and pd.notna(row['部門名']):
                     code_str = str(row['部門コード'])
-                    # 診療科も病棟も同じ「部門コード」「部門名」からマッピングする想定
-                    # 必要であれば部門種別などで区別するロジックを追加
                     dept_display_map[code_str] = row['部門名']
                     ward_display_map[code_str] = row['部門名']
         
@@ -193,39 +290,58 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
         for ward in unique_wards:
             if ward not in ward_display_map:
                 match = re.match(r'0*(\d+)([A-Za-z]*)', ward)
-                if match: ward_display_map[ward] = f"{match.group(1)}{match.group(2)}病棟"
-                else: ward_display_map[ward] = ward
+                if match:
+                    ward_display_map[ward] = f"{match.group(1)}{match.group(2)}病棟"
+                else:
+                    ward_display_map[ward] = ward
         
         unique_depts = df_main["診療科名"].unique()
         for dept in unique_depts:
             if dept not in dept_display_map:
-                 dept_display_map[dept] = dept
-
-        graph_days_to_pre_generate = ["90"] if fast_mode else ["90", "180"]
+                dept_display_map[dept] = dept
         
+        # タスク定義の準備
         task_definitions_list = []
         if mode == "all_only_filter":
-            task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体", "data_for_graphs": df_main.copy()})
+            task_definitions_list.append({
+                "type": "all", 
+                "value": "全体", 
+                "display_name": "全体", 
+                "data_for_graphs": df_main.copy()
+            })
         else:
             if mode == "all":
-                task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体", "data_for_graphs": df_main.copy()})
+                task_definitions_list.append({
+                    "type": "all", 
+                    "value": "全体", 
+                    "display_name": "全体", 
+                    "data_for_graphs": df_main.copy()
+                })
             if mode == "all" or mode == "dept":
                 for dept_val in unique_depts:
                     task_definitions_list.append({
-                        "type": "dept", "value": dept_val, 
+                        "type": "dept", 
+                        "value": dept_val, 
                         "display_name": dept_display_map.get(dept_val, dept_val),
                         "data_for_graphs": df_main[df_main["診療科名"] == dept_val].copy()
                     })
             if mode == "all" or mode == "ward":
                 for ward_val in unique_wards:
                     task_definitions_list.append({
-                        "type": "ward", "value": ward_val, 
+                        "type": "ward", 
+                        "value": ward_val, 
                         "display_name": ward_display_map.get(ward_val, ward_val),
                         "data_for_graphs": df_main[df_main["病棟コード"] == ward_val].copy()
                     })
-
+        
+        # グラフ生成タスクの準備
+        graph_tasks = {}
+        pdf_tasks = []
+        task_id = 0
+        
+        # get_targets_for_pdf関数は既存のものを使用
         def get_targets_for_pdf(task_value, task_type, target_data_df):
-            """PDF用の目標値を取得（改善版）"""
+            # 既存のget_targets_for_pdf関数の内容をそのまま使用
             t_all, t_wd, t_hd = None, None, None
             if target_data_df is None or target_data_df.empty: 
                 return t_all, t_wd, t_hd
@@ -310,124 +426,132 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                             elif period == '休日': t_hd = float(value)
             
             return t_all, t_wd, t_hd
-
-        num_task_defs = len(task_definitions_list)
-        for i, task_def_item in enumerate(task_definitions_list):
-            graph_buffers_for_task = {"alos": {}, "patient_all": {}, "patient_weekday": {}, "patient_holiday": {}, "dual_axis": {}}
-            data_for_current_task_graphs = task_def_item["data_for_graphs"]
-            display_name_for_graphs = task_def_item["display_name"]
+        
+        for task_def in task_definitions_list:
+            task_id += 1
             
-            target_all, target_weekday, target_holiday = get_targets_for_pdf(task_def_item["value"], task_def_item["type"], target_data_main)
-
-            # ALOSグラフ
-            for days_val_str in graph_days_to_pre_generate:
-                days_val_int = int(days_val_str)
-                key = get_pdf_gen_chart_cache_key(f"ALOS_{display_name_for_graphs}", days_val_int, None, "alos_pdf", compute_pdf_gen_data_hash(data_for_current_task_graphs))
-                buffer_val = main_process_chart_cache.get(key)
-                if buffer_val is None and not data_for_current_task_graphs.empty:
-                    img_buf = create_alos_chart_for_pdf(data_for_current_task_graphs, display_name_for_graphs, latest_date_for_batch, 30, MATPLOTLIB_FONT_NAME, days_to_show=days_val_int)
-                    if img_buf: buffer_val = img_buf.getvalue(); main_process_chart_cache[key] = buffer_val
-                if buffer_val: graph_buffers_for_task["alos"][days_val_str] = buffer_val
-            
-            # 患者数推移グラフ
-            patient_chart_types = {"all": target_all, "weekday": target_weekday, "holiday": target_holiday}
-            for type_key, target_val in patient_chart_types.items():
-                data_subset = data_for_current_task_graphs
-                if type_key == "weekday" and "平日判定" in data_for_current_task_graphs.columns: data_subset = data_for_current_task_graphs[data_for_current_task_graphs["平日判定"] == "平日"]
-                elif type_key == "holiday" and "平日判定" in data_for_current_task_graphs.columns: data_subset = data_for_current_task_graphs[data_for_current_task_graphs["平日判定"] == "休日"]
-                if data_subset.empty and type_key != "all": continue
-
-                for days_val_str in graph_days_to_pre_generate:
-                    days_val_int = int(days_val_str)
-                    key = get_pdf_gen_chart_cache_key(f"Patient_{type_key}_{display_name_for_graphs}", days_val_int, target_val, f"patient_{type_key}_pdf", compute_pdf_gen_data_hash(data_subset))
-                    buffer_val = main_process_chart_cache.get(key)
-                    if buffer_val is None and not data_subset.empty:
-                        img_buf = create_patient_chart_with_target_wrapper(data_subset, title=f"{display_name_for_graphs} {type_key.capitalize()}推移({days_val_int}日)", days=days_val_int, target_value=target_val, font_name_for_mpl_to_use=MATPLOTLIB_FONT_NAME)
-                        if img_buf: buffer_val = img_buf.getvalue(); main_process_chart_cache[key] = buffer_val
-                    if buffer_val: graph_buffers_for_task[f"patient_{type_key}"][days_val_str] = buffer_val
-            
-            # 二軸グラフ
-            for days_val_str in graph_days_to_pre_generate:
-                days_val_int = int(days_val_str)
-                key = get_pdf_gen_chart_cache_key(f"DualAxis_{display_name_for_graphs}", days_val_int, None, "dual_axis_pdf", compute_pdf_gen_data_hash(data_for_current_task_graphs))
-                buffer_val = main_process_chart_cache.get(key)
-                if buffer_val is None and not data_for_current_task_graphs.empty:
-                    img_buf = create_dual_axis_chart_for_pdf(data_for_current_task_graphs, title=f"{display_name_for_graphs} 患者移動({days_val_int}日)", days=days_val_int, font_name_for_mpl_to_use=MATPLOTLIB_FONT_NAME)
-                    if img_buf: buffer_val = img_buf.getvalue(); main_process_chart_cache[key] = buffer_val
-                if buffer_val: graph_buffers_for_task["dual_axis"][days_val_str] = buffer_val
-            
-            tasks_for_worker_with_buffers.append(
-                (df_path_main, task_def_item["type"], task_def_item["value"], task_def_item["display_name"], 
-                 latest_date_for_batch.isoformat(), landscape, target_data_path_main, fast_mode,
-                 graph_buffers_for_task["alos"], 
-                 {"all": graph_buffers_for_task["patient_all"], "weekday": graph_buffers_for_task["patient_weekday"], "holiday": graph_buffers_for_task["patient_holiday"]},
-                 graph_buffers_for_task["dual_axis"])
+            # 目標値の取得
+            target_all, target_weekday, target_holiday = get_targets_for_pdf(
+                task_def["value"], task_def["type"], target_data_main
             )
-            if progress_callback and num_task_defs > 0:
-                progress_val = int(10 + ( (i+1) / num_task_defs) * 15) # 10-25%
-                progress_callback(progress_val / 100.0, f"グラフ準備中: {i+1}/{num_task_defs}")
-        
-        del df_main, target_data_main, task_definitions_list # メモリ解放
-        gc.collect()
-
-        total_tasks_to_process = len(tasks_for_worker_with_buffers)
-        if progress_callback: progress_callback(0.25, f"タスク準備完了 (合計: {total_tasks_to_process}件)")
-        
-        if max_workers is None:
-            cpu_cores = multiprocessing.cpu_count()
-            max_workers = max(1, min(cpu_cores -1 if cpu_cores > 1 else 1, 4))
-        
-        zip_archive_buffer = BytesIO()
-        with zipfile.ZipFile(zip_archive_buffer, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zipf_archive:
-            date_suffix_str = latest_date_for_batch.strftime("%Y%m%d")
-            pdfs_completed = 0
             
-            if total_tasks_to_process == 0: # タスクがない場合は空のZIP
-                if progress_callback: progress_callback(1.0, "処理対象なし")
-                print("一括PDF生成: 処理対象なし")
-                zip_archive_buffer.seek(0)
-                return zip_archive_buffer
-
-            with multiprocessing.Pool(processes=max_workers) as pool_obj:
-                pdf_results = pool_obj.starmap(process_pdf_in_worker_revised, tasks_for_worker_with_buffers)
-
-            for result_item_pdf in pdf_results:
-                if result_item_pdf:
-                    title_from_worker, pdf_content_io_obj = result_item_pdf
-                    if pdf_content_io_obj and pdf_content_io_obj.getbuffer().nbytes > 0:
-                        safe_pdf_title = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in title_from_worker)
-                        folder_prefix = ""
-                        if "診療科別" in title_from_worker: folder_prefix = "診療科別/"
-                        elif "病棟別" in title_from_worker: folder_prefix = "病棟別/"
-                        pdf_file_name_in_zip = f"{folder_prefix}入院患者数予測_{safe_pdf_title}_{date_suffix_str}.pdf"
-                        zipf_archive.writestr(pdf_file_name_in_zip, pdf_content_io_obj.getvalue())
-                        pdfs_completed +=1
-                        pdf_content_io_obj.close()
+            graph_tasks[task_id] = {
+                'data': task_def["data_for_graphs"],
+                'display_name': task_def["display_name"],
+                'latest_date': latest_date_for_batch,
+                'targets': {
+                    'all': target_all,
+                    'weekday': target_weekday,
+                    'holiday': target_holiday
+                },
+                'days_list': settings['days'],
+                'font_name': MATPLOTLIB_FONT_NAME
+            }
             
-                if progress_callback and total_tasks_to_process > 0 :
-                    current_progress_val = int(25 + (pdfs_completed / total_tasks_to_process) * 75)
-                    progress_callback(min(100, current_progress_val) / 100.0, f"PDF生成中: {pdfs_completed}/{total_tasks_to_process} 完了")
-            
-        batch_end_time_main = time.time()
-        total_batch_duration = batch_end_time_main - batch_start_time
-        if progress_callback: progress_callback(1.0, f"処理完了! ({pdfs_completed}件) 所要時間: {total_batch_duration:.1f}秒")
+            pdf_tasks.append({
+                'task_id': task_id,
+                'filter_type': task_def["type"],
+                'filter_value': task_def["value"],
+                'display_name': task_def["display_name"]
+            })
         
-        zip_archive_buffer.seek(0)
-        return zip_archive_buffer
-
-    except Exception as e_main_batch:
-        print(f"一括PDF生成(MP)のメイン処理でエラー: {e_main_batch}")
+        if progress_callback:
+            progress_callback(0.1, f"グラフ生成中... ({len(graph_tasks)}セット)")
+        
+        # グラフを並列生成
+        graph_results = generate_graph_batch_parallel(graph_tasks, max_workers=max_workers)
+        
+        if progress_callback:
+            progress_callback(0.5, "PDF生成中...")
+        
+        # PDF生成タスクの実行
+        pdf_generation_tasks = []
+        for pdf_task in pdf_tasks:
+            task_id = pdf_task['task_id']
+            graphs = graph_results.get(task_id, {})
+            
+            if graphs:
+                pdf_generation_tasks.append((
+                    df_path_main,
+                    pdf_task['filter_type'],
+                    pdf_task['filter_value'],
+                    pdf_task['display_name'],
+                    latest_date_for_batch.isoformat(),
+                    landscape,
+                    target_data_path_main,
+                    fast_mode,
+                    graphs.get('alos', {}),
+                    {
+                        'all': graphs.get('patient_all', {}),
+                        'weekday': graphs.get('patient_weekday', {}),
+                        'holiday': graphs.get('patient_holiday', {})
+                    },
+                    graphs.get('dual_axis', {})
+                ))
+        
+        # PDF生成を並列実行
+        zip_buffer = create_zip_from_pdfs_parallel(
+            pdf_generation_tasks, 
+            latest_date_for_batch,
+            max_workers=max_workers,
+            progress_callback=progress_callback
+        )
+        
+        total_time = time.time() - batch_start_time
+        if progress_callback:
+            progress_callback(1.0, f"完了! 処理時間: {total_time:.1f}秒")
+        
+        return zip_buffer
+        
+    except Exception as e:
+        print(f"一括PDF生成(V2)のメイン処理でエラー: {e}")
         import traceback
         print(traceback.format_exc())
-        if progress_callback: progress_callback(1.0, f"エラーが発生しました: {str(e_main_batch)}")
+        if progress_callback:
+            progress_callback(1.0, f"エラーが発生しました: {str(e)}")
         return BytesIO()
     finally:
         try:
             import shutil
             shutil.rmtree(temp_dir_main, ignore_errors=True)
-        except Exception as e_cleanup:
-            print(f"一時ディレクトリの削除に失敗: {e_cleanup}")
+        except Exception:
+            pass
 
+def create_zip_from_pdfs_parallel(pdf_tasks, latest_date, max_workers, progress_callback=None):
+    """PDFを並列生成してZIPファイルを作成"""
+    zip_buffer = BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zipf:
+        date_suffix = latest_date.strftime("%Y%m%d")
+        completed = 0
+        total = len(pdf_tasks)
+        
+        # PDFを並列生成
+        with multiprocessing.Pool(processes=max_workers) as pool:
+            pdf_results = pool.starmap(process_pdf_in_worker_revised, pdf_tasks)
+        
+        # 結果をZIPに追加
+        for result in pdf_results:
+            if result:
+                title, pdf_content = result
+                if pdf_content and pdf_content.getbuffer().nbytes > 0:
+                    safe_title = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in title)
+                    folder = ""
+                    if "診療科別" in title:
+                        folder = "診療科別/"
+                    elif "病棟別" in title:
+                        folder = "病棟別/"
+                    
+                    filename = f"{folder}入院患者数予測_{safe_title}_{date_suffix}.pdf"
+                    zipf.writestr(filename, pdf_content.getvalue())
+                    completed += 1
+                    
+                    if progress_callback and total > 0:
+                        progress = 0.5 + (completed / total) * 0.5
+                        progress_callback(progress, f"PDF生成中: {completed}/{total}")
+    
+    zip_buffer.seek(0)
+    return zip_buffer
 
 def batch_generate_pdfs_full_optimized(
     df, mode="all", landscape=False, target_data=None, 
