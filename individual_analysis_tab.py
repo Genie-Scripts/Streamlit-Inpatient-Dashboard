@@ -134,19 +134,34 @@ def display_individual_analysis_tab(df_filtered_main):
     filter_code_for_target = None
     filter_config = get_unified_filter_config() if get_unified_filter_config else {}
 
+    # デバッグ: フィルター設定の詳細を確認
+    logger.info(f"フィルター設定デバッグ: {filter_config}")
+    
     if filter_config:
-        if filter_config.get('selected_departments') and len(filter_config['selected_departments']) == 1:
-            selected_dept_identifier = str(filter_config.get('selected_departments')[0]).strip()
+        # 診療科フィルターをチェック
+        selected_departments = filter_config.get('selected_departments', [])
+        selected_wards = filter_config.get('selected_wards', [])
+        
+        logger.info(f"選択された診療科: {selected_departments} (数: {len(selected_departments) if selected_departments else 0})")
+        logger.info(f"選択された病棟: {selected_wards} (数: {len(selected_wards) if selected_wards else 0})")
+        
+        if selected_departments and len(selected_departments) == 1:
+            selected_dept_identifier = str(selected_departments[0]).strip()
             filter_code_for_target = selected_dept_identifier
             current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_identifier)}"
+            logger.info(f"診療科モード設定: {filter_code_for_target}")
         
-        elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
-            selected_ward = str(filter_config['selected_wards'][0]).strip()
+        elif selected_wards and len(selected_wards) == 1:
+            selected_ward = str(selected_wards[0]).strip()
             filter_code_for_target = selected_ward
             current_filter_title_display = f"病棟: {selected_ward}"
+            logger.info(f"病棟モード設定: {filter_code_for_target}")
+        else:
+            logger.info("複数選択または未選択のため全体モードに設定")
 
     if filter_code_for_target is None:
         filter_code_for_target = "全体"
+        logger.info(f"最終的なfilter_code_for_target: {filter_code_for_target}")
 
     st.markdown(f"#### 分析結果: {current_filter_title_display}")
 
@@ -245,6 +260,36 @@ def display_individual_analysis_tab(df_filtered_main):
         if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
             st.markdown("---")
             st.subheader("詳細デバッグ: 目標値辞書と検索キーの比較")
+
+            # フィルター設定のデバッグ情報を追加
+            st.markdown("##### 0. フィルター設定デバッグ")
+            if filter_config:
+                st.write("**フィルター設定:**")
+                st.json(filter_config)
+                
+                selected_departments = filter_config.get('selected_departments', [])
+                selected_wards = filter_config.get('selected_wards', [])
+                
+                st.write(f"**選択された診療科:** {selected_departments} (数: {len(selected_departments) if selected_departments else 0})")
+                st.write(f"**選択された病棟:** {selected_wards} (数: {len(selected_wards) if selected_wards else 0})")
+                st.write(f"**最終的なfilter_code_for_target:** `{filter_code_for_target}`")
+                
+                # なぜ「全体」になったかの判定ロジックを表示
+                if selected_departments and len(selected_departments) == 1:
+                    st.success("✅ 診療科が単一選択されています")
+                elif selected_departments and len(selected_departments) > 1:
+                    st.warning("⚠️ 診療科が複数選択されているため、全体扱いになります")
+                elif not selected_departments:
+                    st.info("ℹ️ 診療科が選択されていません")
+                
+                if selected_wards and len(selected_wards) == 1:
+                    st.success("✅ 病棟が単一選択されています")
+                elif selected_wards and len(selected_wards) > 1:
+                    st.warning("⚠️ 病棟が複数選択されているため、全体扱いになります")
+                elif not selected_wards:
+                    st.info("ℹ️ 病棟が選択されていません")
+            else:
+                st.error("❌ フィルター設定が取得できませんでした")
 
             st.markdown("##### 1. プログラムが使用している検索キー")
             
