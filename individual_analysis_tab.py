@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (診療科コード検索機能を追加した最終版)
+# individual_analysis_tab.py (ユーザーの指摘に基づいた最終確定版)
 
 import streamlit as st
 import pandas as pd
@@ -91,29 +91,16 @@ def display_individual_analysis_tab(df_filtered_main):
     filter_code_for_target = None
     filter_config = get_unified_filter_config() if get_unified_filter_config else {}
 
-    # --- ▼▼▼ 診療科コードを検索するロジックに修正 ▼▼▼ ---
+    # --- ▼▼▼ 診療科の目標値検索ロジックをシンプルで直接的なものに修正 ▼▼▼ ---
     if filter_config:
         if filter_config.get('selected_departments') and len(filter_config['selected_departments']) == 1:
-            selected_dept_name = filter_config.get('selected_departments')[0]
-            
-            # 選択された診療科名から部門コードを目標値データから検索
-            dept_code = None
-            if target_data is not None and not target_data.empty:
-                # '部門名'が診療科名と一致し、'部門種別'が'診療科'の行を探す
-                dept_row = target_data[
-                    (target_data['部門名'] == selected_dept_name) & 
-                    (target_data['部門種別'] == '診療科')
-                ]
-                if not dept_row.empty:
-                    # 見つかった行から部門コードを取得
-                    dept_code = dept_row['部門コード'].iloc[0]
-
-            # 検索で見つかった部門コードを目標値検索のキーとして使用
-            filter_code_for_target = dept_code
-            current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_name)}"
+            # フィルターで選択された診療科名（例：「総合内科」）をそのまま検索キーとして使用する
+            selected_dept_identifier = filter_config.get('selected_departments')[0]
+            filter_code_for_target = selected_dept_identifier
+            current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_identifier)}"
         
         elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
-            # 病棟のロジックは正常に動作しているので変更なし
+            # 病棟は正常に動作
             selected_ward = filter_config['selected_wards'][0]
             filter_code_for_target = selected_ward
             current_filter_title_display = f"病棟: {selected_ward}"
@@ -209,11 +196,9 @@ def display_individual_analysis_tab(df_filtered_main):
                 except (ValueError, TypeError): target_val_holiday = None
 
         if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
-            st.write(f"- 検索キー(部門名→コード変換後): `{filter_code_for_target}`")
+            st.write(f"- 検索に使用した部門コード/名: `{filter_code_for_target}`")
             st.write(f"- 検索指標: `{METRIC_FOR_CHART if 'METRIC_FOR_CHART' in locals() else 'N/A'}`")
             st.write(f"- 全日目標値: `{target_val_all}` (型: {type(target_val_all).__name__})")
-            st.write(f"- 平日目標値: `{target_val_weekday}` (型: {type(target_val_weekday).__name__})")
-            st.write(f"- 休日目標値: `{target_val_holiday}` (型: {type(target_val_holiday).__name__})")
             if '_target_dict' in st.session_state:
                 st.write("---")
                 st.write("**_target_dictにロードされたデータ（一部抜粋）:**")
