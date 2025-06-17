@@ -189,6 +189,9 @@ def create_patient_chart_with_target_wrapper(
     fig = None
     actual_font_name = font_name_for_mpl_to_use or MATPLOTLIB_FONT_NAME or MATPLOTLIB_FONT_NAME_FALLBACK
     font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name)
+    # 除外病棟フィルタリング
+    data = filter_excluded_wards(data)
+
     try:
         fig, ax = plt.subplots(figsize=(8, 4.0))
         if not isinstance(data, pd.DataFrame) or data.empty: return None
