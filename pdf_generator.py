@@ -699,7 +699,138 @@ def create_pdf(
     gc.collect()
     return buffer
 
-# create_landscape_pdf も同様に修正（省略：同じパターンで修正）
+def create_landscape_pdf(
+    forecast_df, df_weekday, df_holiday, df_all_avg=None,
+    chart_data=None, title_prefix="全体", latest_date=None,
+    target_data=None, filter_code="全体", graph_days=None,
+    alos_chart_buffers=None,
+    patient_chart_buffers=None,
+    dual_axis_chart_buffers=None
+):
+    """
+    横向き(Landscape)のPDFを生成する関数。create_pdfをベースにページサイズを変更。
+    """
+    # ===== 除外病棟の厳密チェック =====
+    if chart_data is not None and not chart_data.empty and '病棟コード' in chart_data.columns:
+        original_count = len(chart_data)
+        chart_data = filter_excluded_wards(chart_data)
+        filtered_count = len(chart_data)
+        ward_codes = chart_data['病棟コード'].astype(str).unique()
+        excluded_found = [ward for ward in ward_codes if ward in EXCLUDED_WARDS]
+        if excluded_found:
+            print(f"PDF生成スキップ: 除外病棟 {excluded_found} が残存しています")
+            return None
+        if "病棟別" in title_prefix:
+            import re
+            match = re.search(r'(\d+[A-Za-z]*?)病棟', title_prefix)
+            if match:
+                ward_code_from_title = match.group(1)
+                ward_variants = [ward_code_from_title, f"0{ward_code_from_title}", f"00{ward_code_from_title}"]
+                for variant in ward_variants:
+                    if variant in EXCLUDED_WARDS:
+                        print(f"PDF生成スキップ: タイトルから除外病棟 {variant} を検出")
+                        return None
+        if original_count > filtered_count:
+            print(f"除外病棟フィルタリング: {original_count - filtered_count}件除外")
+    
+    # ===== 目標値取得（強化版） =====
+    target_values = get_target_values_for_pdf(target_data, filter_code)
+    
+    elements = []
+    buffer = BytesIO()
+    # ▼▼▼ ページサイズを landscape(A4) に変更 ▼▼▼
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4),
+                            leftMargin=15*mm, rightMargin=15*mm,
+                            topMargin=15*mm, bottomMargin=15*mm)
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Normal_JP', parent=styles['Normal'], fontName=REPORTLAB_FONT_NAME, fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name='Heading1_JP', parent=styles['Heading1'], fontName=REPORTLAB_FONT_NAME, fontSize=14, spaceAfter=5*mm, leading=16))
+    styles.add(ParagraphStyle(name='Heading2_JP', parent=styles['Heading2'], fontName=REPORTLAB_FONT_NAME, fontSize=11, spaceAfter=3*mm, leading=14))
+    styles.add(ParagraphStyle(name='Normal_Center_JP', parent=styles['Normal_JP'], alignment=TA_CENTER, fontSize=7, leading=8))
+
+    normal_ja = styles['Normal_JP']
+    ja_style = styles['Heading1_JP']
+    ja_heading2 = styles['Heading2_JP']
+    para_style_normal_center = styles['Normal_Center_JP']
+
+    current_latest_date = latest_date if latest_date else pd.Timestamp.now().normalize()
+    if isinstance(current_latest_date, str): current_latest_date = pd.Timestamp(current_latest_date)
+    data_date_str = current_latest_date.strftime("%Y年%m月%d日")
+    today_str = pd.Timestamp.now().strftime("%Y年%m月%d日")
+
+    report_title_text = f"入院患者数予測 - {title_prefix}（データ基準日: {data_date_str}）"
+    elements.append(Paragraph(report_title_text, ja_style))
+    elements.append(Spacer(1, 5*mm))
+    
+    # ▼▼▼ 横向きのページ幅に調整 ▼▼▼
+    page_width = landscape(A4)[0] - doc.leftMargin - doc.rightMargin
+    
+    # グラフとテーブルの配置（create_pdfと共通のロジック）
+    # グラフとテーブルは2列に分割して配置すると見やすい
+    col_width = page_width / 2.2 # 少しマージンを設ける
+
+    # グラフセクション
+    graph_elements = []
+    if alos_chart_buffers and alos_chart_buffers.get('90'):
+        img_buf = BytesIO(alos_chart_buffers['90']); img_buf.seek(0)
+        img = Image(img_buf, width=col_width, height=col_width*0.5)
+        graph_elements.append(img)
+    
+    if dual_axis_chart_buffers and dual_axis_chart_buffers.get('90'):
+        img_buf = BytesIO(dual_axis_chart_buffers['90']); img_buf.seek(0)
+        img = Image(img_buf, width=col_width, height=col_width*0.5)
+        graph_elements.append(img)
+        
+    if patient_chart_buffers and patient_chart_buffers.get('all', {}).get('90'):
+        img_buf = BytesIO(patient_chart_buffers['all']['90']); img_buf.seek(0)
+        img = Image(img_buf, width=col_width, height=col_width*0.5)
+        graph_elements.append(img)
+    
+    # テーブルセクション
+    table_elements = []
+    common_table_style_cmds = [
+        ('FONTNAME', (0,0), (-1,-1), REPORTLAB_FONT_NAME), ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('ALIGN', (0,0), (-1,0), 'CENTER'),
+        ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('ALIGN', (0,1), (0,-1), 'LEFT'),
+        ('FONTSIZE', (0,0), (-1,0), 8), ('FONTSIZE', (0,1), (-1,-1), 7),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke), ('LEFTPADDING', (0,0), (-1,-1), 2*mm),
+        ('RIGHTPADDING', (0,0), (-1,-1), 2*mm),
+    ]
+
+    # 予測テーブル
+    if forecast_df is not None and not forecast_df.empty:
+        fc_df_mod = forecast_df.copy()
+        if "年間平均人日（実績＋予測）" in fc_df_mod.columns: fc_df_mod.rename(columns={"年間平均人日（実績＋予測）": "年度予測"}, inplace=True)
+        if "延べ予測人日" in fc_df_mod.columns: fc_df_mod.drop(columns=["延べ予測人日"], inplace=True)
+        header = [fc_df_mod.index.name or "基準"] + fc_df_mod.columns.tolist()
+        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if pd.notna(x) else "-" for x in row] for idx, row in fc_df_mod.iterrows()]
+        num_cols = len(header)
+        col_widths = [col_width*0.25] + [(col_width*0.75)/(num_cols-1 or 1)]*(num_cols-1)
+        tbl = Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.blue)]))
+        table_elements.extend([Paragraph("在院患者数予測", ja_heading2), tbl, Spacer(1, 2*mm)])
+
+    # 平均値テーブル
+    if df_all_avg is not None and not df_all_avg.empty:
+        header = [df_all_avg.index.name or "区分"] + df_all_avg.columns.tolist()
+        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if pd.notna(x) else "-" for x in row] for idx, row in df_all_avg.iterrows()]
+        num_cols = len(header)
+        col_widths = [col_width*0.2] + [(col_width*0.8)/(num_cols-1 or 1)]*(num_cols-1)
+        tbl = Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.green)]))
+        table_elements.extend([Paragraph("全日平均値", ja_heading2), tbl, Spacer(1, 2*mm)])
+
+    # 2列レイアウトで要素を配置
+    layout_table = Table([[graph_elements, table_elements]], colWidths=[col_width, col_width])
+    layout_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+    elements.append(layout_table)
+    
+    elements.append(Spacer(1, 4*mm))
+    elements.append(Paragraph(f"作成日時: {today_str}", normal_ja))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    gc.collect()
+    return buffer
 
 def create_department_tables(chart_data, latest_date, target_data=None, filter_code=None, para_style=None):
     """修正版部門別テーブル生成関数：除外病棟対応"""
