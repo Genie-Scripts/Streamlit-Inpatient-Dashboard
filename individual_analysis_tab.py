@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (超・詳細デバッグツール付き最終版)
+# individual_analysis_tab.py (構文エラー修正版)
 
 import streamlit as st
 import pandas as pd
@@ -98,7 +98,8 @@ def display_individual_analysis_tab(df_filtered_main):
             current_filter_title_display = f"診療科: {get_display_name_for_dept(selected_dept_identifier)}"
         
         elif filter_config.get('selected_wards') and len(filter_config['selected_wards']) == 1:
-            selected_ward = str(filter_config['selected_wards')[0]).strip()
+            # ここがエラー箇所でした
+            selected_ward = str(filter_config['selected_wards'][0]).strip()
             filter_code_for_target = selected_ward
             current_filter_title_display = f"病棟: {selected_ward}"
 
@@ -190,18 +191,15 @@ def display_individual_analysis_tab(df_filtered_main):
                 try: target_val_holiday = float(target_val_holiday)
                 except (ValueError, TypeError): target_val_holiday = None
 
-        # --- ▼▼▼ ここから「超・詳細デバッグツール」▼▼▼ ---
         if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
             st.markdown("---")
             st.subheader("詳細デバッグ: 目標値辞書と検索キーの比較")
 
-            # 1. 実際に検索に使用しているキーを表示
             st.markdown("##### 1. プログラムが使用している検索キー")
             search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日') if 'METRIC_FOR_CHART' in locals() else "N/A"
             st.info(f"**全日用検索キー:** `{search_key_all}`")
 
             if '_target_dict' in st.session_state:
-                # 2. 検索キーが辞書内に存在するかどうかをチェック
                 st.markdown("##### 2. 検索キーの存在チェック結果")
                 if search_key_all != "N/A" and search_key_all in st.session_state._target_dict:
                     st.success(f"✅ 検索キーは目標値辞書内に **存在します**。")
@@ -213,7 +211,6 @@ def display_individual_analysis_tab(df_filtered_main):
                     st.write("1. 以下の「利用可能なキー」のリストから、対応する正しい「部門コード」のテキストをコピーしてください。")
                     st.write("2. 日々の実績データ（入退院クロス.csvなど）の「診療科名」列を、コピーしたテキストに修正・統一してください。")
 
-                # 3. 利用可能なキーのリストを表示
                 st.markdown("##### 3. 目標値ファイルから読み込まれた利用可能なキー（部門コード）のリスト")
                 st.caption(f"指標タイプが「{METRIC_FOR_CHART if 'METRIC_FOR_CHART' in locals() else 'N/A'}」のものに絞って表示しています。")
                 
@@ -233,11 +230,9 @@ def display_individual_analysis_tab(df_filtered_main):
                     st.dataframe(key_df, use_container_width=True)
             else:
                 st.error("目標値辞書(_target_dict)が作成されていません。")
-        # --- ▲▲▲ デバッグツール終了 ▲▲▲ ---
 
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
-        # (以降のグラフ描画コードは変更なし)
-        # ...
+        
         with graph_tab1:
             if create_interactive_patient_chart:
                 st.markdown("##### 全日 入院患者数推移")
