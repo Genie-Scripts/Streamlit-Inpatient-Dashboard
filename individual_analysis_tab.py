@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (クラッシュバグ修正版)
+# individual_analysis_tab.py (診療科目標値修正版)
 
 import streamlit as st
 import pandas as pd
@@ -22,6 +22,46 @@ except ImportError as e:
     get_display_name_for_dept = None
     get_unified_filter_summary = None
     get_unified_filter_config = None
+
+def find_department_code_in_targets(dept_name, target_dict, metric_name):
+    """
+    診療科名に対応する部門コードを目標値辞書から探す
+    
+    Args:
+        dept_name: 診療科名
+        target_dict: 目標値辞書
+        metric_name: 指標名
+        
+    Returns:
+        tuple: (部門コード, 目標値が見つかったかどうか)
+    """
+    if not target_dict:
+        return None, False
+    
+    # 1. 直接一致をチェック
+    test_key = (str(dept_name).strip(), metric_name, '全日')
+    if test_key in target_dict:
+        return str(dept_name).strip(), True
+    
+    # 2. 部分一致をチェック（診療科名が部門コードに含まれる場合）
+    dept_name_clean = str(dept_name).strip()
+    for (dept_code, indicator, period), value in target_dict.items():
+        if indicator == metric_name and period == '全日':
+            # 部門コードが診療科名を含む場合
+            if dept_name_clean in str(dept_code) or str(dept_code) in dept_name_clean:
+                return str(dept_code), True
+    
+    # 3. より柔軟な一致をチェック（スペースや特殊文字を無視）
+    import re
+    dept_name_normalized = re.sub(r'[^\w]', '', dept_name_clean)
+    for (dept_code, indicator, period), value in target_dict.items():
+        if indicator == metric_name and period == '全日':
+            dept_code_normalized = re.sub(r'[^\w]', '', str(dept_code))
+            if dept_name_normalized and dept_code_normalized:
+                if dept_name_normalized == dept_code_normalized:
+                    return str(dept_code), True
+    
+    return None, False
 
 def display_dataframe_with_title(title, df_data, key_suffix=""):
     if df_data is not None and not df_data.empty:
@@ -174,11 +214,22 @@ def display_individual_analysis_tab(df_filtered_main):
                 key_holiday_2 = ("全体", METRIC_FOR_CHART, '休日')
                 target_val_holiday = st.session_state._target_dict.get(key_holiday_1, st.session_state._target_dict.get(key_holiday_2))
             else:
-                key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
+                # 診療科の場合は、適切な部門コードを見つける処理を追加
+                actual_dept_code = filter_code_for_target
+                
+                # 診療科の場合、目標値辞書から対応する部門コードを探す
+                if filter_config and filter_config.get('selected_departments'):
+                    dept_code_found, target_exists = find_department_code_in_targets(
+                        filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
+                    )
+                    if dept_code_found:
+                        actual_dept_code = dept_code_found
+                
+                key_all = (str(actual_dept_code), METRIC_FOR_CHART, '全日')
                 target_val_all = st.session_state._target_dict.get(key_all)
-                key_weekday = (str(filter_code_for_target), METRIC_FOR_CHART, '平日')
+                key_weekday = (str(actual_dept_code), METRIC_FOR_CHART, '平日')
                 target_val_weekday = st.session_state._target_dict.get(key_weekday)
-                key_holiday = (str(filter_code_for_target), METRIC_FOR_CHART, '休日')
+                key_holiday = (str(actual_dept_code), METRIC_FOR_CHART, '休日')
                 target_val_holiday = st.session_state._target_dict.get(key_holiday)
 
             if target_val_all is not None:
@@ -196,7 +247,24 @@ def display_individual_analysis_tab(df_filtered_main):
             st.subheader("詳細デバッグ: 目標値辞書と検索キーの比較")
 
             st.markdown("##### 1. プログラムが使用している検索キー")
-            search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
+            
+            # 診療科の場合の部門コード変換状況を表示
+            if filter_config and filter_config.get('selected_departments'):
+                original_dept_name = filter_code_for_target
+                dept_code_found, target_exists = find_department_code_in_targets(
+                    filter_code_for_target, st.session_state._target_dict, METRIC_FOR_CHART
+                )
+                
+                st.info(f"**選択された診療科名:** `{original_dept_name}`")
+                if dept_code_found:
+                    st.success(f"**対応する部門コード:** `{dept_code_found}` (変換成功)")
+                    search_key_all = (str(dept_code_found), METRIC_FOR_CHART, '全日')
+                else:
+                    st.warning(f"**部門コード変換:** 失敗。元の診療科名を使用")
+                    search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
+            else:
+                search_key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
+            
             st.info(f"**全日用検索キー:** `{search_key_all}`")
 
             if '_target_dict' in st.session_state:
@@ -228,6 +296,21 @@ def display_individual_analysis_tab(df_filtered_main):
                         })
                     key_df = pd.DataFrame(key_df_data)
                     st.dataframe(key_df, use_container_width=True)
+                    
+                    # 診療科名との一致候補を表示
+                    if filter_config and filter_config.get('selected_departments'):
+                        st.markdown("##### 4. 診療科名との一致候補")
+                        dept_name = filter_code_for_target
+                        candidates = []
+                        for key in available_keys.keys():
+                            dept_code = key[0]
+                            if str(dept_name).strip() in str(dept_code) or str(dept_code) in str(dept_name).strip():
+                                candidates.append(dept_code)
+                        
+                        if candidates:
+                            st.success(f"部分一致候補: {candidates}")
+                        else:
+                            st.warning("部分一致する候補が見つかりませんでした。")
             else:
                 st.error("目標値辞書(_target_dict)が作成されていません。")
 
