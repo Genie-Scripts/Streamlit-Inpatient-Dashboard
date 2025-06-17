@@ -1,4 +1,4 @@
-# individual_analysis_tab.py (目標値読取を強化した最終版)
+# individual_analysis_tab.py (目標値検索を厳密化した最終版)
 
 import streamlit as st
 import pandas as pd
@@ -26,7 +26,6 @@ except ImportError as e:
 def display_dataframe_with_title(title, df_data, key_suffix=""):
     if df_data is not None and not df_data.empty:
         st.markdown(f"##### {title}")
-        # .fillna('-') を削除し、NaNはStreamlitのデフォルト（空白）で表示
         st.dataframe(df_data, use_container_width=True)
     else:
         st.markdown(f"##### {title}")
@@ -135,40 +134,54 @@ def display_individual_analysis_tab(df_filtered_main):
 
         target_val_all, target_val_weekday, target_val_holiday = None, None, None
         
-        # --- ▼▼▼ ここから目標値取得ロジックを修正 ▼▼▼ ---
+        # --- ▼▼▼ ここから目標値取得ロジックを全面的に修正 ▼▼▼ ---
         period_col_name = None
+        indicator_col_name = None
+        
         if target_data is not None and not target_data.empty:
             if '区分' in target_data.columns:
                 period_col_name = '区分'
             elif '期間区分' in target_data.columns:
                 period_col_name = '期間区分'
+            
+            if '指標タイプ' in target_data.columns:
+                indicator_col_name = '指標タイプ'
 
         if target_data is not None and not target_data.empty and \
-           period_col_name is not None and \
+           period_col_name and indicator_col_name and \
            all(col in target_data.columns for col in ['部門コード', '目標値']):
             
+            # 辞書のキーを (部門コード, 指標タイプ, 期間区分) の3要素に変更
             if '_target_dict' not in st.session_state:
                 st.session_state._target_dict = {}
                 for _, row in target_data.iterrows():
-                    st.session_state._target_dict[(str(row['部門コード']), str(row[period_col_name]))] = row['目標値']
+                    key = (str(row['部門コード']), str(row[indicator_col_name]), str(row[period_col_name]))
+                    st.session_state._target_dict[key] = row['目標値']
             
-            if filter_code_for_target == "全体":
-                target_val_all = st.session_state._target_dict.get(("000", '全日'))
-                if target_val_all is None:
-                    target_val_all = st.session_state._target_dict.get(("全体", '全日'))
-                
-                target_val_weekday = st.session_state._target_dict.get(("000", '平日'))
-                if target_val_weekday is None:
-                    target_val_weekday = st.session_state._target_dict.get(("全体", '平日'))
+            # このグラフで対象とする指標を明示
+            METRIC_FOR_CHART = '日平均在院患者数'
 
-                target_val_holiday = st.session_state._target_dict.get(("000", '休日'))
-                if target_val_holiday is None:
-                    target_val_holiday = st.session_state._target_dict.get(("全体", '休日'))
+            if filter_code_for_target == "全体":
+                key_all_1 = ("000", METRIC_FOR_CHART, '全日')
+                key_all_2 = ("全体", METRIC_FOR_CHART, '全日')
+                target_val_all = st.session_state._target_dict.get(key_all_1, st.session_state._target_dict.get(key_all_2))
+
+                key_weekday_1 = ("000", METRIC_FOR_CHART, '平日')
+                key_weekday_2 = ("全体", METRIC_FOR_CHART, '平日')
+                target_val_weekday = st.session_state._target_dict.get(key_weekday_1, st.session_state._target_dict.get(key_weekday_2))
+
+                key_holiday_1 = ("000", METRIC_FOR_CHART, '休日')
+                key_holiday_2 = ("全体", METRIC_FOR_CHART, '休日')
+                target_val_holiday = st.session_state._target_dict.get(key_holiday_1, st.session_state._target_dict.get(key_holiday_2))
             else:
-                target_val_all = st.session_state._target_dict.get((str(filter_code_for_target), '全日'))
-                target_val_weekday = st.session_state._target_dict.get((str(filter_code_for_target), '平日'))
-                target_val_holiday = st.session_state._target_dict.get((str(filter_code_for_target), '休日'))
-        # --- ▲▲▲ 目標値取得ロジックの修正終了 ▲▲▲ ---
+                key_all = (str(filter_code_for_target), METRIC_FOR_CHART, '全日')
+                target_val_all = st.session_state._target_dict.get(key_all)
+                
+                key_weekday = (str(filter_code_for_target), METRIC_FOR_CHART, '平日')
+                target_val_weekday = st.session_state._target_dict.get(key_weekday)
+                
+                key_holiday = (str(filter_code_for_target), METRIC_FOR_CHART, '休日')
+                target_val_holiday = st.session_state._target_dict.get(key_holiday)
 
             if target_val_all is not None:
                 try: target_val_all = float(target_val_all)
@@ -180,15 +193,17 @@ def display_individual_analysis_tab(df_filtered_main):
                 try: target_val_holiday = float(target_val_holiday)
                 except (ValueError, TypeError): target_val_holiday = None
 
-            if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
-                st.write(f"- 検索キー: `{filter_code_for_target}`")
-                st.write(f"- 全日目標値: `{target_val_all}` (型: {type(target_val_all).__name__})")
-                st.write(f"- 平日目標値: `{target_val_weekday}` (型: {type(target_val_weekday).__name__})")
-                st.write(f"- 休日目標値: `{target_val_holiday}` (型: {type(target_val_holiday).__name__})")
-                if '_target_dict' in st.session_state:
-                    st.write("---")
-                    st.write("**_target_dictにロードされたデータ（一部抜粋）:**")
-                    st.json({f"{k[0]}, {k[1]}": v for k, v in list(st.session_state._target_dict.items())[:10]})
+        if st.checkbox("🎯 目標値設定状況を確認", key="show_target_debug_main"):
+            st.write(f"- 検索キー: `{filter_code_for_target}`")
+            st.write(f"- 検索指標: `{METRIC_FOR_CHART if 'METRIC_FOR_CHART' in locals() else 'N/A'}`")
+            st.write(f"- 全日目標値: `{target_val_all}` (型: {type(target_val_all).__name__})")
+            st.write(f"- 平日目標値: `{target_val_weekday}` (型: {type(target_val_weekday).__name__})")
+            st.write(f"- 休日目標値: `{target_val_holiday}` (型: {type(target_val_holiday).__name__})")
+            if '_target_dict' in st.session_state:
+                st.write("---")
+                st.write("**_target_dictにロードされたデータ（一部抜粋）:**")
+                st.json({f"({k[0]}, {k[1]}, {k[2]})": v for k, v in list(st.session_state._target_dict.items())[:15]})
+        # --- ▲▲▲ 目標値取得ロジックの修正終了 ▲▲▲ ---
 
         graph_tab1, graph_tab2 = st.tabs(["📈 入院患者数推移", "📊 複合指標推移（二軸）"])
 
