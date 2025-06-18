@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 import logging
@@ -1651,9 +1651,6 @@ def create_github_publisher_interface():
 def generate_90day_report_html(df, target_data):
     """90日間総合レポートのHTML生成（簡易版）"""
     try:
-        from datetime import timedelta
-        import json
-        
         # 90日間のデータをフィルタリング
         end_date = df['日付'].max()
         start_date = end_date - timedelta(days=90)
