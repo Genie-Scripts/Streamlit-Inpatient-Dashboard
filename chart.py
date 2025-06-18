@@ -1,4 +1,4 @@
-# chart.py (修正版 - PDF高速化対応)
+# chart.py (修正・機能追加版)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -199,15 +199,16 @@ def _create_dual_axis_chart_core(data, title="入院患者数と患者移動の�
             plt.close(fig)
         gc.collect()
 
-# ===== インタラクティブグラフ関数（既存のまま） =====
+# ===== インタラクティブグラフ関数 =====
+
 def create_interactive_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, target_value=None, chart_type="全日"):
-    """インタラクティブな患者数推移グラフを作成する (Plotly)"""
+    """【修正】インタラクティブな患者数推移グラフを作成する (Plotly) - PDF版の表示内容に準拠"""
     try:
         if not isinstance(data, pd.DataFrame) or data.empty:
             logger.warning(f"create_interactive_patient_chart: '{title}' のデータが空です。")
             return None
         if "日付" not in data.columns or "入院患者数（在院）" not in data.columns:
-            logger.warning(f"create_interactive_patient_chart: '{title}' のデータに必要な列（日付, 入院患者数（在院））がありません。")
+            logger.warning(f"create_interactive_patient_chart: '{title}' のデータに必要な列がありません。")
             return None
 
         data_copy = data.copy()
@@ -217,171 +218,166 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
 
         grouped = data_copy.groupby("日付")["入院患者数（在院）"].sum().reset_index().sort_values("日付")
         
-        if grouped.empty:
-            logger.warning(f"create_interactive_patient_chart: '{title}' のグループ化後データが空です。")
+        if grouped.empty or len(grouped) == 0:
             return None
-            
+
         if len(grouped) > days and days > 0:
             grouped = grouped.tail(days)
 
         if grouped.empty:
-            logger.warning(f"create_interactive_patient_chart: '{title}' の期間絞り込み後データが空です（days: {days}）。")
             return None
 
         avg = grouped["入院患者数（在院）"].mean()
         if len(grouped) >= 7: 
             grouped['7日移動平均'] = grouped["入院患者数（在院）"].rolling(window=7, min_periods=1).mean()
 
-        fig = make_subplots()
+        fig = go.Figure()
         
-        # 基本的なグラフ要素
-        fig.add_trace(go.Scatter(
-            x=grouped["日付"], 
-            y=grouped["入院患者数（在院）"], 
-            mode='lines+markers', 
-            name='入院患者数', 
-            line=dict(color='#3498db', width=2), 
-            marker=dict(size=6)
-        ))
+        # グラフ要素
+        fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）"], mode='lines', name='入院患者数', line=dict(color='#3498db')))
         
         if show_moving_average and '7日移動平均' in grouped.columns:
-            fig.add_trace(go.Scatter(
-                x=grouped["日付"], 
-                y=grouped['7日移動平均'], 
-                mode='lines', 
-                name='7日移動平均', 
-                line=dict(color='#2ecc71', width=2)
-            ))
-        
-        # 平均線
-        fig.add_trace(go.Scatter(
-            x=[grouped["日付"].min(), grouped["日付"].max()], 
-            y=[avg, avg], 
-            mode='lines', 
-            name=f'平均: {avg:.1f}', 
-            line=dict(color='#e74c3c', width=2, dash='dash')
-        ))
+            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped['7日移動平均'], mode='lines', name='7日移動平均', line=dict(color='#2ecc71')))
+
+        fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[avg, avg], mode='lines', name=f'平均: {avg:.1f}', line=dict(color='#e74c3c', dash='dash')))
 
         if target_value is not None and pd.notna(target_value):
-            # 目標線
-            fig.add_trace(go.Scatter(
-                x=[grouped["日付"].min(), grouped["日付"].max()], 
-                y=[target_value, target_value], 
-                mode='lines', 
-                name=f'目標値: {target_value:.1f}', 
-                line=dict(color='#9b59b6', width=2, dash='dot')
-            ))
-            
-            # データの範囲を取得して適切なY軸範囲を計算
-            data_min = grouped["入院患者数（在院）"].min()
-            data_max = grouped["入院患者数（在院）"].max()
-            
-            # 下限：データの最小値から10%のマージン
-            y_min = data_min * 0.9 if data_min > 0 else 0
-            
-            # 上限：データの最大値と目標値の大きい方に20%のマージン
-            y_max = max(data_max, target_value) * 1.05
-            
-            # 達成ゾーン（目標値以上）- 薄い緑色
-            fig.add_trace(go.Scatter(
-                x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
-                y=[target_value, target_value, y_max, y_max], 
-                fill='toself', 
-                fillcolor='rgba(46, 204, 113, 0.15)',  # 薄い緑色
-                line=dict(color='rgba(46, 204, 113, 0)', width=0), 
-                name='達成ゾーン',
-                showlegend=True,
-                hoverinfo='skip'
-            ))
-            
-            # 注意ゾーン（目標値の97%～目標値）- 薄いオレンジ色
-            caution_threshold = target_value * 0.97
-            fig.add_trace(go.Scatter(
-                x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
-                y=[caution_threshold, caution_threshold, target_value, target_value], 
-                fill='toself', 
-                fillcolor='rgba(255, 165, 0, 0.15)',  # 薄いオレンジ色
-                line=dict(color='rgba(255, 165, 0, 0)', width=0), 
-                name='注意ゾーン',
-                showlegend=True,
-                hoverinfo='skip'
-            ))
-            
-            # Y軸の範囲を設定
-            fig.update_yaxes(range=[y_min, y_max])
+            fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[target_value, target_value], mode='lines', name=f'目標値: {target_value:.1f}', line=dict(color='#9b59b6', dash='dot')))
 
         fig.update_layout(
-            title=title, 
+            title={'text': title, 'x': 0.5},
             xaxis_title='日付', 
             yaxis_title='患者数', 
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), 
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), 
             hovermode='x unified', 
-            height=500, 
-            margin=dict(l=10, r=10, t=50, b=10)
+            height=400,
+            margin=dict(l=40, r=20, t=60, b=20)
         )
-        fig.update_xaxes(tickformat="%Y-%m-%d", tickangle=-45, tickmode='auto', nticks=10)
-        
         return fig
         
     except Exception as e:
         logger.error(f"インタラクティブグラフ '{title}' 作成中にエラー: {e}", exc_info=True)
         return None
 
-def create_interactive_dual_axis_chart(data, title="入院患者数と患者移動の推移", days=90):
-    """インタラクティブな入院患者数と患者移動の7日移動平均グラフを二軸で作成する (Plotly)"""
+def create_interactive_dual_axis_chart(data, title="患者移動と在院数の推移", days=90):
+    """【修正】インタラクティブな患者移動グラフ (Plotly) - PDF版の表示内容に準拠"""
     try:
-        if not isinstance(data, pd.DataFrame) or data.empty:
-            logger.warning(f"create_interactive_dual_axis_chart: '{title}' のデータが空です。")
+        if data is None or data.empty:
             return None
-        required_columns = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "退院患者数"]
-        if any(col not in data.columns for col in required_columns):
-            missing_cols_str = ", ".join([col for col in required_columns if col not in data.columns])
-            logger.warning(f"create_interactive_dual_axis_chart: '{title}' のデータに必要な列がありません。不足列: {missing_cols_str}")
+            
+        required_cols = ["日付", "入院患者数（在院）", "新入院患者数", "総退院患者数"]
+        if any(col not in data.columns for col in required_cols):
             return None
-        
+
         data_copy = data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
-            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
-            data_copy.dropna(subset=['日付'], inplace=True)
+            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce').dropna(subset=['日付'])
 
-        grouped = data_copy.groupby("日付").agg({"入院患者数（在院）": "sum", "新入院患者数": "sum", "緊急入院患者数": "sum", "退院患者数": "sum"}).reset_index().sort_values("日付")
+        agg_dict = {col: "sum" for col in required_cols if col != "日付"}
+        grouped = data_copy.groupby("日付").agg(agg_dict).reset_index().sort_values("日付")
         
-        if grouped.empty:
-            logger.warning(f"create_interactive_dual_axis_chart: '{title}' のグループ化後データが空です。")
-            return None
+        if len(grouped) > days and days > 0:
+            grouped = grouped.tail(days)
+        if grouped.empty: return None
 
-        if len(grouped) > days:
-            if days > 0:
-                grouped = grouped.tail(days)
-        
-        if grouped.empty:
-            logger.warning(f"create_interactive_dual_axis_chart: '{title}' の期間絞り込み後データが空です（days: {days}）。")
-            return None
-
-        for col in required_columns[1:]: # "日付"以外
-             if col in grouped.columns: # groupedに列が存在するか確認
-                grouped[f'{col}_7日移動平均'] = grouped[col].rolling(window=7, min_periods=1).mean()
-             else: # 実際にはaggで列が作られるはずだが念のため
-                grouped[f'{col}_7日移動平均'] = 0
+        for col in required_cols[1:]:
+            grouped[f'{col}_7日MA'] = grouped[col].rolling(window=7, min_periods=1).mean()
 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         
-        if "入院患者数（在院）_7日移動平均" in grouped.columns:
-            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）_7日移動平均"], name="入院患者数（在院）", line=dict(color="#3498db", width=3), mode="lines"), secondary_y=False)
+        # 主軸: 在院患者数
+        fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）_7日MA"], name="在院患者数(7日MA)", line=dict(color='#3498db', width=2.5)), secondary_y=False)
 
-        colors_map = {"新入院患者数": "#2ecc71", "緊急入院患者数": "#e74c3c", "退院患者数": "#f39c12"}
-        for col, color_val in colors_map.items():
-            ma_col_name = f"{col}_7日移動平均"
-            if ma_col_name in grouped.columns:
-                fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped[ma_col_name], name=col, line=dict(color=color_val, width=2), mode="lines"), secondary_y=True)
+        # 副軸: 患者移動
+        colors_map = {"新入院患者数": "#2ecc71", "総退院患者数": "#f39c12"}
+        for col, color in colors_map.items():
+            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped[f'{col}_7日MA'], name=f"{col}(7日MA)", line=dict(color=color, width=2)), secondary_y=True)
 
-        fig.update_layout(title=title, xaxis_title="日付", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5), hovermode="x unified", font=dict(family="Arial, 'Noto Sans JP', sans-serif", size=12), height=500)
-        fig.update_yaxes(title_text="入院患者数（在院）", secondary_y=False)
+        fig.update_layout(
+            title={'text': title, 'x': 0.5},
+            xaxis_title='日付',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode='x unified',
+            height=400,
+            margin=dict(l=40, r=20, t=60, b=20)
+        )
+        fig.update_yaxes(title_text="在院患者数", secondary_y=False)
         fig.update_yaxes(title_text="患者移動数", secondary_y=True)
-        fig.update_xaxes(tickformat="%Y-%m-%d", tickangle=-45, tickmode='auto', nticks=10)
         return fig
     except Exception as e:
         logger.error(f"インタラクティブ2軸グラフ '{title}' 作成中にエラー: {e}", exc_info=True)
+        return None
+
+# ★★★ 新規追加関数 ★★★
+def create_interactive_alos_chart(chart_data, title="ALOS推移", days_to_show=90, moving_avg_window=30):
+    """【新規】インタラクティブなALOS（平均在院日数）グラフを作成する (Plotly) - PDF版のロジックを移植"""
+    try:
+        if not isinstance(chart_data, pd.DataFrame) or chart_data.empty:
+            return None
+        
+        required_columns = ["日付", "入院患者数（在院）", "総入院患者数", "総退院患者数"]
+        if any(col not in chart_data.columns for col in required_columns):
+            return None
+
+        data_copy = chart_data.copy()
+        if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
+            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
+            data_copy.dropna(subset=['日付'], inplace=True)
+        if data_copy.empty: return None
+
+        latest_date = data_copy['日付'].max()
+        start_date_limit = latest_date - pd.Timedelta(days=days_to_show - 1)
+        date_range_for_plot = pd.date_range(start=start_date_limit, end=latest_date, freq='D')
+        
+        daily_metrics = []
+        for display_date in date_range_for_plot:
+            window_start = display_date - pd.Timedelta(days=moving_avg_window - 1)
+            window_data = data_copy[(data_copy['日付'] >= window_start) & (data_copy['日付'] <= display_date)]
+            
+            if not window_data.empty:
+                total_patient_days = window_data['入院患者数（在院）'].sum()
+                total_admissions = window_data['総入院患者数'].sum()
+                total_discharges = window_data['総退院患者数'].sum()
+                num_days_in_window = window_data['日付'].nunique()
+                
+                denominator = (total_admissions + total_discharges) / 2
+                alos = total_patient_days / denominator if denominator > 0 else np.nan
+                daily_census = total_patient_days / num_days_in_window if num_days_in_window > 0 else np.nan
+                
+                daily_metrics.append({'日付': display_date, '平均在院日数': alos, '平均在院患者数': daily_census})
+
+        if not daily_metrics: return None
+        daily_df = pd.DataFrame(daily_metrics).sort_values('日付')
+        if daily_df.empty: return None
+
+        # Plotlyで二軸グラフを作成
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        # 主軸: 平均在院日数
+        fig.add_trace(
+            go.Scatter(x=daily_df['日付'], y=daily_df['平均在院日数'], name=f'平均在院日数 ({moving_avg_window}日MA)', line=dict(color='#3498db', width=2)),
+            secondary_y=False
+        )
+        # 副軸: 平均在院患者数
+        fig.add_trace(
+            go.Scatter(x=daily_df['日付'], y=daily_df['平均在院患者数'], name='平均在院患者数', line=dict(color='#e74c3c', width=2, dash='dash')),
+            secondary_y=True
+        )
+
+        fig.update_layout(
+            title={'text': title, 'x': 0.5},
+            xaxis_title='日付',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode='x unified',
+            height=400,
+            margin=dict(l=40, r=20, t=60, b=20)
+        )
+        fig.update_yaxes(title_text="平均在院日数", secondary_y=False)
+        fig.update_yaxes(title_text="平均在院患者数", secondary_y=True)
+        return fig
+
+    except Exception as e:
+        logger.error(f"インタラクティブALOSグラフ '{title}' 作成中にエラー: {e}", exc_info=True)
         return None
 
 @st.cache_data(ttl=1800)
