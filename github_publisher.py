@@ -102,7 +102,17 @@ class GitHubPublisher:
         # 外部ダッシュボード情報を統合
         all_dashboards = dashboards_info.copy() if dashboards_info else []
         if external_dashboards:
+            # 外部ダッシュボードのファイルパスを修正
+            for ext_dash in external_dashboards:
+                # ファイルパスからdocs/を削除
+                if 'file' in ext_dash and ext_dash['file'].startswith('docs/'):
+                    ext_dash['file'] = ext_dash['file'].replace('docs/', '')
             all_dashboards.extend(external_dashboards)
+        
+        # デバッグ: ダッシュボード総数をログ
+        logger.info(f"Total dashboards: {len(all_dashboards)}")
+        for dash in all_dashboards:
+            logger.info(f"Dashboard: {dash.get('title', 'No title')} - {dash.get('file', 'No file')}")
             
         if layout_style == "minimal":
             return self._create_minimal_layout(all_dashboards, content_config)
@@ -1136,6 +1146,11 @@ def create_external_dashboard_uploader():
                 if st.session_state.get('github_publisher'):
                     publisher = st.session_state.github_publisher
                     
+                    # ファイル名の安全化（upload_external_htmlと同じ処理）
+                    safe_filename = filename.lower().replace(' ', '_').replace('　', '_')
+                    if not safe_filename.endswith('.html'):
+                        safe_filename += '.html'
+                    
                     # HTMLアップロード
                     success, message = publisher.upload_external_html(
                         st.session_state.external_html_content,
@@ -1150,11 +1165,11 @@ def create_external_dashboard_uploader():
                         # 既存のダッシュボード情報を更新または追加
                         updated = False
                         for i, dash in enumerate(external_dashboards):
-                            if dash['file'] == filename or dash['title'] == dashboard_title:
+                            if dash['file'] == safe_filename or dash['title'] == dashboard_title:
                                 external_dashboards[i] = {
                                     "title": dashboard_title,
                                     "description": dashboard_description,
-                                    "file": filename if filename.endswith('.html') else filename + '.html',
+                                    "file": safe_filename,  # docs/プレフィックスなしで保存
                                     "type": "external",
                                     "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
                                 }
@@ -1165,7 +1180,7 @@ def create_external_dashboard_uploader():
                             external_dashboards.append({
                                 "title": dashboard_title,
                                 "description": dashboard_description,
-                                "file": filename if filename.endswith('.html') else filename + '.html',
+                                "file": safe_filename,  # docs/プレフィックスなしで保存
                                 "type": "external",
                                 "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
                             })
@@ -1449,6 +1464,11 @@ def create_github_publisher_interface():
                                 if dash['title'] == external_title:
                                     external_included.append(dash)
                                     break
+                    
+                    # デバッグ情報
+                    st.sidebar.info(f"外部ダッシュボード数: {len(external_included)}")
+                    for ext in external_included:
+                        st.sidebar.info(f"外部: {ext['title']} - {ext['file']}")
                     
                     # 統合インデックスページ生成
                     index_html = publisher.create_index_page(
