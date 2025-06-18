@@ -1,4 +1,4 @@
-# chart.py (修正版)
+# chart.py (修正版 - PDF高速化対応)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,19 +10,33 @@ import matplotlib.font_manager
 import gc
 import time
 import hashlib
-import logging # ロギングを追加
+import logging
 
-logger = logging.getLogger(__name__) # ロガーを取得
+logger = logging.getLogger(__name__)
 
-# get_chart_cache, get_data_hash, get_chart_cache_key は、
-# @st.cache_data を全面的に使用する場合、必須ではなくなります。
-# BytesIOオブジェクト自体を@st.cache_dataでキャッシュできるためです。
-# ただし、Plotlyのグラフオブジェクトなど、キャッシュできないものを扱う場合は
-# 別の戦略が必要になることがあります。ここではMatplotlib生成のBytesIOをキャッシュします。
-
+# ===== Streamlit UI用関数（キャッシュあり） =====
 @st.cache_data(ttl=1800, show_spinner=False)
 def create_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, font_name_for_mpl=None):
-    """データから患者数推移グラフを作成する（キャッシュ対応版）- Matplotlib PDF用"""
+    """データから患者数推移グラフを作成する（Streamlit UI用、キャッシュ対応版）"""
+    return _create_patient_chart_core(data, title, days, show_moving_average, font_name_for_mpl)
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def create_dual_axis_chart(data, title="入院患者数と患者移動の推移", filename=None, days=90, font_name_for_mpl=None):
+    """入院患者数と患者移動の7日移動平均グラフを二軸で作成する（Streamlit UI用、キャッシュ対応版）"""
+    return _create_dual_axis_chart_core(data, title, days, font_name_for_mpl)
+
+# ===== PDF生成用関数（キャッシュなし、直接実行） =====
+def create_patient_chart_for_pdf(data, title="入院患者数推移", days=90, show_moving_average=True, font_name_for_mpl=None):
+    """PDF生成専用の患者数推移グラフ（キャッシュなし）"""
+    return _create_patient_chart_core(data, title, days, show_moving_average, font_name_for_mpl)
+
+def create_dual_axis_chart_for_pdf(data, title="入院患者数と患者移動の推移", days=90, font_name_for_mpl=None):
+    """PDF生成専用の二軸グラフ（キャッシュなし）"""
+    return _create_dual_axis_chart_core(data, title, days, font_name_for_mpl)
+
+# ===== 共通のコア関数 =====
+def _create_patient_chart_core(data, title="入院患者数推移", days=90, show_moving_average=True, font_name_for_mpl=None):
+    """患者数推移グラフの共通コア関数"""
     start_time = time.time()
     fig = None
     try:
@@ -43,7 +57,7 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
 
         grouped = data_copy.groupby("日付")["入院患者数（在院）"].sum().reset_index().sort_values("日付")
 
-        if len(grouped) > days:
+        if len(grouped) > days and days > 0:
             grouped = grouped.tail(days)
 
         if grouped.empty:
@@ -81,19 +95,113 @@ def create_patient_chart(data, title="入院患者数推移", days=90, show_movi
         buf.seek(0)
 
         end_time = time.time()
-        logger.info(f"グラフ '{title}' 生成完了 (@st.cache_data), 処理時間: {end_time - start_time:.2f}秒")
+        # デバッグログはlogger.debugに変更（本番では出力されない）
+        logger.debug(f"グラフ '{title}' 生成完了, 処理時間: {end_time - start_time:.2f}秒")
         return buf
+        
     except Exception as e:
         logger.error(f"グラフ生成エラー '{title}': {e}", exc_info=True)
         return None
     finally:
-        if fig: plt.close(fig)
+        if fig: 
+            plt.close(fig)
         gc.collect()
 
+def _create_dual_axis_chart_core(data, title="入院患者数と患者移動の推移", days=90, font_name_for_mpl=None):
+    """二軸グラフの共通コア関数"""
+    start_time = time.time()
+    fig = None
+    try:
+        fig, ax1 = plt.subplots(figsize=(10, 5.5))
+
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            if fig: plt.close(fig)
+            return None
+
+        required_columns = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "総退院患者数"]
+        if any(col not in data.columns for col in required_columns):
+            if fig: plt.close(fig)
+            return None
+
+        data_copy = data.copy()
+        if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
+            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
+            data_copy.dropna(subset=['日付'], inplace=True)
+
+        grouped = data_copy.groupby("日付").agg({
+            "入院患者数（在院）": "sum", "新入院患者数": "sum",
+            "緊急入院患者数": "sum", "総退院患者数": "sum"
+        }).reset_index().sort_values("日付")
+
+        if len(grouped) > days and days > 0: 
+            grouped = grouped.tail(days)
+        if grouped.empty:
+            if fig: plt.close(fig)
+            return None
+
+        cols_for_ma = ["入院患者数（在院）", "新入院患者数", "緊急入院患者数", "総退院患者数"]
+        for col in cols_for_ma:
+            if col in grouped.columns:
+                grouped[f'{col}_7日移動平均'] = grouped[col].rolling(window=7, min_periods=1).mean()
+            else:
+                logger.warning(f"Warning: Column '{col}' not found for MA in '{title}'.")
+                grouped[f'{col}_7日移動平均'] = 0
+
+        font_kwargs = {}
+        if font_name_for_mpl: 
+            font_kwargs['fontname'] = font_name_for_mpl
+
+        if "入院患者数（在院）_7日移動平均" in grouped.columns:
+             ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日移動平均"], color='#3498db', linewidth=2, label="入院患者数（在院）")
+        else:
+            logger.warning(f"Warning: '入院患者数（在院）_7日移動平均' not found for plotting in '{title}'.")
+
+        ax1.set_xlabel('日付', fontsize=9, **font_kwargs)
+        ax1.set_ylabel('入院患者数（在院）', fontsize=9, color='#3498db', **font_kwargs)
+        ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=8)
+        ax1.tick_params(axis='x', labelsize=8)
+
+        ax2 = ax1.twinx()
+        colors_map = {"新入院患者数": "#2ecc71", "緊急入院患者数": "#e74c3c", "総退院患者数": "#f39c12"}
+        for col, color_val in colors_map.items():
+            ma_col_name = f"{col}_7日移動平均"
+            if ma_col_name in grouped.columns:
+                ax2.plot(grouped["日付"], grouped[ma_col_name], color=color_val, linewidth=1.5, label=col)
+
+        ax2.set_ylabel('患者移動数', fontsize=9, **font_kwargs)
+        ax2.tick_params(axis='y', labelsize=8)
+
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        legend_prop = {'size': 9}
+        if font_name_for_mpl: 
+            legend_prop['family'] = font_name_for_mpl
+        ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', prop=legend_prop)
+
+        plt.title(title, fontsize=12, **font_kwargs)
+        fig.autofmt_xdate(rotation=30, ha='right')
+        ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
+        plt.tight_layout(pad=0.5)
+
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=150)
+        buf.seek(0)
+        
+        end_time = time.time()
+        logger.debug(f"二軸グラフ '{title}' 生成完了, 処理時間: {end_time - start_time:.2f}秒")
+        return buf
+        
+    except Exception as e:
+        logger.error(f"Error in _create_dual_axis_chart_core ('{title}'): {e}", exc_info=True)
+        return None
+    finally:
+        if fig: 
+            plt.close(fig)
+        gc.collect()
+
+# ===== インタラクティブグラフ関数（既存のまま） =====
 def create_interactive_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, target_value=None, chart_type="全日"):
-    """
-    インタラクティブな患者数推移グラフを作成する (Plotly)
-    """
+    """インタラクティブな患者数推移グラフを作成する (Plotly)"""
     try:
         if not isinstance(data, pd.DataFrame) or data.empty:
             logger.warning(f"create_interactive_patient_chart: '{title}' のデータが空です。")
@@ -220,9 +328,7 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
         return None
 
 def create_interactive_dual_axis_chart(data, title="入院患者数と患者移動の推移", days=90):
-    """
-    インタラクティブな入院患者数と患者移動の7日移動平均グラフを二軸で作成する (Plotly)
-    """
+    """インタラクティブな入院患者数と患者移動の7日移動平均グラフを二軸で作成する (Plotly)"""
     try:
         if not isinstance(data, pd.DataFrame) or data.empty:
             logger.warning(f"create_interactive_dual_axis_chart: '{title}' のデータが空です。")
@@ -258,7 +364,6 @@ def create_interactive_dual_axis_chart(data, title="入院患者数と患者移�
              else: # 実際にはaggで列が作られるはずだが念のため
                 grouped[f'{col}_7日移動平均'] = 0
 
-
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         
         if "入院患者数（在院）_7日移動平均" in grouped.columns:
@@ -279,103 +384,9 @@ def create_interactive_dual_axis_chart(data, title="入院患者数と患者移�
         logger.error(f"インタラクティブ2軸グラフ '{title}' 作成中にエラー: {e}", exc_info=True)
         return None
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def create_dual_axis_chart(data, title="入院患者数と患者移動の推移", filename=None, days=90, font_name_for_mpl=None):
-    """
-    入院患者数と患者移動の7日移動平均グラフを二軸で作成する（Matplotlib版、PDF用）
-    @st.cache_data によるキャッシュ
-    """
-    start_time = time.time()
-    fig = None
-    try:
-        fig, ax1 = plt.subplots(figsize=(10, 5.5))
-
-        if not isinstance(data, pd.DataFrame) or data.empty:
-            if fig: plt.close(fig)
-            return None
-
-        required_columns = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "退院患者数"]
-        if any(col not in data.columns for col in required_columns):
-            if fig: plt.close(fig)
-            return None
-
-        data_copy = data.copy()
-        if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
-            data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
-            data_copy.dropna(subset=['日付'], inplace=True)
-
-        grouped = data_copy.groupby("日付").agg({
-            "入院患者数（在院）": "sum", "新入院患者数": "sum",
-            "緊急入院患者数": "sum", "退院患者数": "sum"
-        }).reset_index().sort_values("日付")
-
-        if len(grouped) > days: grouped = grouped.tail(days)
-        if grouped.empty:
-            if fig: plt.close(fig)
-            return None
-
-        cols_for_ma = ["入院患者数（在院）", "新入院患者数", "緊急入院患者数", "退院患者数"]
-        for col in cols_for_ma:
-            if col in grouped.columns:
-                grouped[f'{col}_7日移動平均'] = grouped[col].rolling(window=7, min_periods=1).mean()
-            else:
-                logger.warning(f"Warning: Column '{col}' not found for MA in '{title}'.")
-                grouped[f'{col}_7日移動平均'] = 0
-
-        font_kwargs = {}
-        if font_name_for_mpl: font_kwargs['fontname'] = font_name_for_mpl
-
-        if "入院患者数（在院）_7日移動平均" in grouped.columns:
-             ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日移動平均"], color='#3498db', linewidth=2, label="入院患者数（在院）")
-        else:
-            logger.warning(f"Warning: '入院患者数（在院）_7日移動平均' not found for plotting in '{title}'.")
-
-
-        ax1.set_xlabel('日付', fontsize=9, **font_kwargs)
-        ax1.set_ylabel('入院患者数（在院）', fontsize=9, color='#3498db', **font_kwargs)
-        ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=8)
-        ax1.tick_params(axis='x', labelsize=8)
-
-        ax2 = ax1.twinx()
-        colors_map = {"新入院患者数": "#2ecc71", "緊急入院患者数": "#e74c3c", "退院患者数": "#f39c12"}
-        for col, color_val in colors_map.items():
-            ma_col_name = f"{col}_7日移動平均"
-            if ma_col_name in grouped.columns:
-                ax2.plot(grouped["日付"], grouped[ma_col_name], color=color_val, linewidth=1.5, label=col)
-
-        ax2.set_ylabel('患者移動数', fontsize=9, **font_kwargs)
-        ax2.tick_params(axis='y', labelsize=8)
-
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        legend_prop = {'size': 9}
-        if font_name_for_mpl: legend_prop['family'] = font_name_for_mpl
-        ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', prop=legend_prop)
-
-        plt.title(title, fontsize=12, **font_kwargs)
-        fig.autofmt_xdate(rotation=30, ha='right')
-        ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
-        plt.tight_layout(pad=0.5)
-
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=150)
-        buf.seek(0)
-        
-        end_time = time.time()
-        logger.info(f"二軸グラフ '{title}' 生成完了 (@st.cache_data), 処理時間: {end_time - start_time:.2f}秒")
-        return buf
-    except Exception as e:
-        logger.error(f"Error in create_dual_axis_chart ('{title}'): {e}", exc_info=True)
-        return None
-    finally:
-        if fig: plt.close(fig)
-        gc.collect()
-
 @st.cache_data(ttl=1800)
 def create_forecast_comparison_chart(actual_series, forecast_results, title="年度患者数予測比較", display_days_past=365, display_days_future=365):
-    """
-    実績データと複数の予測モデルの結果を比較するインタラクティブグラフを作成する (Plotly)
-    """
+    """実績データと複数の予測モデルの結果を比較するインタラクティブグラフを作成する (Plotly)"""
     try:
         if actual_series.empty:
             logger.warning(f"create_forecast_comparison_chart: '{title}' の実績データが空です。")
@@ -390,7 +401,6 @@ def create_forecast_comparison_chart(actual_series, forecast_results, title="年
         if display_days_past > 0 and len(actual_series) > display_days_past:
             actual_display_start_date = actual_series.index.max() - pd.Timedelta(days=display_days_past -1)
             actual_display_data = actual_series[actual_series.index >= actual_display_start_date]
-
 
         fig.add_trace(go.Scatter(
             x=actual_display_data.index,
@@ -417,7 +427,6 @@ def create_forecast_comparison_chart(actual_series, forecast_results, title="年
                 pred_end_date = pred_start_date + pd.Timedelta(days=display_days_future -1)
                 forecast_display_data = forecast_series[(forecast_series.index >= pred_start_date) &
                                                         (forecast_series.index <= pred_end_date)]
-
 
             if not forecast_display_data.empty:
                 fig.add_trace(go.Scatter(

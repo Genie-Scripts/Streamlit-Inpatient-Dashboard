@@ -166,10 +166,39 @@ def process_pdf_in_worker_revised(
         return None
 
 def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, target_data_main=None, 
-                                    progress_callback=None, max_workers=None, fast_mode=True):
+                                          progress_callback=None, max_workers=None, fast_mode=True):
+    """最適化されたバッチPDF生成"""
+    import psutil
+    import multiprocessing
+    
     batch_start_time = time.time()
-    # register_fonts() # メインプロセス開始時に一度実行 (モジュールインポート時にも実行される)
-
+    
+    # メモリ監視と最適化
+    process = psutil.Process()
+    memory_usage_mb = process.memory_info().rss / 1024 / 1024
+    
+    if memory_usage_mb > 1500:  # 1.5GB以上使用している場合
+        print(f"高メモリ使用量検出: {memory_usage_mb:.1f}MB. 最適化を実行...")
+        gc.collect()
+        
+        # データサイズの削減
+        if len(df_main) > 50000:
+            print(f"大量データ検出 ({len(df_main):,}件). 最新データに絞り込み...")
+            df_main = df_main.sort_values('日付').tail(30000)
+            print(f"データを{len(df_main):,}件に削減")
+    
+    # ワーカー数の動的調整
+    if max_workers is None:
+        cpu_cores = multiprocessing.cpu_count()
+        available_memory_gb = psutil.virtual_memory().available / (1024**3)
+        
+        # メモリ制約を考慮
+        memory_based_workers = max(1, int(available_memory_gb / 1.0))  # 1GB per worker
+        cpu_based_workers = max(1, min(cpu_cores - 1, 6))  # 最大6ワーカー
+        
+        max_workers = min(memory_based_workers, cpu_based_workers)
+        print(f"最適化ワーカー数: {max_workers} (CPU: {cpu_cores}, メモリ: {available_memory_gb:.1f}GB)")
+        
     if progress_callback: progress_callback(0.05, "データを準備中...")
 
     # *** メインデータから除外病棟をフィルタリング ***

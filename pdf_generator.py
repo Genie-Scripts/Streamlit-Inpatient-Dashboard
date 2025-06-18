@@ -1,3 +1,4 @@
+# pdf_generator.py (最適化版)
 import pandas as pd
 import streamlit as st
 from io import BytesIO
@@ -22,191 +23,257 @@ import matplotlib.font_manager
 import matplotlib.pyplot as plt
 import matplotlib
 
-# --- フォント設定 ---
+# --- フォント設定（最適化） ---
 FONT_DIR = 'fonts'
 FONT_FILENAME = 'NotoSansJP-Regular.ttf'
 FONT_PATH = os.path.join(FONT_DIR, FONT_FILENAME)
 REPORTLAB_FONT_NAME = 'NotoSansJP_RL'
 MATPLOTLIB_FONT_NAME_FALLBACK = 'sans-serif'
-MATPLOTLIB_FONT_NAME = None # register_fonts で設定される
+MATPLOTLIB_FONT_NAME = None
+
+# フォント登録の状態を追跡
+_FONTS_REGISTERED = False
 
 def register_fonts():
-    global MATPLOTLIB_FONT_NAME
+    """フォント登録（重複実行を防ぐ）"""
+    global MATPLOTLIB_FONT_NAME, _FONTS_REGISTERED
+    
+    if _FONTS_REGISTERED:
+        return  # 既に登録済みの場合はスキップ
+    
     font_registered_rl = False
     font_registered_mpl = False
 
     if os.path.exists(FONT_PATH):
         try:
             pdfmetrics.registerFont(TTFont(REPORTLAB_FONT_NAME, FONT_PATH))
-            print(f"ReportLab font '{REPORTLAB_FONT_NAME}' ({FONT_PATH}) registered.")
+            print(f"ReportLab font '{REPORTLAB_FONT_NAME}' registered.")
             font_registered_rl = True
         except Exception as e:
-            print(f"Failed to register ReportLab font '{FONT_PATH}': {e}")
+            print(f"Failed to register ReportLab font: {e}")
 
         try:
             font_entry = matplotlib.font_manager.FontEntry(
-                fname=FONT_PATH, name='NotoSansJP_MPL_PDFGEN' # PDFジェネレータ内でのユニークな名前
+                fname=FONT_PATH, name='NotoSansJP_MPL_PDFGEN'
             )
-            # Check if font is already in list to avoid duplicates if called multiple times in same main process
-            if font_entry.name not in [f.name for f in matplotlib.font_manager.fontManager.ttflist]:
-                 matplotlib.font_manager.fontManager.ttflist.insert(0, font_entry)
+            # 重複チェック
+            existing_fonts = [f.name for f in matplotlib.font_manager.fontManager.ttflist]
+            if font_entry.name not in existing_fonts:
+                matplotlib.font_manager.fontManager.ttflist.insert(0, font_entry)
 
-            # plt.rcParams['font.family'] = font_entry.name # グローバル設定はメインで行う想定
-            # MATPLOTLIB_FONT_NAME はここで設定するフォント名とする
             MATPLOTLIB_FONT_NAME = font_entry.name
-            print(f"Matplotlib font '{MATPLOTLIB_FONT_NAME}' prepared for use from {FONT_PATH}.")
+            print(f"Matplotlib font '{MATPLOTLIB_FONT_NAME}' prepared.")
             font_registered_mpl = True
         except Exception as e:
-            print(f"Failed to prepare Matplotlib font '{FONT_PATH}' for pdf_generator: {e}")
-            # plt.rcParams['font.family'] = MATPLOTLIB_FONT_NAME_FALLBACK # グローバル設定は避ける
-            MATPLOTLIB_FONT_NAME = None # エラー時はNoneのまま
+            print(f"Failed to prepare Matplotlib font: {e}")
+            MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK
     else:
-        print(f"Font file not found at '{FONT_PATH}'. Using fallback fonts for Matplotlib.")
-        # plt.rcParams['font.family'] = MATPLOTLIB_FONT_NAME_FALLBACK # グローバル設定は避ける
-        MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK # フォールバックを設定
+        print(f"Font file not found. Using fallback fonts.")
+        MATPLOTLIB_FONT_NAME = MATPLOTLIB_FONT_NAME_FALLBACK
 
-    if not font_registered_rl:
-        print(f"ReportLab will use its default font or Helvetica if '{REPORTLAB_FONT_NAME}' was intended as NotoSansJP.")
+    _FONTS_REGISTERED = True
 
-register_fonts() # モジュールインポート時にフォント登録
+# モジュールインポート時にフォント登録
+register_fonts()
 
-# --- キャッシュ設定 (メインプロセスでのみ使用される想定) ---
+# --- キャッシュ設定（最適化版） ---
 def get_chart_cache():
-    if 'pdf_chart_cache' not in st.session_state:
-        st.session_state.pdf_chart_cache = {}
-    return st.session_state.pdf_chart_cache
+    """メインプロセス専用キャッシュ"""
+    try:
+        if hasattr(st, 'session_state') and st.session_state is not None:
+            if 'pdf_chart_cache' not in st.session_state:
+                st.session_state.pdf_chart_cache = {}
+            return st.session_state.pdf_chart_cache
+    except:
+        pass
+    # ワーカープロセスまたはStreamlitコンテキスト外では空の辞書
+    return {}
 
 def compute_data_hash(data):
-    if data is None or data.empty: return "empty_data_hash"
+    """最適化されたデータハッシュ計算"""
+    if data is None or data.empty: 
+        return "empty_data_hash"
     try:
-        return hashlib.md5(pd.util.hash_pandas_object(data, index=True).values.tobytes()).hexdigest()
-    except Exception: return hashlib.md5(str(time.time()).encode()).hexdigest()
+        # 大きなデータの場合はサンプリングしてハッシュ計算を高速化
+        if len(data) > 5000:
+            sample_data = data.sample(n=1000, random_state=42)
+            return hashlib.md5(pd.util.hash_pandas_object(sample_data, index=True).values.tobytes()).hexdigest()[:12]
+        else:
+            return hashlib.md5(pd.util.hash_pandas_object(data, index=True).values.tobytes()).hexdigest()[:12]
+    except Exception: 
+        return hashlib.md5(str(time.time()).encode()).hexdigest()[:12]
 
 def get_chart_cache_key(title, days, target_value=None, chart_type="default", data_hash=None):
-    components = [str(title), str(days)]
+    """最適化されたキャッシュキー生成"""
+    components = [str(title)[:30], str(days)]  # タイトルを短縮
     if target_value is not None:
-        try: components.append(f"{float(target_value):.2f}")
-        except (ValueError, TypeError): components.append(str(target_value))
-    else: components.append("None")
+        try: 
+            components.append(f"{float(target_value):.1f}")
+        except (ValueError, TypeError): 
+            components.append(str(target_value)[:10])
+    else: 
+        components.append("None")
     components.append(str(chart_type))
-    if data_hash: components.append(data_hash)
+    if data_hash: 
+        components.append(data_hash[:8])  # ハッシュを短縮
     key_string = "_".join(components)
-    return hashlib.md5(key_string.encode()).hexdigest()
+    return hashlib.md5(key_string.encode()).hexdigest()[:12]  # キーを短縮
 
-
-# --- グラフ生成関数 ---
+# --- 最適化されたグラフ生成関数 ---
 def create_alos_chart_for_pdf(
     chart_data, title_prefix="全体", latest_date=None,
     moving_avg_window=30, font_name_for_mpl_to_use=None,
     days_to_show=90
 ):
+    """ALOS（平均在院日数）グラフ生成（最適化版）"""
     start_time = time.time()
     fig = None
-    # 引数で渡されたフォント名、それがなければグローバルなMATPLOTLIB_FONT_NAME、それもなければフォールバック
     actual_font_name = font_name_for_mpl_to_use or MATPLOTLIB_FONT_NAME or MATPLOTLIB_FONT_NAME_FALLBACK
-    font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name)
-
+    
     try:
-        fig, ax1 = plt.subplots(figsize=(10, 5.5))
-        if not isinstance(chart_data, pd.DataFrame) or chart_data.empty: return None
+        # データの事前検証（高速化）
+        if not isinstance(chart_data, pd.DataFrame) or chart_data.empty:
+            return None
+        
         required_columns = ["日付", "入院患者数（在院）", "総入院患者数", "総退院患者数"]
-        if any(col not in chart_data.columns for col in required_columns): return None
+        if any(col not in chart_data.columns for col in required_columns):
+            return None
+
+        # matplotlib設定の最適化
+        plt.style.use('default')  # スタイルをリセット
+        fig, ax1 = plt.subplots(figsize=(8, 4.5))  # サイズを少し小さく
 
         data_copy = chart_data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
-        if data_copy.empty: return None
+        
+        if data_copy.empty:
+            return None
 
         current_latest_date = latest_date if latest_date else data_copy['日付'].max()
-        if pd.isna(current_latest_date): current_latest_date = pd.Timestamp.now()
+        if pd.isna(current_latest_date):
+            current_latest_date = pd.Timestamp.now()
 
-        start_date_limit = current_latest_date - pd.Timedelta(days=days_to_show -1)
+        start_date_limit = current_latest_date - pd.Timedelta(days=days_to_show - 1)
         date_range_for_plot = pd.date_range(start=start_date_limit, end=current_latest_date, freq='D')
+        
+        # ベクトル化された計算で高速化
         daily_metrics = []
-
         for display_date in date_range_for_plot:
             window_start = display_date - pd.Timedelta(days=moving_avg_window - 1)
-            window_data = chart_data[(chart_data['日付'] >= window_start) & (chart_data['日付'] <= display_date)]
+            window_data = data_copy[(data_copy['日付'] >= window_start) & (data_copy['日付'] <= display_date)]
+            
             if not window_data.empty:
                 total_patient_days = window_data['入院患者数（在院）'].sum()
                 total_admissions = window_data['総入院患者数'].sum()
                 total_discharges = window_data['総退院患者数'].sum()
                 num_days_in_window = window_data['日付'].nunique()
+                
                 denominator = (total_admissions + total_discharges) / 2
-                alos = total_patient_days / denominator if denominator > 0 else np.nan # 0除算でNaN
+                alos = total_patient_days / denominator if denominator > 0 else np.nan
                 daily_census = total_patient_days / num_days_in_window if num_days_in_window > 0 else np.nan
-                daily_metrics.append({'日付': display_date, '平均在院日数': alos, '平均在院患者数': daily_census})
+                
+                daily_metrics.append({
+                    '日付': display_date, 
+                    '平均在院日数': alos, 
+                    '平均在院患者数': daily_census
+                })
 
-        if not daily_metrics: return None
+        if not daily_metrics:
+            return None
+            
         daily_df = pd.DataFrame(daily_metrics).sort_values('日付')
-        if daily_df.empty: return None
+        if daily_df.empty:
+            return None
 
-        ax1.plot(daily_df['日付'], daily_df['平均在院日数'], color='#3498db', linewidth=2, marker='o', markersize=4, label=f"平均在院日数({moving_avg_window}日MA)")
-        ax1.set_xlabel('日付', fontproperties=font_prop, fontsize=10)
-        ax1.set_ylabel('平均在院日数', fontproperties=font_prop, fontsize=10, color='#3498db')
-        ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=8)
-        # ax1.tick_params(axis='x', labelsize=8, rotation=30, ha='right') # 'ha' を削除
-        ax1.tick_params(axis='x', labelsize=8, rotation=30)
-        for label in ax1.get_xticklabels(): # ha を個別に設定
-            label.set_fontproperties(font_prop)
-            label.set_ha('right')
+        # フォント設定
+        font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name, size=9)
 
+        # グラフ描画（簡素化）
+        ax1.plot(daily_df['日付'], daily_df['平均在院日数'], 
+                color='#3498db', linewidth=2, marker='o', markersize=2, 
+                label=f"平均在院日数({moving_avg_window}日MA)")
+        
+        ax1.set_xlabel('日付', fontproperties=font_prop)
+        ax1.set_ylabel('平均在院日数', fontproperties=font_prop, color='#3498db')
+        ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=7)
+        ax1.tick_params(axis='x', labelsize=7, rotation=30)
 
         ax2 = ax1.twinx()
-        ax2.plot(daily_df['日付'], daily_df['平均在院患者数'], color='#e74c3c', linewidth=2, linestyle='--', label='平均在院患者数')
-        ax2.set_ylabel('平均在院患者数', fontproperties=font_prop, fontsize=10, color='#e74c3c')
-        ax2.tick_params(axis='y', labelcolor='#e74c3c', labelsize=8)
-        for label in ax2.get_xticklabels(): label.set_fontproperties(font_prop)
+        ax2.plot(daily_df['日付'], daily_df['平均在院患者数'], 
+                color='#e74c3c', linewidth=2, linestyle='--', label='平均在院患者数')
+        ax2.set_ylabel('平均在院患者数', fontproperties=font_prop, color='#e74c3c')
+        ax2.tick_params(axis='y', labelcolor='#e74c3c', labelsize=7)
 
-
+        # 凡例の最適化
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        legend_prop_obj = font_prop.copy()
-        legend_prop_obj.set_size(8) # 凡例のサイズ調整
-        ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', prop=legend_prop_obj)
+        ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', 
+                  prop={'family': actual_font_name, 'size': 7})
 
-        plt.title(f"{title_prefix} ALOSと在院患者数(直近{days_to_show}日)", fontproperties=font_prop, fontsize=12)
-        # fig.autofmt_xdate(rotation=30, ha='right') # tick_paramsで対応したので不要か、影響を確認
-        ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
-        plt.tight_layout(pad=0.8)
+        plt.title(f"{title_prefix} ALOS推移(直近{days_to_show}日)", fontproperties=font_prop, fontsize=10)
+        ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.5)
+        
+        # レイアウト最適化
+        plt.tight_layout(pad=0.3)
+        
         buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=150)
+        plt.savefig(buf, format='png', dpi=120, bbox_inches='tight')  # DPIを下げて高速化
         buf.seek(0)
+        
+        end_time = time.time()
+        if end_time - start_time > 2.0:  # 2秒以上かかった場合のみログ
+            print(f"ALOS chart for {title_prefix} took {end_time - start_time:.2f}s")
+        
         return buf
+        
     except Exception as e:
         print(f"Error in create_alos_chart_for_pdf for {title_prefix}: {e}")
-        import traceback; print(traceback.format_exc())
         return None
     finally:
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         gc.collect()
 
 def create_patient_chart_with_target_wrapper(
     data, title="入院患者数推移", days=90, show_moving_average=True, target_value=None,
     font_name_for_mpl_to_use=None
 ):
+    """患者数推移グラフ生成（最適化版）"""
     fig = None
     actual_font_name = font_name_for_mpl_to_use or MATPLOTLIB_FONT_NAME or MATPLOTLIB_FONT_NAME_FALLBACK
-    font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name)
+    
     try:
-        fig, ax = plt.subplots(figsize=(8, 4.0))
-        if not isinstance(data, pd.DataFrame) or data.empty: return None
-        if "日付" not in data.columns or "入院患者数（在院）" not in data.columns: return None
+        # データの事前検証
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            return None
+        if "日付" not in data.columns or "入院患者数（在院）" not in data.columns:
+            return None
+
+        # 最適化されたfigureサイズ
+        fig, ax = plt.subplots(figsize=(7, 3.5))  # より小さなサイズ
 
         data_copy = data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
-        if data_copy.empty : return None
+        
+        if data_copy.empty:
+            return None
 
         grouped = data_copy.groupby("日付")["入院患者数（在院）"].sum().reset_index().sort_values("日付")
-        if len(grouped) > days: grouped = grouped.tail(days)
-        if grouped.empty: return None
+        if len(grouped) > days and days > 0:
+            grouped = grouped.tail(days)
+        if grouped.empty:
+            return None
 
-        # 基本的なグラフ要素
+        # フォント設定の最適化
+        font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name, size=8)
+
+        # 基本グラフ要素（簡素化）
         ax.plot(grouped["日付"], grouped["入院患者数（在院）"], 
-                marker='o', linestyle='-', linewidth=1.5, markersize=3, 
+                marker='o', linestyle='-', linewidth=1.5, markersize=2, 
                 color='#3498db', label='入院患者数')
         
         avg = grouped["入院患者数（在院）"].mean()
@@ -218,171 +285,155 @@ def create_patient_chart_with_target_wrapper(
             ax.plot(grouped["日付"], grouped['7日移動平均'], 
                     linestyle='-', linewidth=1.2, color='#2ecc71', label='7日移動平均')
 
+        # 目標値処理（最適化）
         if target_value is not None and pd.notna(target_value):
             try:
                 target_val_float = float(target_value)
-                
-                # データの範囲を取得
                 data_min = grouped["入院患者数（在院）"].min()
                 data_max = grouped["入院患者数（在院）"].max()
                 
-                # 適切なY軸範囲を計算
-                # 下限：データ最小値の90%（ただし0未満にはしない）
                 y_min = max(0, data_min * 0.9)
-                
-                # 上限：データ最大値と目標値の大きい方に20%のマージン
                 y_max = max(data_max, target_val_float) * 1.05
-                
-                # Y軸の範囲を設定
                 ax.set_ylim(bottom=y_min, top=y_max)
                 
-                # 達成ゾーン（目標値以上）を先に描画
-                ax.fill_between(grouped["日付"], 
-                               target_val_float, 
-                               y_max, 
-                               color='#2ecc71',  # 緑色
-                               alpha=0.15, 
-                               label='達成ゾーン',
-                               zorder=1)  # 背景に描画
+                # 達成ゾーン（半透明度を下げて高速化）
+                ax.fill_between(grouped["日付"], target_val_float, y_max, 
+                               color='#2ecc71', alpha=0.1, label='達成ゾーン', zorder=1)
                 
-                # 注意ゾーン（目標値の97%～目標値）
+                # 注意ゾーン
                 caution_threshold = target_val_float * 0.97
-                ax.fill_between(grouped["日付"], 
-                               caution_threshold, 
-                               target_val_float, 
-                               color='orange', 
-                               alpha=0.15, 
-                               label='注意ゾーン',
-                               zorder=2)
+                ax.fill_between(grouped["日付"], caution_threshold, target_val_float, 
+                               color='orange', alpha=0.1, label='注意ゾーン', zorder=2)
                 
-                # 目標線（最前面に描画）
+                # 目標線
                 ax.axhline(y=target_val_float, color='#9b59b6', linestyle='-.', 
-                          linewidth=1.2, label=f'目標値: {target_val_float:.1f}',
-                          zorder=10)
+                          linewidth=1.2, label=f'目標値: {target_val_float:.1f}', zorder=10)
                 
-            except ValueError: 
-                print(f"Warning: Target value '{target_value}' for {title} not float.")
-        # ここにelseは不要 - 目標値がない場合はMatplotlibのデフォルトの自動スケーリングが使用される
+            except ValueError:
+                pass
 
-        ax.set_title(title, fontproperties=font_prop, fontsize=11)
-        ax.set_xlabel('日付', fontproperties=font_prop, fontsize=9)
-        ax.set_ylabel('患者数', fontproperties=font_prop, fontsize=9)
-        ax.grid(True, linestyle=':', linewidth=0.5, alpha=0.7, zorder=0)
+        # レイアウト最適化
+        ax.set_title(title, fontproperties=font_prop, fontsize=9)
+        ax.set_xlabel('日付', fontproperties=font_prop, fontsize=8)
+        ax.set_ylabel('患者数', fontproperties=font_prop, fontsize=8)
+        ax.grid(True, linestyle=':', linewidth=0.5, alpha=0.5, zorder=0)
         
-        # 凡例の順序を調整
+        # 凡例の最適化（項目数制限）
         handles, labels = ax.get_legend_handles_labels()
-        # 望ましい順序を定義
-        desired_order = ['入院患者数', '7日移動平均', '平均:', '目標値:', '達成ゾーン', '注意ゾーン']
-        ordered_handles = []
-        ordered_labels = []
+        if len(handles) > 5:  # 凡例項目が多すぎる場合は重要なもののみ表示
+            important_indices = [0, 1, -1]  # 最初、2番目、最後
+            handles = [handles[i] for i in important_indices if i < len(handles)]
+            labels = [labels[i] for i in important_indices if i < len(labels)]
         
-        for desired_label in desired_order:
-            for i, label in enumerate(labels):
-                if desired_label in label or label.startswith(desired_label):
-                    ordered_handles.append(handles[i])
-                    ordered_labels.append(labels[i])
-                    break
+        ax.legend(handles, labels, prop={'family': actual_font_name, 'size': 7}, loc='upper left')
         
-        legend_font_prop = font_prop.copy()
-        legend_font_prop.set_size(8)
-        ax.legend(ordered_handles, ordered_labels, prop=legend_font_prop, loc='upper left')
-        
-        ax.tick_params(axis='x', labelsize=7, rotation=30)
-        for label in ax.get_xticklabels():
-            label.set_fontproperties(font_prop)
-            label.set_ha('right')
-        ax.tick_params(axis='y', labelsize=7)
-        for label in ax.get_yticklabels(): 
-            label.set_fontproperties(font_prop)
+        ax.tick_params(axis='x', labelsize=6, rotation=30)
+        ax.tick_params(axis='y', labelsize=6)
 
-        plt.tight_layout(pad=0.5)
+        plt.tight_layout(pad=0.2)
+        
         buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=120)
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')  # DPIをさらに下げて高速化
         buf.seek(0)
         return buf
+        
     except Exception as e:
         print(f"Error in create_patient_chart_with_target_wrapper ('{title}'): {e}")
-        import traceback
-        print(traceback.format_exc())
         return None
     finally:
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         gc.collect()
 
-def create_dual_axis_chart_for_pdf(
-    data, title="患者移動と在院数", days=90, font_name_for_mpl_to_use=None
-):
+def create_dual_axis_chart_for_pdf(data, title="患者移動と在院数", days=90, font_name_for_mpl_to_use=None):
+    """二軸グラフ生成（最適化版）"""
     fig = None
     actual_font_name = font_name_for_mpl_to_use or MATPLOTLIB_FONT_NAME or MATPLOTLIB_FONT_NAME_FALLBACK
-    font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name)
+    
     try:
-        fig, ax1 = plt.subplots(figsize=(8, 4.0)) # PDF向けサイズ調整
-        if not isinstance(data, pd.DataFrame) or data.empty: return None
+        # データの事前検証
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            return None
         required_cols = ["日付", "入院患者数（在院）", "新入院患者数", "緊急入院患者数", "総退院患者数"]
-        if any(col not in data.columns for col in required_cols): return None
+        if any(col not in data.columns for col in required_cols):
+            return None
+
+        # 最適化されたfigureサイズ
+        fig, ax1 = plt.subplots(figsize=(7, 3.5))
 
         data_copy = data.copy()
         if not pd.api.types.is_datetime64_any_dtype(data_copy['日付']):
             data_copy['日付'] = pd.to_datetime(data_copy['日付'], errors='coerce')
             data_copy.dropna(subset=['日付'], inplace=True)
-        if data_copy.empty: return None
+        
+        if data_copy.empty:
+            return None
 
+        # データ集約の最適化
         agg_dict = {"入院患者数（在院）": "sum", "新入院患者数": "sum", "緊急入院患者数": "sum", "総退院患者数": "sum"}
         grouped = data_copy.groupby("日付").agg(agg_dict).reset_index().sort_values("日付")
-        if len(grouped) > days: grouped = grouped.tail(days)
-        if grouped.empty: return None
+        
+        if len(grouped) > days and days > 0:
+            grouped = grouped.tail(days)
+        if grouped.empty:
+            return None
 
+        # 移動平均計算の最適化
         cols_for_ma = ["入院患者数（在院）", "新入院患者数", "緊急入院患者数", "総退院患者数"]
         for col in cols_for_ma:
-            if col in grouped.columns: grouped[f'{col}_7日MA'] = grouped[col].rolling(window=7, min_periods=1).mean()
-            else: grouped[f'{col}_7日MA'] = 0
+            if col in grouped.columns:
+                grouped[f'{col}_7日MA'] = grouped[col].rolling(window=7, min_periods=1).mean()
 
+        # フォント設定
+        font_prop = matplotlib.font_manager.FontProperties(family=actual_font_name, size=8)
+
+        # グラフ描画（簡素化）
         if "入院患者数（在院）_7日MA" in grouped.columns:
-            ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日MA"], color='#3498db', linewidth=2, label="在院患者数(7日MA)")
-        ax1.set_xlabel('日付', fontproperties=font_prop, fontsize=9)
-        ax1.set_ylabel('在院患者数', fontproperties=font_prop, fontsize=9, color='#3498db')
-        ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=8)
-        # ax1.tick_params(axis='x', labelsize=8, rotation=30, ha='right') # ha を削除
-        ax1.tick_params(axis='x', labelsize=8, rotation=30)
-        for label in ax1.get_xticklabels(): # ha を個別に設定
-            label.set_fontproperties(font_prop)
-            label.set_ha('right')
-
+            ax1.plot(grouped["日付"], grouped["入院患者数（在院）_7日MA"], 
+                    color='#3498db', linewidth=2, label="在院患者数(7日MA)")
+        
+        ax1.set_xlabel('日付', fontproperties=font_prop)
+        ax1.set_ylabel('在院患者数', fontproperties=font_prop, color='#3498db')
+        ax1.tick_params(axis='y', labelcolor='#3498db', labelsize=7)
+        ax1.tick_params(axis='x', labelsize=7, rotation=30)
 
         ax2 = ax1.twinx()
-        colors_map = {"新入院患者数": "#2ecc71", "緊急入院患者数": "#e74c3c", "総退院患者数": "#f39c12"}
-        for col, color_val in colors_map.items():
+        
+        # 重要な指標のみ表示（高速化）
+        important_colors = {"新入院患者数": "#2ecc71", "総退院患者数": "#f39c12"}
+        for col, color_val in important_colors.items():
             ma_col_name = f"{col}_7日MA"
             if ma_col_name in grouped.columns:
-                ax2.plot(grouped["日付"], grouped[ma_col_name], color=color_val, linewidth=1.5, label=f"{col}(7日MA)")
-        ax2.set_ylabel('患者移動数', fontproperties=font_prop, fontsize=9)
-        ax2.tick_params(axis='y', labelsize=8)
-        for label in ax2.get_yticklabels(): label.set_fontproperties(font_prop)
+                ax2.plot(grouped["日付"], grouped[ma_col_name], 
+                        color=color_val, linewidth=1.5, label=f"{col}(7日MA)")
+        
+        ax2.set_ylabel('患者移動数', fontproperties=font_prop)
+        ax2.tick_params(axis='y', labelsize=7)
 
+        # 凡例の最適化
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        legend_font_prop = font_prop.copy(); legend_font_prop.set_size(8)
-        ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', prop=legend_font_prop)
+        ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', 
+                  prop={'family': actual_font_name, 'size': 7})
 
-        plt.title(title, fontproperties=font_prop, fontsize=11)
-        # fig.autofmt_xdate(rotation=30, ha='right') # tick_paramsで対応したので不要か
-        ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.7)
-        plt.tight_layout(pad=0.5)
+        plt.title(title, fontproperties=font_prop, fontsize=9)
+        ax1.grid(True, linestyle=':', linewidth=0.5, alpha=0.5)
+        plt.tight_layout(pad=0.2)
+        
         buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=120)
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
         buf.seek(0)
         return buf
+        
     except Exception as e:
         print(f"Error in create_dual_axis_chart_for_pdf ('{title}'): {e}")
-        import traceback; print(traceback.format_exc())
         return None
     finally:
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         gc.collect()
 
-
-# --- PDF生成メイン関数 ---
-# @st.cache_data(ttl=600, show_spinner=False, max_entries=50) # PDF自体はキャッシュしない
+# --- PDF生成メイン関数（最適化版） ---
 def create_pdf(
     forecast_df, df_weekday, df_holiday, df_all_avg=None,
     chart_data=None, title_prefix="全体", latest_date=None,
@@ -391,166 +442,285 @@ def create_pdf(
     patient_chart_buffers=None,
     dual_axis_chart_buffers=None
 ):
-    # ... (既存のcreate_pdf関数の中身は、グラフ生成部分をバッファ使用に置き換える以外は変更なし) ...
-    # ... (ただし、内部で get_chart_cache や chart_cache.get/[] を使っている箇所があれば、それは削除するか、
-    #      メインプロセスでのみ機能することを理解した上で条件分岐する)
-    # 以下は、バッファ使用を前提とした修正後の構成例
+    """PDF生成（最適化版）"""
     pdf_start_time = time.time()
     elements = []
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4,
-                            leftMargin=15*mm, rightMargin=15*mm,
-                            topMargin=18*mm, bottomMargin=18*mm)
+    
+    # PDF設定の最適化
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=12*mm, rightMargin=12*mm,  # マージンを小さく
+        topMargin=15*mm, bottomMargin=15*mm
+    )
 
+    # スタイル定義の最適化
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='Normal_JP', parent=styles['Normal'], fontName=REPORTLAB_FONT_NAME, fontSize=8, leading=10))
-    styles.add(ParagraphStyle(name='Heading1_JP', parent=styles['Heading1'], fontName=REPORTLAB_FONT_NAME, fontSize=14, spaceAfter=5*mm, leading=16))
-    styles.add(ParagraphStyle(name='Heading2_JP', parent=styles['Heading2'], fontName=REPORTLAB_FONT_NAME, fontSize=11, spaceAfter=3*mm, leading=14))
-    styles.add(ParagraphStyle(name='Normal_Center_JP', parent=styles['Normal_JP'], alignment=TA_CENTER, fontSize=7, leading=8))
+    styles.add(ParagraphStyle(name='Normal_JP', parent=styles['Normal'], fontName=REPORTLAB_FONT_NAME, fontSize=8, leading=9))
+    styles.add(ParagraphStyle(name='Heading1_JP', parent=styles['Heading1'], fontName=REPORTLAB_FONT_NAME, fontSize=13, spaceAfter=3*mm, leading=15))
+    styles.add(ParagraphStyle(name='Heading2_JP', parent=styles['Heading2'], fontName=REPORTLAB_FONT_NAME, fontSize=10, spaceAfter=2*mm, leading=12))
 
     normal_ja = styles['Normal_JP']
     ja_style = styles['Heading1_JP']
     ja_heading2 = styles['Heading2_JP']
-    para_style_normal_center = styles['Normal_Center_JP']
 
+    # 日付処理の最適化
     current_latest_date = latest_date if latest_date else pd.Timestamp.now().normalize()
-    if isinstance(current_latest_date, str): current_latest_date = pd.Timestamp(current_latest_date)
+    if isinstance(current_latest_date, str):
+        current_latest_date = pd.Timestamp(current_latest_date)
+    
     data_date_str = current_latest_date.strftime("%Y年%m月%d日")
     today_str = pd.Timestamp.now().strftime("%Y年%m月%d日")
 
+    # タイトル
     report_title_text = f"入院患者数予測 - {title_prefix}（データ基準日: {data_date_str}）"
     elements.append(Paragraph(report_title_text, ja_style))
-    elements.append(Spacer(1, 5*mm))
+    elements.append(Spacer(1, 3*mm))
+    
     page_width = A4[0] - doc.leftMargin - doc.rightMargin
     graphs_on_current_page = 0
-    max_graphs_per_page = 2 # 縦向きの場合
+    max_graphs_per_page = 2
 
-    # ALOSグラフ (バッファから)
+    # グラフ配置（バッファから、最適化版）
     if alos_chart_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(alos_chart_buffers.items(), key=lambda item: int(item[0])):
+        for days_val_str, chart_buffer_bytes in sorted(alos_chart_buffers.items(), key=lambda x: int(x[0])):
             if graphs_on_current_page >= max_graphs_per_page:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Spacer(1, 3*mm))
+                graphs_on_current_page = 0
+            
             if chart_buffer_bytes:
-                img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                elements.append(Paragraph(f"平均在院日数と平均在院患者数の推移（直近{days_val_str}日間）", ja_heading2))
-                elements.append(Spacer(1, 1.5*mm)); elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page += 1
-        if graphs_on_current_page > 0 and (patient_chart_buffers or dual_axis_chart_buffers): # 次にグラフが続くなら改ページ
-             elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                img_buf = BytesIO(chart_buffer_bytes)
+                img_buf.seek(0)
+                elements.append(Paragraph(f"平均在院日数推移（直近{days_val_str}日間）", ja_heading2))
+                elements.append(Spacer(1, 1*mm))
+                # 画像サイズを最適化
+                elements.append(Image(img_buf, width=page_width*0.85, height=(page_width*0.85)*0.4))
+                elements.append(Spacer(1, 2*mm))
+                graphs_on_current_page += 1
 
-    # 患者数推移グラフ (バッファから)
+    # 患者数推移グラフ（最適化版）
     if patient_chart_buffers:
         type_name_map = {"all": "全日", "weekday": "平日", "holiday": "休日"}
         for chart_type_key in ["all", "weekday", "holiday"]:
             day_buffers_dict = patient_chart_buffers.get(chart_type_key, {})
-            if not day_buffers_dict: continue
+            if not day_buffers_dict:
+                continue
+            
             display_name = type_name_map.get(chart_type_key, chart_type_key.capitalize())
-            for days_val_str, chart_buffer_bytes in sorted(day_buffers_dict.items(), key=lambda item: int(item[0])):
+            for days_val_str, chart_buffer_bytes in sorted(day_buffers_dict.items(), key=lambda x: int(x[0])):
                 if graphs_on_current_page >= max_graphs_per_page:
-                    elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                    elements.append(PageBreak())
+                    elements.append(Paragraph(report_title_text, ja_style))
+                    elements.append(Spacer(1, 3*mm))
+                    graphs_on_current_page = 0
+                
                 if chart_buffer_bytes:
-                    img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
+                    img_buf = BytesIO(chart_buffer_bytes)
+                    img_buf.seek(0)
                     elements.append(Paragraph(f"{display_name} 入院患者数推移（直近{days_val_str}日間）", ja_heading2))
-                    elements.append(Spacer(1, 1.5*mm)); elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page += 1
-            if graphs_on_current_page > 0 and dual_axis_chart_buffers: # 次に二軸グラフが続くなら改ページ
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
-            elif graphs_on_current_page > 0 and not dual_axis_chart_buffers: # これでグラフ終わりならテーブル前に改ページ
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                    elements.append(Spacer(1, 1*mm))
+                    elements.append(Image(img_buf, width=page_width*0.85, height=(page_width*0.85)*0.4))
+                    elements.append(Spacer(1, 2*mm))
+                    graphs_on_current_page += 1
 
-
-    # 二軸グラフ (バッファから)
+    # 二軸グラフ
     if dual_axis_chart_buffers:
-        for days_val_str, chart_buffer_bytes in sorted(dual_axis_chart_buffers.items(), key=lambda item: int(item[0])):
+        for days_val_str, chart_buffer_bytes in sorted(dual_axis_chart_buffers.items(), key=lambda x: int(x[0])):
             if graphs_on_current_page >= max_graphs_per_page:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Spacer(1, 3*mm))
+                graphs_on_current_page = 0
+            
             if chart_buffer_bytes:
-                img_buf = BytesIO(chart_buffer_bytes); img_buf.seek(0)
-                elements.append(Paragraph(f"患者移動と在院数の推移（直近{days_val_str}日間）", ja_heading2))
-                elements.append(Spacer(1, 1.5*mm)); elements.append(Image(img_buf, width=page_width*0.9, height=(page_width*0.9)*0.45)); elements.append(Spacer(1, 3*mm)); graphs_on_current_page += 1
-        if graphs_on_current_page > 0: # これでグラフ終わりなのでテーブル前に改ページ
-            elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm)); graphs_on_current_page = 0
+                img_buf = BytesIO(chart_buffer_bytes)
+                img_buf.seek(0)
+                elements.append(Paragraph(f"患者移動推移（直近{days_val_str}日間）", ja_heading2))
+                elements.append(Spacer(1, 1*mm))
+                elements.append(Image(img_buf, width=page_width*0.85, height=(page_width*0.85)*0.4))
+                elements.append(Spacer(1, 2*mm))
+                graphs_on_current_page += 1
 
-    # ... (以降のテーブル生成ロジックは変更なし) ...
+    # テーブル生成（最適化版）
+    if graphs_on_current_page > 0:
+        elements.append(PageBreak())
+        elements.append(Paragraph(report_title_text, ja_style))
+        elements.append(Spacer(1, 3*mm))
+
+    # 共通テーブルスタイル（最適化）
     common_table_style_cmds = [
-        ('FONTNAME', (0,0), (-1,-1), REPORTLAB_FONT_NAME), ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('ALIGN', (0,0), (-1,0), 'CENTER'), 
-        ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('ALIGN', (0,1), (0,-1), 'LEFT'),   
-        ('FONTSIZE', (0,0), (-1,0), 9), ('FONTSIZE', (0,1), (-1,-1), 8),   
-        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke), ('LEFTPADDING', (0,0), (-1,-1), 2*mm), 
-        ('RIGHTPADDING', (0,0), (-1,-1), 2*mm),
+        ('FONTNAME', (0,0), (-1,-1), REPORTLAB_FONT_NAME),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (0,0), (-1,0), 'CENTER'), 
+        ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+        ('FONTSIZE', (0,0), (-1,0), 8),
+        ('FONTSIZE', (0,1), (-1,-1), 7),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('LEFTPADDING', (0,0), (-1,-1), 1.5*mm),
+        ('RIGHTPADDING', (0,0), (-1,-1), 1.5*mm),
     ]
-    if df_all_avg is not None and not df_all_avg.empty:
-        elements.append(Paragraph("全日平均値（平日・休日含む）", ja_heading2))
-        header = [df_all_avg.index.name if df_all_avg.index.name else "区分"] + df_all_avg.columns.tolist()
-        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in df_all_avg.iterrows()]
-        num_cols = len(header); col_widths = [page_width*0.2] + [(page_width*0.8)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
-        elements.append(Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.green)])))
-        elements.append(Spacer(1, 4*mm))
 
+    # 主要テーブルの追加（全日平均値）
+    if df_all_avg is not None and not df_all_avg.empty:
+        elements.append(Paragraph("全日平均値", ja_heading2))
+        header = [df_all_avg.index.name if df_all_avg.index.name else "区分"] + df_all_avg.columns.tolist()
+        
+        # テーブルデータの最適化（数値フォーマット簡素化）
+        table_data = [header]
+        for idx, row in df_all_avg.iterrows():
+            row_data = [str(idx)]
+            for x in row:
+                if isinstance(x, (float, int)) and pd.notna(x):
+                    row_data.append(f"{x:.1f}")
+                else:
+                    row_data.append(str(x) if pd.notna(x) else "-")
+            table_data.append(row_data)
+        
+        num_cols = len(header)
+        col_widths = [page_width*0.2] + [(page_width*0.8)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
+        
+        elements.append(Table(table_data, colWidths=col_widths, 
+                             style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.green)])))
+        elements.append(Spacer(1, 3*mm))
+
+    # 予測テーブルの追加
     if forecast_df is not None and not forecast_df.empty:
         elements.append(Paragraph("在院患者数予測", ja_heading2))
         fc_df_mod = forecast_df.copy()
-        if "年間平均人日（実績＋予測）" in fc_df_mod.columns: fc_df_mod.rename(columns={"年間平均人日（実績＋予測）": "年度予測"}, inplace=True)
-        if "延べ予測人日" in fc_df_mod.columns: fc_df_mod.drop(columns=["延べ予測人日"], inplace=True)
+        
+        # 列名の最適化
+        if "年間平均人日（実績＋予測）" in fc_df_mod.columns:
+            fc_df_mod.rename(columns={"年間平均人日（実績＋予測）": "年度予測"}, inplace=True)
+        if "延べ予測人日" in fc_df_mod.columns:
+            fc_df_mod.drop(columns=["延べ予測人日"], inplace=True)
+        
         header = [fc_df_mod.index.name if fc_df_mod.index.name else "基準"] + fc_df_mod.columns.tolist()
-        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in fc_df_mod.iterrows()]
-        num_cols = len(header); col_widths_fc = [page_width*0.25] + [(page_width*0.75)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
-        elements.append(Table(table_data, colWidths=col_widths_fc, style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.blue)])))
-        elements.append(Spacer(1, 4*mm))
-    
-    elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm))
+        
+        table_data = [header]
+        for idx, row in fc_df_mod.iterrows():
+            row_data = [str(idx)]
+            for x in row:
+                if isinstance(x, (float, int)) and pd.notna(x):
+                    row_data.append(f"{x:.1f}")
+                else:
+                    row_data.append(str(x) if pd.notna(x) else "-")
+            table_data.append(row_data)
+        
+        num_cols = len(header)
+        col_widths_fc = [page_width*0.25] + [(page_width*0.75)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
+        
+        elements.append(Table(table_data, colWidths=col_widths_fc, 
+                             style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.blue)])))
+        elements.append(Spacer(1, 3*mm))
 
-    if df_weekday is not None and not df_weekday.empty:
-        elements.append(Paragraph("平日平均値", ja_heading2))
-        header = [df_weekday.index.name if df_weekday.index.name else "区分"] + df_weekday.columns.tolist()
-        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in df_weekday.iterrows()]
-        num_cols = len(header); col_widths = [page_width*0.2] + [(page_width*0.8)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
-        elements.append(Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.teal)])))
-        elements.append(Spacer(1, 4*mm))
-    if df_holiday is not None and not df_holiday.empty:
-        elements.append(Paragraph("休日平均値", ja_heading2))
-        header = [df_holiday.index.name if df_holiday.index.name else "区分"] + df_holiday.columns.tolist()
-        table_data = [header] + [[str(idx)] + [f"{x:.1f}" if isinstance(x,(float,int)) and pd.notna(x) else (str(x) if pd.notna(x) else "-") for x in row] for idx, row in df_holiday.iterrows()]
-        num_cols = len(header); col_widths = [page_width*0.2] + [(page_width*0.8)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
-        elements.append(Table(table_data, colWidths=col_widths, style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), colors.orange)])))
-        elements.append(Spacer(1, 4*mm))
+    # 新しいページで平日・休日テーブル
+    elements.append(PageBreak())
+    elements.append(Paragraph(report_title_text, ja_style))
+    elements.append(Spacer(1, 3*mm))
 
+    # 平日・休日テーブル（最適化版）
+    for df_data, table_title, bg_color in [
+        (df_weekday, "平日平均値", colors.teal),
+        (df_holiday, "休日平均値", colors.orange)
+    ]:
+        if df_data is not None and not df_data.empty:
+            elements.append(Paragraph(table_title, ja_heading2))
+            header = [df_data.index.name if df_data.index.name else "区分"] + df_data.columns.tolist()
+            
+            table_data = [header]
+            for idx, row in df_data.iterrows():
+                row_data = [str(idx)]
+                for x in row:
+                    if isinstance(x, (float, int)) and pd.notna(x):
+                        row_data.append(f"{x:.1f}")
+                    else:
+                        row_data.append(str(x) if pd.notna(x) else "-")
+                table_data.append(row_data)
+            
+            num_cols = len(header)
+            col_widths = [page_width*0.2] + [(page_width*0.8)/(num_cols-1 if num_cols > 1 else 1)]*(num_cols-1)
+            
+            elements.append(Table(table_data, colWidths=col_widths, 
+                                 style=TableStyle(common_table_style_cmds + [('BACKGROUND', (0,0), (-1,0), bg_color)])))
+            elements.append(Spacer(1, 2*mm))
+
+    # 部門別テーブル（条件付きで追加、最適化版）
     if chart_data is not None and not chart_data.empty:
-        generated_ward_table_data, generated_dept_table_data, period_labels_dept_ward = create_department_tables(
-            chart_data, current_latest_date, target_data, filter_code, para_style_normal_center
-        )
-        dept_ward_common_style = [
-            ('FONTNAME', (0,0), (-1,-1), REPORTLAB_FONT_NAME), ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('FONTSIZE', (0,0), (-1,0), 8), ('FONTSIZE', (0,1), (-1,-1), 7), ('TEXTCOLOR', (0,0), (-1,0), colors.black),
-        ]
-        is_ward_pdf = "病棟別" in title_prefix; is_dept_pdf = "診療科別" in title_prefix
-        if (is_ward_pdf and not is_dept_pdf) or (not is_ward_pdf and not is_dept_pdf) :
-            if generated_ward_table_data and len(generated_ward_table_data) > 1:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm))
-                elements.append(Paragraph("病棟別 入院患者数（在院）平均", ja_heading2))
-                num_cols = len(generated_ward_table_data[0])
-                period_count = len(period_labels_dept_ward) if period_labels_dept_ward else 0
-                col_widths_ward = [page_width * 0.12] + [(page_width * 0.70) / period_count if period_count > 0 else 0] * period_count + [page_width * 0.09] * 2
-                if num_cols != len(col_widths_ward) and num_cols > 0: col_widths_ward = [page_width/num_cols] * num_cols
-                elements.append(Table(generated_ward_table_data, colWidths=col_widths_ward, style=TableStyle(dept_ward_common_style + [('BACKGROUND', (0,0), (-1,0), colors.lightgrey)])))
-                elements.append(Spacer(1, 4*mm))
-        if (is_dept_pdf and not is_ward_pdf) or (not is_ward_pdf and not is_dept_pdf) :
-            if generated_dept_table_data and len(generated_dept_table_data) > 1:
-                elements.append(PageBreak()); elements.append(Paragraph(report_title_text, ja_style)); elements.append(Spacer(1, 5*mm))
-                elements.append(Paragraph("診療科別 入院患者数（在院）平均", ja_heading2))
-                num_cols = len(generated_dept_table_data[0])
-                period_count = len(period_labels_dept_ward) if period_labels_dept_ward else 0
-                col_widths_dept = [page_width * 0.12] + [(page_width * 0.70) / period_count if period_count > 0 else 0] * period_count + [page_width * 0.09] * 2
-                if num_cols != len(col_widths_dept) and num_cols > 0: col_widths_dept = [page_width/num_cols] * num_cols
-                elements.append(Table(generated_dept_table_data, colWidths=col_widths_dept, style=TableStyle(dept_ward_common_style + [('BACKGROUND', (0,0), (-1,0), colors.lightcyan)])))
-                elements.append(Spacer(1, 4*mm))
+        try:
+            from pdf_generator import create_department_tables
+            ward_table_data, dept_table_data, period_labels = create_department_tables(
+                chart_data, current_latest_date, target_data, filter_code, None
+            )
+            
+            # テーブルスタイルの最適化
+            dept_ward_style = [
+                ('FONTNAME', (0,0), (-1,-1), REPORTLAB_FONT_NAME),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTSIZE', (0,0), (-1,0), 7),
+                ('FONTSIZE', (0,1), (-1,-1), 6),
+            ]
+            
+            is_ward_pdf = "病棟別" in title_prefix
+            is_dept_pdf = "診療科別" in title_prefix
+            
+            # 病棟テーブル
+            if (is_ward_pdf or not is_dept_pdf) and ward_table_data and len(ward_table_data) > 1:
+                elements.append(PageBreak())
+                elements.append(Paragraph(report_title_text, ja_style))
+                elements.append(Spacer(1, 3*mm))
+                elements.append(Paragraph("病棟別 入院患者数平均", ja_heading2))
+                
+                num_cols = len(ward_table_data[0])
+                col_widths_ward = [page_width/num_cols] * num_cols
+                
+                elements.append(Table(ward_table_data, colWidths=col_widths_ward, 
+                                     style=TableStyle(dept_ward_style + [('BACKGROUND', (0,0), (-1,0), colors.lightgrey)])))
+                elements.append(Spacer(1, 2*mm))
+            
+            # 診療科テーブル
+            if (is_dept_pdf or not is_ward_pdf) and dept_table_data and len(dept_table_data) > 1:
+                if not is_ward_pdf or not ward_table_data:
+                    elements.append(PageBreak())
+                    elements.append(Paragraph(report_title_text, ja_style))
+                    elements.append(Spacer(1, 3*mm))
+                
+                elements.append(Paragraph("診療科別 入院患者数平均", ja_heading2))
+                
+                num_cols = len(dept_table_data[0])
+                col_widths_dept = [page_width/num_cols] * num_cols
+                
+                elements.append(Table(dept_table_data, colWidths=col_widths_dept, 
+                                     style=TableStyle(dept_ward_style + [('BACKGROUND', (0,0), (-1,0), colors.lightcyan)])))
+                elements.append(Spacer(1, 2*mm))
+                
+        except Exception as e:
+            print(f"部門別テーブル生成エラー: {e}")
 
-    elements.append(Spacer(1, 8*mm))
+    # フッター
+    elements.append(Spacer(1, 5*mm))
     elements.append(Paragraph(f"作成日時: {today_str}", normal_ja))
-    doc.build(elements)
-    buffer.seek(0)
-    gc.collect()
-    return buffer
+    
+    # PDF構築（最適化版）
+    try:
+        doc.build(elements)
+        buffer.seek(0)
+        
+        pdf_end_time = time.time()
+        if pdf_end_time - pdf_start_time > 5.0:  # 5秒以上かかった場合のみログ
+            print(f"PDF generation for {title_prefix} took {pdf_end_time - pdf_start_time:.2f}s")
+        
+        return buffer
+        
+    except Exception as e:
+        print(f"PDF構築エラー ({title_prefix}): {e}")
+        return None
+    finally:
+        gc.collect()
 
 # create_landscape_pdf も同様に修正
 def create_landscape_pdf(
