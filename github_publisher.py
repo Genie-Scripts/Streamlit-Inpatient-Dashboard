@@ -688,115 +688,181 @@ class ContentCustomizer:
         }
     
     def create_streamlit_interface(self):
-        """Streamlitで内容編集インターフェースを作成"""
+        """Streamlitで内容編集インターフェースを作成（修正版）"""
         
-        with st.sidebar.expander("📝 トップページ内容編集", expanded=False):
-            
-            # ヘッダー部分
-            st.markdown("### 🏠 ヘッダー部分")
-            main_title = st.text_input(
-                "メインタイトル",
-                value=st.session_state.get('content_main_title', self.default_content["main_title"]),
-                key="content_main_title",
-                help="トップページの大見出し"
-            )
-            
-            subtitle = st.text_input(
-                "サブタイトル",
-                value=st.session_state.get('content_subtitle', self.default_content["subtitle"]),
-                key="content_subtitle",
-                help="タイトル下の説明文"
-            )
-            
-            # 機能紹介部分
-            st.markdown("### ✨ 機能紹介部分")
-            show_features = st.checkbox(
-                "機能紹介セクションを表示",
-                value=st.session_state.get('content_show_features', True),
-                key="content_show_features"
-            )
-            
-            if show_features:
-                for i in range(4):
-                    with st.expander(f"機能 {i+1}", expanded=False):
-                        feature_icon = st.text_input(
-                            "アイコン",
-                            value=st.session_state.get(f'content_feature_{i}_icon', self.default_content["features"][i]["icon"]),
-                            key=f"content_feature_{i}_icon"
-                        )
-                        feature_title = st.text_input(
-                            "タイトル",
-                            value=st.session_state.get(f'content_feature_{i}_title', self.default_content["features"][i]["title"]),
-                            key=f"content_feature_{i}_title"
-                        )
-                        feature_desc = st.text_area(
-                            "説明",
-                            value=st.session_state.get(f'content_feature_{i}_description', self.default_content["features"][i]["description"]),
-                            key=f"content_feature_{i}_description",
-                            height=50
-                        )
-            
-            # ダッシュボード説明
-            st.markdown("### 📊 ダッシュボード説明")
-            dept_description = st.text_area(
-                "診療科別ダッシュボード説明",
-                value=st.session_state.get('content_dept_description', self.default_content["department_dashboard_description"]),
-                key="content_dept_description",
-                height=60
-            )
-            
-            ward_description = st.text_area(
-                "病棟別ダッシュボード説明",
-                value=st.session_state.get('content_ward_description', self.default_content["ward_dashboard_description"]),
-                key="content_ward_description",
-                height=60
-            )
-            
-            # フッター部分
-            st.markdown("### 🔻 フッター部分")
-            footer_text = st.text_input(
-                "フッターメインテキスト",
-                value=st.session_state.get('content_footer_text', self.default_content["footer_text"]),
-                key="content_footer_text"
-            )
-            
-            footer_note = st.text_area(
-                "フッター追加メモ",
-                value=st.session_state.get('content_footer_note', self.default_content["footer_note"]),
-                key="content_footer_note",
-                height=60,
-                help="病院名や部署名など"
-            )
-            
-            # ボタンテキスト
-            st.markdown("### 🔘 ボタン・リンク")
-            button_text = st.text_input(
-                "ダッシュボードボタンテキスト",
-                value=st.session_state.get('content_button_text', self.default_content["dashboard_button_text"]),
-                key="content_button_text"
-            )
-            
-            # プリセット適用
-            st.markdown("### ⚡ プリセット適用")
-            col1, col2, col3 = st.columns(3)
-            
+        # expanderネストを避けるため、直接サイドバーに配置
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 📝 トップページ内容編集")
+        
+        # ヘッダー部分
+        st.sidebar.markdown("**🏠 ヘッダー部分**")
+        main_title = st.sidebar.text_input(
+            "メインタイトル",
+            value=st.session_state.get('content_main_title', self.default_content["main_title"]),
+            key="content_main_title",
+            help="トップページの大見出し"
+        )
+        
+        subtitle = st.sidebar.text_input(
+            "サブタイトル",
+            value=st.session_state.get('content_subtitle', self.default_content["subtitle"]),
+            key="content_subtitle",
+            help="タイトル下の説明文"
+        )
+        
+        # 機能紹介部分
+        st.sidebar.markdown("**✨ 機能紹介部分**")
+        show_features = st.sidebar.checkbox(
+            "機能紹介セクションを表示",
+            value=st.session_state.get('content_show_features', True),
+            key="content_show_features"
+        )
+        
+        if show_features:
+            st.sidebar.markdown("**機能1**")
+            col1, col2 = st.sidebar.columns(2)
             with col1:
-                if st.button("🏥 病院標準", key="content_preset_hospital", use_container_width=True):
-                    self._apply_hospital_content_preset()
-            
+                feature1_icon = st.text_input(
+                    "アイコン",
+                    value=st.session_state.get('content_feature_0_icon', self.default_content["features"][0]["icon"]),
+                    key="content_feature_0_icon"
+                )
             with col2:
-                if st.button("🏢 経営層向け", key="content_preset_executive", use_container_width=True):
-                    self._apply_executive_content_preset()
+                feature1_title = st.text_input(
+                    "タイトル",
+                    value=st.session_state.get('content_feature_0_title', self.default_content["features"][0]["title"]),
+                    key="content_feature_0_title"
+                )
+            feature1_desc = st.sidebar.text_area(
+                "説明",
+                value=st.session_state.get('content_feature_0_description', self.default_content["features"][0]["description"]),
+                key="content_feature_0_description",
+                height=50
+            )
             
-            with col3:
-                if st.button("👥 職員親近", key="content_preset_friendly", use_container_width=True):
-                    self._apply_friendly_content_preset()
+            st.sidebar.markdown("**機能2**")
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                feature2_icon = st.text_input(
+                    "アイコン",
+                    value=st.session_state.get('content_feature_1_icon', self.default_content["features"][1]["icon"]),
+                    key="content_feature_1_icon"
+                )
+            with col2:
+                feature2_title = st.text_input(
+                    "タイトル",
+                    value=st.session_state.get('content_feature_1_title', self.default_content["features"][1]["title"]),
+                    key="content_feature_1_title"
+                )
+            feature2_desc = st.sidebar.text_area(
+                "説明",
+                value=st.session_state.get('content_feature_1_description', self.default_content["features"][1]["description"]),
+                key="content_feature_1_description",
+                height=50
+            )
             
-            # 設定保存
-            st.markdown("---")
-            if st.button("💾 内容設定を保存", key="save_content_settings", type="primary"):
-                self._save_current_content()
-                st.success("✅ 内容設定を保存しました")
+            st.sidebar.markdown("**機能3**")
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                feature3_icon = st.text_input(
+                    "アイコン",
+                    value=st.session_state.get('content_feature_2_icon', self.default_content["features"][2]["icon"]),
+                    key="content_feature_2_icon"
+                )
+            with col2:
+                feature3_title = st.text_input(
+                    "タイトル",
+                    value=st.session_state.get('content_feature_2_title', self.default_content["features"][2]["title"]),
+                    key="content_feature_2_title"
+                )
+            feature3_desc = st.sidebar.text_area(
+                "説明",
+                value=st.session_state.get('content_feature_2_description', self.default_content["features"][2]["description"]),
+                key="content_feature_2_description",
+                height=50
+            )
+            
+            st.sidebar.markdown("**機能4**")
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                feature4_icon = st.text_input(
+                    "アイコン",
+                    value=st.session_state.get('content_feature_3_icon', self.default_content["features"][3]["icon"]),
+                    key="content_feature_3_icon"
+                )
+            with col2:
+                feature4_title = st.text_input(
+                    "タイトル",
+                    value=st.session_state.get('content_feature_3_title', self.default_content["features"][3]["title"]),
+                    key="content_feature_3_title"
+                )
+            feature4_desc = st.sidebar.text_area(
+                "説明",
+                value=st.session_state.get('content_feature_3_description', self.default_content["features"][3]["description"]),
+                key="content_feature_3_description",
+                height=50
+            )
+        
+        # ダッシュボード説明
+        st.sidebar.markdown("**📊 ダッシュボード説明**")
+        dept_description = st.sidebar.text_area(
+            "診療科別ダッシュボード説明",
+            value=st.session_state.get('content_dept_description', self.default_content["department_dashboard_description"]),
+            key="content_dept_description",
+            height=60
+        )
+        
+        ward_description = st.sidebar.text_area(
+            "病棟別ダッシュボード説明",
+            value=st.session_state.get('content_ward_description', self.default_content["ward_dashboard_description"]),
+            key="content_ward_description",
+            height=60
+        )
+        
+        # フッター部分
+        st.sidebar.markdown("**🔻 フッター部分**")
+        footer_text = st.sidebar.text_input(
+            "フッターメインテキスト",
+            value=st.session_state.get('content_footer_text', self.default_content["footer_text"]),
+            key="content_footer_text"
+        )
+        
+        footer_note = st.sidebar.text_area(
+            "フッター追加メモ",
+            value=st.session_state.get('content_footer_note', self.default_content["footer_note"]),
+            key="content_footer_note",
+            height=60,
+            help="病院名や部署名など"
+        )
+        
+        # ボタンテキスト
+        st.sidebar.markdown("**🔘 ボタン・リンク**")
+        button_text = st.sidebar.text_input(
+            "ダッシュボードボタンテキスト",
+            value=st.session_state.get('content_button_text', self.default_content["dashboard_button_text"]),
+            key="content_button_text"
+        )
+        
+        # プリセット適用
+        st.sidebar.markdown("**⚡ プリセット適用**")
+        col1, col2, col3 = st.sidebar.columns(3)
+        
+        with col1:
+            if st.button("🏥 病院標準", key="content_preset_hospital", use_container_width=True):
+                self._apply_hospital_content_preset()
+        
+        with col2:
+            if st.button("🏢 経営層向け", key="content_preset_executive", use_container_width=True):
+                self._apply_executive_content_preset()
+        
+        with col3:
+            if st.button("👥 職員親近", key="content_preset_friendly", use_container_width=True):
+                self._apply_friendly_content_preset()
+        
+        # 設定保存
+        if st.sidebar.button("💾 内容設定を保存", key="save_content_settings", type="primary"):
+            self._save_current_content()
+            st.sidebar.success("✅ 内容設定を保存しました")
     
     def _apply_hospital_content_preset(self):
         """病院標準プリセット"""
@@ -959,7 +1025,7 @@ def generate_ward_dashboard_html(df, target_data, period="直近4週間"):
         return None, f"エラー: {str(e)}"
 
 def create_github_publisher_interface():
-    """Streamlit用のGitHub自動公開インターフェース（完全版）"""
+    """Streamlit用のGitHub自動公開インターフェース（修正版）"""
     
     st.sidebar.markdown("---")
     st.sidebar.header("🌐 職員向け自動公開")
@@ -1019,7 +1085,7 @@ def create_github_publisher_interface():
             else:
                 st.error("すべての項目を入力してください")
     
-    # 内容カスタマイズ機能
+    # 内容カスタマイズ機能（修正版）
     content_customizer = ContentCustomizer()
     content_customizer.create_streamlit_interface()
     
@@ -1057,41 +1123,6 @@ def create_github_publisher_interface():
             key="github_layout_style"
         )
         
-        # レイアウトプレビュー
-        with st.sidebar.expander("👀 レイアウトプレビュー", expanded=False):
-            if selected_layout == "minimal":
-                st.markdown("""
-                **✨ ミニマル・シンプル**
-                - 中央配置のシンプルなデザイン
-                - 大きなボタン形式
-                - 余計な情報を排除
-                - 高齢者にも見やすい
-                """)
-            elif selected_layout == "corporate":
-                st.markdown("""
-                **🏢 企業・フォーマル**
-                - プロフェッショナルなグラデーション
-                - 番号付きカード
-                - 更新時刻明記
-                - 経営層向けデザイン
-                """)
-            elif selected_layout == "mobile_first":
-                st.markdown("""
-                **📱 モバイルファースト**
-                - iOS/Android風リスト形式
-                - タップしやすい大きな領域
-                - スマホアプリライク
-                - 若手職員向け
-                """)
-            else:
-                st.markdown("""
-                **🎯 標準レイアウト**
-                - バランスの取れたデザイン
-                - 機能説明付き
-                - 全年齢層対応
-                - 多機能表示
-                """)
-        
         # 公開するダッシュボードの選択
         publish_options = st.sidebar.multiselect(
             "公開ダッシュボード",
@@ -1102,7 +1133,7 @@ def create_github_publisher_interface():
         )
         
         # 内容プレビュー
-        with st.sidebar.expander("👀 内容プレビュー", expanded=False):
+        with st.sidebar.expander("👀 設定プレビュー", expanded=False):
             content_config = content_customizer.get_current_config()
             st.markdown(f"**タイトル:** {content_config.get('main_title', 'デフォルト')}")
             st.markdown(f"**サブタイトル:** {content_config.get('subtitle', 'デフォルト')}")
