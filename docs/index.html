@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>病院パフォーマンスダッシュボード</title>
+    <title>病院ダッシュボード</title>
     <style>
         body {
             font-family: 'Noto Sans JP', Meiryo, sans-serif;
@@ -18,7 +18,7 @@
         h1 {
             text-align: center;
             color: #293a27;
-            margin-bottom: 30px;
+            margin-bottom: 10px;
             font-size: 2em;
         }
         .subtitle {
@@ -26,6 +26,20 @@
             color: #666;
             margin-bottom: 40px;
             font-size: 1.1em;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .feature {
+            text-align: center;
+            color: #666;
+        }
+        .feature-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
         }
         .dashboard-grid {
             display: grid;
@@ -72,41 +86,6 @@
         .dashboard-link:hover {
             background: #45a049;
         }
-        .qr-info {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 30px;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .qr-info h2 {
-            color: #293a27;
-            margin-bottom: 15px;
-        }
-        .qr-info .url {
-            background: #f8f9fa;
-            padding: 12px;
-            border-radius: 6px;
-            font-family: monospace;
-            color: #333;
-            margin: 15px 0;
-            word-break: break-all;
-        }
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-        .feature {
-            text-align: center;
-            color: #666;
-        }
-        .feature-icon {
-            font-size: 2em;
-            margin-bottom: 10px;
-        }
         @media (max-width: 768px) {
             .dashboard-grid {
                 grid-template-columns: 1fr;
@@ -119,62 +98,61 @@
 </head>
 <body>
     <div class="container">
-        <h1>🏥 病院パフォーマンスダッシュボード</h1>
-        <p class="subtitle">スマートフォン対応・リアルタイム更新</p>
+        <h1>病院ダッシュボード</h1>
+        <p class="subtitle">職員向け</p>
         
-        <div class="qr-info">
-            <h2>📱 スマートフォンでのアクセス</h2>
-            <p>以下のURLをQRコードにして職員に配布できます</p>
-            <div class="url">https://Genie-Scripts.github.io/Streamlit-Inpatient-Dashboard/</div>
-            <p style="color: #666; font-size: 0.9em;">
-                ブックマーク推奨 | 自動更新 | 個人情報なし
-            </p>
-        </div>
         
-        <div class="features">
-            <div class="feature">
-                <div class="feature-icon">📊</div>
-                <h4>リアルタイム指標</h4>
-                <p>最新の病院パフォーマンス指標</p>
+            <div class="features">
+                
+                <div class="feature">
+                    <div class="feature-icon">📊</div>
+                    <h4>週次指標</h4>
+                    <p>最新の病院パフォーマンス指標</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">📱</div>
+                    <h4>モバイル最適化</h4>
+                    <p>スマートフォンで快適に閲覧</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">🔄</div>
+                    <h4>自動更新</h4>
+                    <p>データは定期的に自動更新</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">🔒</div>
+                    <h4>プライバシー保護</h4>
+                    <p>個人情報は含まれません</p>
+                </div>
+                
             </div>
-            <div class="feature">
-                <div class="feature-icon">📱</div>
-                <h4>モバイル最適化</h4>
-                <p>スマートフォンで快適に閲覧</p>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">🔄</div>
-                <h4>自動更新</h4>
-                <p>データは定期的に自動更新</p>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">🔒</div>
-                <h4>プライバシー保護</h4>
-                <p>個人情報は含まれません</p>
-            </div>
-        </div>
+            
         
         <div class="dashboard-grid">
             
             <div class="dashboard-card">
                 <h3>診療科別パフォーマンス</h3>
-                <p>各診療科の入院患者数、新入院患者数、平均在院日数の実績と目標達成率（直近4週間）</p>
-                <p class="update-time">最終更新: 2025/06/18 03:40</p>
+                <p>各診療科の入院患者数、新入院患者数、平均在院日数の実績と目標達成率</p>
+                <p class="update-time">最終更新: 2025/06/18 05:47</p>
                 <a href="dept_performance.html" class="dashboard-link">ダッシュボードを開く</a>
             </div>
             
             <div class="dashboard-card">
                 <h3>病棟別パフォーマンス</h3>
-                <p>各病棟の入院患者数、新入院患者数、平均在院日数の実績と目標達成率（直近4週間）</p>
-                <p class="update-time">最終更新: 2025/06/18 03:40</p>
+                <p>各病棟の入院患者数、新入院患者数、平均在院日数の実績と目標達成率</p>
+                <p class="update-time">最終更新: 2025/06/18 05:47</p>
                 <a href="ward_performance.html" class="dashboard-link">ダッシュボードを開く</a>
             </div>
             
         </div>
         
         <footer style="text-align: center; margin-top: 50px; color: #999; border-top: 1px solid #eee; padding-top: 30px;">
-            <p>最終更新: 2025年06月18日 03:40</p>
-            <p>🏥 病院パフォーマンス分析システム</p>
+            <p>最終更新: 2025年06月18日 05:47</p>
+            <p>経営企画室</p>
+            
         </footer>
     </div>
 </body>
