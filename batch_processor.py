@@ -14,6 +14,9 @@ import concurrent.futures
 from multiprocessing import Manager
 import pickle
 
+# config から除外病棟設定をインポート
+from config import EXCLUDED_WARDS
+
 # forecast モジュールの関数
 from forecast import generate_filtered_summaries, create_forecast_dataframe
 
@@ -86,6 +89,14 @@ def process_pdf_in_worker_revised(
         if target_data_path and os.path.exists(target_data_path):
             target_data_worker = pd.read_feather(target_data_path)
         
+        # *** 除外病棟のフィルタリングを追加 ***
+        if '病棟コード' in df_worker.columns and EXCLUDED_WARDS:
+            original_count = len(df_worker)
+            df_worker = df_worker[~df_worker['病棟コード'].isin(EXCLUDED_WARDS)]
+            removed_count = original_count - len(df_worker)
+            if removed_count > 0:
+                print(f"PID {pid}: 除外病棟フィルタリングで{removed_count}件のレコードを除外")
+        
         current_data_for_tables_worker = df_worker.copy() # テーブル生成用
         current_filter_code_worker = "全体"
         title_prefix_for_pdf = "全体"
@@ -95,6 +106,10 @@ def process_pdf_in_worker_revised(
             current_filter_code_worker = filter_value
             title_prefix_for_pdf = f"診療科別 {display_name}"
         elif filter_type == "ward":
+            # *** 病棟別の場合、さらに除外病棟チェック ***
+            if filter_value in EXCLUDED_WARDS:
+                print(f"PID {pid}: 除外病棟 '{filter_value}' のPDF生成をスキップ")
+                return None
             current_data_for_tables_worker = df_worker[df_worker["病棟コード"] == filter_value].copy()
             current_filter_code_worker = str(filter_value)
             title_prefix_for_pdf = f"病棟別 {display_name}"
@@ -157,9 +172,18 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
 
     if progress_callback: progress_callback(0.05, "データを準備中...")
 
+    # *** メインデータから除外病棟をフィルタリング ***
+    df_filtered = df_main.copy()
+    if '病棟コード' in df_filtered.columns and EXCLUDED_WARDS:
+        original_count = len(df_filtered)
+        df_filtered = df_filtered[~df_filtered['病棟コード'].isin(EXCLUDED_WARDS)]
+        removed_count = original_count - len(df_filtered)
+        if removed_count > 0:
+            print(f"一括PDF生成: 除外病棟フィルタリングで{removed_count}件のレコードを除外")
+
     temp_dir_main = tempfile.mkdtemp()
     df_path_main = os.path.join(temp_dir_main, "main_data.feather")
-    df_main.reset_index(drop=True).to_feather(df_path_main)
+    df_filtered.reset_index(drop=True).to_feather(df_path_main)
     
     target_data_path_main = None
     if target_data_main is not None and not target_data_main.empty:
@@ -170,7 +194,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
     main_process_chart_cache = get_pdf_gen_main_process_cache()
 
     try:
-        summaries_for_latest_date = generate_filtered_summaries(df_main)
+        summaries_for_latest_date = generate_filtered_summaries(df_filtered)
         latest_date_for_batch = summaries_for_latest_date.get("latest_date", pd.Timestamp.now().normalize())
         
         if progress_callback: progress_callback(0.10, "PDF生成タスクとグラフを準備中...")
@@ -189,14 +213,18 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                     dept_display_map[code_str] = row['部門名']
                     ward_display_map[code_str] = row['部門名']
         
-        unique_wards = df_main["病棟コード"].astype(str).unique()
+        # *** 除外病棟を除いたユニークな病棟リストを取得 ***
+        unique_wards = df_filtered["病棟コード"].astype(str).unique()
+        if EXCLUDED_WARDS:
+            unique_wards = [ward for ward in unique_wards if ward not in EXCLUDED_WARDS]
+        
         for ward in unique_wards:
             if ward not in ward_display_map:
                 match = re.match(r'0*(\d+)([A-Za-z]*)', ward)
                 if match: ward_display_map[ward] = f"{match.group(1)}{match.group(2)}病棟"
                 else: ward_display_map[ward] = ward
         
-        unique_depts = df_main["診療科名"].unique()
+        unique_depts = df_filtered["診療科名"].unique()
         for dept in unique_depts:
             if dept not in dept_display_map:
                  dept_display_map[dept] = dept
@@ -205,23 +233,24 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
         
         task_definitions_list = []
         if mode == "all_only_filter":
-            task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体", "data_for_graphs": df_main.copy()})
+            task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体", "data_for_graphs": df_filtered.copy()})
         else:
             if mode == "all":
-                task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体", "data_for_graphs": df_main.copy()})
+                task_definitions_list.append({"type": "all", "value": "全体", "display_name": "全体", "data_for_graphs": df_filtered.copy()})
             if mode == "all" or mode == "dept":
                 for dept_val in unique_depts:
                     task_definitions_list.append({
                         "type": "dept", "value": dept_val, 
                         "display_name": dept_display_map.get(dept_val, dept_val),
-                        "data_for_graphs": df_main[df_main["診療科名"] == dept_val].copy()
+                        "data_for_graphs": df_filtered[df_filtered["診療科名"] == dept_val].copy()
                     })
             if mode == "all" or mode == "ward":
+                # *** 除外病棟を除いた病棟のみでタスクを作成 ***
                 for ward_val in unique_wards:
                     task_definitions_list.append({
                         "type": "ward", "value": ward_val, 
                         "display_name": ward_display_map.get(ward_val, ward_val),
-                        "data_for_graphs": df_main[df_main["病棟コード"] == ward_val].copy()
+                        "data_for_graphs": df_filtered[df_filtered["病棟コード"] == ward_val].copy()
                     })
 
         def get_targets_for_pdf(task_value, task_type, target_data_df):
@@ -367,7 +396,7 @@ def batch_generate_pdfs_mp_optimized(df_main, mode="all", landscape=False, targe
                 progress_val = int(10 + ( (i+1) / num_task_defs) * 15) # 10-25%
                 progress_callback(progress_val / 100.0, f"グラフ準備中: {i+1}/{num_task_defs}")
         
-        del df_main, target_data_main, task_definitions_list # メモリ解放
+        del df_main, df_filtered, target_data_main, task_definitions_list # メモリ解放
         gc.collect()
 
         total_tasks_to_process = len(tasks_for_worker_with_buffers)
@@ -472,7 +501,10 @@ def batch_generate_pdfs_full_optimized(
             if mode == "all" or mode == "dept":
                 for dept in sorted(df["診療科名"].unique()): tasks_seq.append({"type": "dept", "value": dept, "display_name": dept_display_map_seq.get(dept, dept)})
             if mode == "all" or mode == "ward":
-                for ward in sorted(df["病棟コード"].astype(str).unique()): tasks_seq.append({"type": "ward", "value": ward, "display_name": ward_display_map_seq.get(ward, ward)})
+                for ward in sorted(df["病棟コード"].astype(str).unique()): 
+                    # *** 除外病棟チェック ***
+                    if ward not in EXCLUDED_WARDS:
+                        tasks_seq.append({"type": "ward", "value": ward, "display_name": ward_display_map_seq.get(ward, ward)})
 
         zip_buffer_seq = BytesIO()
         with zipfile.ZipFile(zip_buffer_seq, 'w', zipfile.ZIP_DEFLATED) as zipf_seq:
