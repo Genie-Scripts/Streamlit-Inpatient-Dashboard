@@ -81,6 +81,18 @@ class GitHubPublisher:
         except:
             return []
     
+    def _get_relative_path(self, file_path, dashboard_type=None):
+        """相対パスを正しく取得する"""
+        # ファイル名のみの場合（外部ダッシュボード）
+        if '/' not in file_path:
+            return file_path
+        
+        # すでにパスが含まれている場合
+        if file_path.startswith('docs/'):
+            return file_path.replace('docs/', '')
+        
+        return file_path
+    
     def create_index_page(self, dashboards_info, layout_style="default", content_config=None, external_dashboards=None):
         """ダッシュボード一覧のインデックスページを生成（外部ダッシュボード対応）"""
         
@@ -124,12 +136,15 @@ class GitHubPublisher:
             if dashboard.get('type') == 'external':
                 title_with_icon = f"🔗 {dashboard['title']}"
             
+            # 相対パスの正しい処理
+            file_path = self._get_relative_path(dashboard['file'], dashboard.get('type'))
+            
             dashboard_links += f"""
             <div class="dashboard-card">
                 <h3>{title_with_icon}</h3>
                 <p>{description}</p>
                 <p class="update-time">最終更新: {update_time}</p>
-                <a href="{dashboard['file']}" class="dashboard-link">{button_text}</a>
+                <a href="{file_path}" class="dashboard-link">{button_text}</a>
             </div>
             """
         
@@ -290,9 +305,12 @@ class GitHubPublisher:
             title_with_icon = dashboard['title']
             if dashboard.get('type') == 'external':
                 title_with_icon = f"🔗 {dashboard['title']}"
+            
+            # 相対パスの正しい処理
+            file_path = self._get_relative_path(dashboard['file'], dashboard.get('type'))
                 
             dashboard_links += f"""
-            <a href="{dashboard['file']}" class="dashboard-button">
+            <a href="{file_path}" class="dashboard-button">
                 <h3>{title_with_icon}</h3>
                 <p>{description}</p>
             </a>
@@ -406,6 +424,9 @@ class GitHubPublisher:
             if dashboard.get('type') == 'external':
                 title_with_icon = f"🔗 {dashboard['title']}"
             
+            # 相対パスの正しい処理
+            file_path = self._get_relative_path(dashboard['file'], dashboard.get('type'))
+            
             dashboard_cards += f"""
             <div class="dashboard-card">
                 <div class="card-number">{str(i+1).zfill(2)}</div>
@@ -413,7 +434,7 @@ class GitHubPublisher:
                 <p>{description}</p>
                 <div class="card-footer">
                     <span class="update-time">更新: {update_time}</span>
-                    <a href="{dashboard['file']}" class="access-button">{button_text}</a>
+                    <a href="{file_path}" class="access-button">{button_text}</a>
                 </div>
             </div>
             """
@@ -570,8 +591,11 @@ class GitHubPublisher:
             # アイコンの設定
             icon = "🔗" if dashboard.get('type') == 'external' else "📊"
             
+            # 相対パスの正しい処理
+            file_path = self._get_relative_path(dashboard['file'], dashboard.get('type'))
+            
             dashboard_list += f"""
-            <a href="{dashboard['file']}" class="dashboard-item">
+            <a href="{file_path}" class="dashboard-item">
                 <div class="item-icon">{icon}</div>
                 <div class="item-content">
                     <h3>{dashboard['title']}</h3>
