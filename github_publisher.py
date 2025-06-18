@@ -1277,7 +1277,7 @@ def create_github_publisher_interface():
                 key="github_publisher_repo"
             )
         
-        publish_path = st.selectbox(
+        publish_path_select = st.selectbox(
             "公開フォルダ",
             ["docs/", "public/", ""],
             index=0,
@@ -1290,13 +1290,13 @@ def create_github_publisher_interface():
                 st.session_state.github_publisher = GitHubPublisher(
                     repo_owner, repo_name, github_token, "main"
                 )
-                st.session_state.github_publish_path_config = publish_path
+                st.session_state.github_publish_path_config = publish_path_select
                 st.success("✅ GitHub設定を保存しました")
                 
                 st.info(f"""
                 **GitHub Pages設定** 1. GitHubリポジトリ → Settings → Pages  
                 2. Source: Deploy from a branch  
-                3. Branch: main / {publish_path or 'root'}  
+                3. Branch: main / {publish_path_select or 'root'}  
                 
                 **公開URL:** https://{repo_owner}.github.io/{repo_name}/
                 """)
@@ -1313,6 +1313,10 @@ def create_github_publisher_interface():
     # 統合公開機能
     if st.session_state.get('github_publisher'):
         
+        # 修正箇所：`publisher`と`publish_path`をこのスコープで定義
+        publisher = st.session_state.github_publisher
+        publish_path = st.session_state.get('github_publish_path_config', 'docs/')
+
         st.sidebar.markdown("### 🚀 統合ダッシュボード公開")
         
         # データ読み込み状況に応じた選択肢
@@ -1386,8 +1390,9 @@ def create_github_publisher_interface():
         # 統合自動公開実行
         if st.sidebar.button("🚀 統合ダッシュボード公開", key="execute_integrated_publish", type="primary"):
             
-            publisher = st.session_state.github_publisher
-            publish_path = st.session_state.get('github_publish_path_config', 'docs/')
+            # 修正箇所：ここで再度定義する必要はない
+            # publisher = st.session_state.github_publisher
+            # publish_path = st.session_state.get('github_publish_path_config', 'docs/')
             
             # カスタム内容設定を取得
             content_config = content_customizer.get_current_config()
