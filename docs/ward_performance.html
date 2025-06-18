@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>病棟別パフォーマンスダッシュボード - 直近4週間 (05/21～06/17)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #f5f7fa;
+            font-family: 'Noto Sans JP', Meiryo, sans-serif;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1920px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #293a27;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .metric-selector {
+            display: flex;
+            gap: 10px;
+            background: white;
+            padding: 5px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .metric-btn {
+            padding: 10px 20px;
+            border: none;
+            background: #e0e0e0;
+            color: #666;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .metric-btn:hover {
+            background: #d0d0d0;
+        }
+        
+        .metric-btn.active {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .period-info {
+            background: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .grid-container {
+            display: grid;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        /* レスポンシブグリッド */
+        @media (min-width: 1600px) {
+            .grid-container { grid-template-columns: repeat(5, 1fr); }
+        }
+        
+        @media (min-width: 1200px) and (max-width: 1599px) {
+            .grid-container { grid-template-columns: repeat(4, 1fr); }
+        }
+        
+        @media (min-width: 900px) and (max-width: 1199px) {
+            .grid-container { grid-template-columns: repeat(3, 1fr); }
+        }
+        
+        @media (min-width: 600px) and (max-width: 899px) {
+            .grid-container { grid-template-columns: repeat(2, 1fr); }
+        }
+        
+        @media (max-width: 599px) {
+            .grid-container { grid-template-columns: 1fr; }
+        }
+        
+        .metric-card {
+            background: white;
+            border-radius: 11px;
+            border-left: 6px solid #ccc;
+            padding: 16px;
+            transition: all 0.3s ease;
+            height: 100%;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .card-title {
+            font-size: 1.13em;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #293a27;
+        }
+        
+        .card-content {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .metric-label {
+            font-size: 0.93em;
+            color: #7b8a7a;
+        }
+        
+        .metric-value {
+            font-size: 1.07em;
+            font-weight: 700;
+            color: #2e3532;
+        }
+        
+        .achievement-row {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .achievement-label {
+            font-weight: 700;
+            font-size: 1.03em;
+        }
+        
+        .achievement-value {
+            font-weight: 700;
+            font-size: 1.20em;
+        }
+        
+        .bed-info {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .bed-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+        
+        .bed-label {
+            font-size: 0.85em;
+            color: #999;
+        }
+        
+        .bed-value {
+            font-size: 0.9em;
+            color: #666;
+            font-weight: 600;
+        }
+        
+        /* 達成率による色分け */
+        .achievement-high { color: #7fb069; }
+        .achievement-medium { color: #f5d76e; }
+        .achievement-low { color: #e08283; }
+        
+        .border-high { border-left-color: #7fb069; }
+        .border-medium { border-left-color: #f5d76e; }
+        .border-low { border-left-color: #e08283; }
+        
+        @media print {
+            body { padding: 10px; }
+            .controls { display: none; }
+            .grid-container { 
+                grid-template-columns: repeat(5, 1fr);
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>病棟別パフォーマンスダッシュボード</h1>
+        
+        <div class="controls">
+            <div class="metric-selector">
+                <button class="metric-btn active" onclick="showMetric('daily_census')">日平均在院患者数</button>
+                <button class="metric-btn" onclick="showMetric('weekly_admissions')">週合計新入院患者数</button>
+                <button class="metric-btn" onclick="showMetric('avg_los')">平均在院日数</button>
+            </div>
+            <div class="period-info">期間: 直近4週間 (05/21～06/17)</div>
+        </div>
+        
+        <div id="grid-container" class="grid-container"></div>
+    </div>
+    
+    <script>
+        // 全ての指標データ
+        const metricsData = {"daily_census": [{"name": "5階A病棟", "avg": 43.785714285714285, "recent": 42.285714285714285, "target": 44.1, "achievement": 99.28733398121152, "bed_count": null, "bed_occupancy_rate": null}, {"name": "4階A病棟", "avg": 5.321428571428571, "recent": 5.285714285714286, "target": 5.4, "achievement": 98.54497354497353, "bed_count": null, "bed_occupancy_rate": null}, {"name": "2階B病棟", "avg": 45.0, "recent": 44.42857142857143, "target": 46.6, "achievement": 96.56652360515021, "bed_count": null, "bed_occupancy_rate": null}, {"name": "9階B病棟", "avg": 45.642857142857146, "recent": 45.0, "target": 47.5, "achievement": 96.09022556390978, "bed_count": null, "bed_occupancy_rate": null}, {"name": "7階A病棟", "avg": 41.17857142857143, "recent": 40.142857142857146, "target": 43.2, "achievement": 95.3207671957672, "bed_count": null, "bed_occupancy_rate": null}, {"name": "8階A病棟", "avg": 43.035714285714285, "recent": 43.0, "target": 45.6, "achievement": 94.37656641604009, "bed_count": null, "bed_occupancy_rate": null}, {"name": "6階A病棟", "avg": 44.357142857142854, "recent": 42.57142857142857, "target": 47.5, "achievement": 93.38345864661653, "bed_count": null, "bed_occupancy_rate": null}, {"name": "6階B病棟", "avg": 44.17857142857143, "recent": 43.57142857142857, "target": 47.5, "achievement": 93.00751879699249, "bed_count": null, "bed_occupancy_rate": null}, {"name": "3階A病棟", "avg": 41.214285714285715, "recent": 39.0, "target": 45.6, "achievement": 90.38220551378447, "bed_count": null, "bed_occupancy_rate": null}, {"name": "4階C病棟", "avg": 16.0, "recent": 15.428571428571429, "target": 18.0, "achievement": 88.88888888888889, "bed_count": null, "bed_occupancy_rate": null}, {"name": "7階B病棟", "avg": 26.714285714285715, "recent": 25.285714285714285, "target": 30.6, "achievement": 87.3015873015873, "bed_count": null, "bed_occupancy_rate": null}, {"name": "5階B病棟", "avg": 32.142857142857146, "recent": 32.57142857142857, "target": 37.8, "achievement": 85.0340136054422, "bed_count": null, "bed_occupancy_rate": null}, {"name": "2階A病棟", "avg": 39.75, "recent": 39.142857142857146, "target": 47.5, "achievement": 83.6842105263158, "bed_count": null, "bed_occupancy_rate": null}, {"name": "9階A病棟", "avg": 17.714285714285715, "recent": 18.142857142857142, "target": 22.1, "achievement": 80.15513897866839, "bed_count": null, "bed_occupancy_rate": null}, {"name": "8階B病棟", "avg": 23.107142857142858, "recent": 38.42857142857143, "target": 42.8, "achievement": 53.98865153538052, "bed_count": null, "bed_occupancy_rate": null}, {"name": "4階B病棟", "avg": 17.5, "recent": 4.857142857142857, "target": 37.8, "achievement": 46.296296296296305, "bed_count": null, "bed_occupancy_rate": null}], "weekly_admissions": [{"name": "4階A病棟", "avg": 24.0, "recent": 22.0, "target": 2.0, "achievement": 1200.0}, {"name": "2階B病棟", "avg": 20.75, "recent": 22.0, "target": 18.0, "achievement": 115.27777777777777}, {"name": "5階A病棟", "avg": 41.25, "recent": 45.0, "target": 37.0, "achievement": 111.48648648648648}, {"name": "7階A病棟", "avg": 29.5, "recent": 31.0, "target": 28.0, "achievement": 105.35714285714286}, {"name": "3階A病棟", "avg": 35.75, "recent": 37.0, "target": 39.0, "achievement": 91.66666666666666}, {"name": "9階B病棟", "avg": 17.75, "recent": 21.0, "target": 20.0, "achievement": 88.75}, {"name": "2階A病棟", "avg": 20.0, "recent": 23.0, "target": 23.0, "achievement": 86.95652173913044}, {"name": "7階B病棟", "avg": 40.75, "recent": 49.0, "target": 47.0, "achievement": 86.70212765957447}, {"name": "9階A病棟", "avg": 15.75, "recent": 17.0, "target": 19.0, "achievement": 82.89473684210526}, {"name": "5階B病棟", "avg": 33.0, "recent": 35.0, "target": 44.0, "achievement": 75.0}, {"name": "6階B病棟", "avg": 20.0, "recent": 20.0, "target": 27.0, "achievement": 74.07407407407408}, {"name": "8階A病棟", "avg": 13.0, "recent": 10.0, "target": 18.0, "achievement": 72.22222222222221}, {"name": "6階A病棟", "avg": 20.75, "recent": 27.0, "target": 30.0, "achievement": 69.16666666666667}, {"name": "4階C病棟", "avg": 13.25, "recent": 17.0, "target": 41.0, "achievement": 32.31707317073171}, {"name": "8階B病棟", "avg": 5.75, "recent": 11.0, "target": 20.0, "achievement": 28.749999999999996}, {"name": "4階B病棟", "avg": 5.25, "recent": 2.0, "target": 23.0, "achievement": 22.82608695652174}], "avg_los": [{"name": "3階A病棟", "avg": 7.592105263157895, "recent": 7.8, "target": null, "achievement": 0}, {"name": "8階B病棟", "avg": 18.485714285714284, "recent": 17.933333333333334, "target": null, "achievement": 0}, {"name": "4階A病棟", "avg": 14.9, "recent": 18.5, "target": null, "achievement": 0}, {"name": "2階B病棟", "avg": 13.846153846153847, "recent": 12.958333333333334, "target": null, "achievement": 0}, {"name": "7階B病棟", "avg": 12.677966101694915, "recent": 8.85, "target": null, "achievement": 0}, {"name": "5階B病棟", "avg": 6.569343065693431, "recent": 7.125, "target": null, "achievement": 0}, {"name": "4階C病棟", "avg": 24.88888888888889, "recent": 27.0, "target": null, "achievement": 0}, {"name": "5階A病棟", "avg": 6.352331606217617, "recent": 5.6923076923076925, "target": null, "achievement": 0}, {"name": "9階A病棟", "avg": 8.551724137931034, "recent": 7.055555555555555, "target": null, "achievement": 0}, {"name": "8階A病棟", "avg": 15.855263157894736, "recent": 27.363636363636363, "target": null, "achievement": 0}, {"name": "2階A病棟", "avg": 10.401869158878505, "recent": 9.448275862068966, "target": null, "achievement": 0}, {"name": "4階B病棟", "avg": 12.894736842105264, "recent": 0, "target": null, "achievement": 0}, {"name": "6階B病棟", "avg": 11.34862385321101, "recent": 12.708333333333334, "target": null, "achievement": 0}, {"name": "6階A病棟", "avg": 12.42, "recent": 10.642857142857142, "target": null, "achievement": 0}, {"name": "7階A病棟", "avg": 9.078740157480315, "recent": 8.264705882352942, "target": null, "achievement": 0}, {"name": "9階B病棟", "avg": 14.689655172413794, "recent": 12.6, "target": null, "achievement": 0}]};
+        
+        // 指標の設定
+        const metricsConfig = {"daily_census": {"title": "日平均在院患者数", "unit": "人", "fields": {"avg": "daily_avg_census", "recent": "recent_week_daily_census", "target": "daily_census_target", "achievement": "daily_census_achievement"}}, "weekly_admissions": {"title": "週合計新入院患者数", "unit": "件", "fields": {"avg": "weekly_avg_admissions", "recent": "recent_week_admissions", "target": "weekly_admissions_target", "achievement": "weekly_admissions_achievement"}}, "avg_los": {"title": "平均在院日数", "unit": "日", "fields": {"avg": "avg_length_of_stay", "recent": "recent_week_avg_los", "target": "avg_los_target", "achievement": "avg_los_achievement"}}};
+        
+        // 現在表示中の指標
+        let currentMetric = 'daily_census';
+        
+        // 達成率による色クラスを取得
+        function getColorClass(achievement) {
+            if (achievement >= 100) return 'high';
+            if (achievement >= 80) return 'medium';
+            return 'low';
+        }
+        
+        // 数値のフォーマット
+        function formatValue(value, decimals = 1) {
+            if (value === null || value === undefined) return '--';
+            return value.toFixed(decimals);
+        }
+        
+        // カードのHTMLを生成
+        function createCard(item, metric) {
+            const colorClass = getColorClass(item.achievement);
+            const config = metricsConfig[metric];
+            const unit = config.unit;
+            
+            let bedInfoHtml = '';
+            if (metric === 'daily_census' && item.bed_count) {
+                const occupancyStr = item.bed_occupancy_rate !== null ? 
+                    formatValue(item.bed_occupancy_rate) + '%' : '--';
+                bedInfoHtml = `
+                    <div class="bed-info">
+                        <div class="bed-row">
+                            <span class="bed-label">病床数:</span>
+                            <span class="bed-value">${item.bed_count}床</span>
+                        </div>
+                        <div class="bed-row">
+                            <span class="bed-label">稼働率:</span>
+                            <span class="bed-value">${occupancyStr}</span>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            return `
+                <div class="metric-card border-${colorClass}">
+                    <div class="card-title">${item.name}</div>
+                    <div class="card-content">
+                        <div class="metric-row">
+                            <span class="metric-label">期間平均:</span>
+                            <span class="metric-value">${formatValue(item.avg)} ${unit}</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">直近週実績:</span>
+                            <span class="metric-value">${formatValue(item.recent)} ${unit}</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">目標:</span>
+                            <span class="metric-value">${item.target ? formatValue(item.target) : '--'} ${unit}</span>
+                        </div>
+                    </div>
+                    <div class="achievement-row">
+                        <span class="achievement-label achievement-${colorClass}">達成率:</span>
+                        <span class="achievement-value achievement-${colorClass}">${formatValue(item.achievement)}%</span>
+                    </div>
+                    ${bedInfoHtml}
+                </div>
+            `;
+        }
+        
+        // 指標を表示
+        function showMetric(metric) {
+            currentMetric = metric;
+            
+            // ボタンのアクティブ状態を更新
+            document.querySelectorAll('.metric-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // グリッドをクリアして再描画
+            const container = document.getElementById('grid-container');
+            container.innerHTML = '';
+            
+            const data = metricsData[metric];
+            data.forEach(item => {
+                container.innerHTML += createCard(item, metric);
+            });
+        }
+        
+        // 初期表示
+        document.addEventListener('DOMContentLoaded', function() {
+            const container = document.getElementById('grid-container');
+            const data = metricsData[currentMetric];
+            data.forEach(item => {
+                container.innerHTML += createCard(item, currentMetric);
+            });
+        });
+    </script>
+</body>
+</html>
