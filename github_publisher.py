@@ -1298,6 +1298,7 @@ def create_github_publisher_interface():
         # 外部ダッシュボード
         external_dashboards = st.session_state.get('external_dashboards', [])
         for dash in external_dashboards:
+            # タイトルを短縮せずに完全表示
             publish_options_all.append(f"外部: {dash['title']}")
         
         # インデックスページは常に選択可能
@@ -1455,15 +1456,16 @@ def create_github_publisher_interface():
                             "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
                         })
                     
-                    # 外部ダッシュボード情報追加
+                    # 外部ダッシュボード情報追加（デバッグ情報付き）
                     external_included = []
+                    st.sidebar.info(f"選択された項目: {publish_options}")
+                    st.sidebar.info(f"登録済み外部ダッシュボード: {[d['title'] for d in external_dashboards]}")
+                    
                     for option in publish_options:
                         if option.startswith("外部: "):
-                            external_title = option[3:]  # "外部: " を削除
-                            for dash in external_dashboards:
-                                if dash['title'] == external_title:
-                                    external_included.append(dash)
-                                    break
+                            # すべての外部ダッシュボードを含める（省略記号の問題を回避）
+                            external_included = external_dashboards.copy()
+                            break
                     
                     # デバッグ情報
                     st.sidebar.info(f"外部ダッシュボード数: {len(external_included)}")
