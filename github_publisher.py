@@ -55,36 +55,78 @@ class GitHubPublisher:
         except Exception as e:
             return False, f"Error uploading file: {str(e)}"
     
-    def create_index_page(self, dashboards_info, layout_style="default", content_config=None):
-        """ダッシュボード一覧のインデックスページを生成"""
+    def upload_external_html(self, html_content, filename, dashboard_title, commit_message=None):
+        """外部HTMLファイル（手術分析など）をアップロード"""
+        try:
+            # ファイル名の安全化
+            safe_filename = filename.lower().replace(' ', '_').replace('　', '_')
+            if not safe_filename.endswith('.html'):
+                safe_filename += '.html'
+            
+            file_path = f"docs/{safe_filename}"
+            
+            if not commit_message:
+                commit_message = f"Update external dashboard: {dashboard_title} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            return self.upload_html_file(html_content, file_path, commit_message)
+            
+        except Exception as e:
+            return False, f"外部HTMLアップロードエラー: {str(e)}"
+    
+    def get_external_dashboards_list(self):
+        """アップロード済み外部ダッシュボード一覧を取得"""
+        try:
+            # セッションステートから外部ダッシュボード情報を取得
+            return st.session_state.get('external_dashboards', [])
+        except:
+            return []
+    
+    def create_index_page(self, dashboards_info, layout_style="default", content_config=None, external_dashboards=None):
+        """ダッシュボード一覧のインデックスページを生成（外部ダッシュボード対応）"""
         
         if content_config is None:
             content_config = ContentCustomizer().default_content
+        
+        # 外部ダッシュボード情報を統合
+        all_dashboards = dashboards_info.copy() if dashboards_info else []
+        if external_dashboards:
+            all_dashboards.extend(external_dashboards)
             
         if layout_style == "minimal":
-            return self._create_minimal_layout(dashboards_info, content_config)
+            return self._create_minimal_layout(all_dashboards, content_config)
         elif layout_style == "corporate":
-            return self._create_corporate_layout(dashboards_info, content_config)
+            return self._create_corporate_layout(all_dashboards, content_config)
         elif layout_style == "mobile_first":
-            return self._create_mobile_first_layout(dashboards_info, content_config)
+            return self._create_mobile_first_layout(all_dashboards, content_config)
         else:
-            return self._create_default_layout(dashboards_info, content_config)
+            return self._create_default_layout(all_dashboards, content_config)
 
     def _create_default_layout(self, dashboards_info, content_config):
-        """デフォルトレイアウト"""
+        """デフォルトレイアウト（外部ダッシュボード対応）"""
         dashboard_links = ""
         button_text = content_config.get('dashboard_button_text', 'ダッシュボードを開く')
         
         for dashboard in dashboards_info:
+            # ダッシュボードタイプに応じた説明文の選択
             if 'department' in dashboard.get('file', '').lower() or '診療科' in dashboard.get('title', ''):
                 description = content_config.get('department_dashboard_description', dashboard.get('description', ''))
-            else:
+            elif 'ward' in dashboard.get('file', '').lower() or '病棟' in dashboard.get('title', ''):
                 description = content_config.get('ward_dashboard_description', dashboard.get('description', ''))
+            elif dashboard.get('type') == 'external':
+                description = dashboard.get('description', '外部システムから提供されるダッシュボード')
+            else:
+                description = dashboard.get('description', '')
                 
             update_time = dashboard.get('update_time', '不明')
+            
+            # 外部ダッシュボードの場合はアイコンを追加
+            title_with_icon = dashboard['title']
+            if dashboard.get('type') == 'external':
+                title_with_icon = f"🔗 {dashboard['title']}"
+            
             dashboard_links += f"""
             <div class="dashboard-card">
-                <h3>{dashboard['title']}</h3>
+                <h3>{title_with_icon}</h3>
                 <p>{description}</p>
                 <p class="update-time">最終更新: {update_time}</p>
                 <a href="{dashboard['file']}" class="dashboard-link">{button_text}</a>
@@ -233,19 +275,25 @@ class GitHubPublisher:
 </html>"""
 
     def _create_minimal_layout(self, dashboards_info, content_config):
-        """シンプル・ミニマルなレイアウト"""
+        """シンプル・ミニマルなレイアウト（外部ダッシュボード対応）"""
         dashboard_links = ""
         button_text = content_config.get('dashboard_button_text', 'ダッシュボードを開く')
         
         for dashboard in dashboards_info:
             if 'department' in dashboard.get('file', '').lower() or '診療科' in dashboard.get('title', ''):
                 description = content_config.get('department_dashboard_description', dashboard.get('description', ''))
-            else:
+            elif 'ward' in dashboard.get('file', '').lower() or '病棟' in dashboard.get('title', ''):
                 description = content_config.get('ward_dashboard_description', dashboard.get('description', ''))
+            else:
+                description = dashboard.get('description', '')
+                
+            title_with_icon = dashboard['title']
+            if dashboard.get('type') == 'external':
+                title_with_icon = f"🔗 {dashboard['title']}"
                 
             dashboard_links += f"""
             <a href="{dashboard['file']}" class="dashboard-button">
-                <h3>{dashboard['title']}</h3>
+                <h3>{title_with_icon}</h3>
                 <p>{description}</p>
             </a>
             """
@@ -340,21 +388,28 @@ class GitHubPublisher:
 </html>"""
 
     def _create_corporate_layout(self, dashboards_info, content_config):
-        """企業・法人向けフォーマルなレイアウト"""
+        """企業・法人向けフォーマルなレイアウト（外部ダッシュボード対応）"""
         dashboard_cards = ""
         button_text = content_config.get('dashboard_button_text', 'アクセス')
         
         for i, dashboard in enumerate(dashboards_info):
             if 'department' in dashboard.get('file', '').lower() or '診療科' in dashboard.get('title', ''):
                 description = content_config.get('department_dashboard_description', dashboard.get('description', ''))
-            else:
+            elif 'ward' in dashboard.get('file', '').lower() or '病棟' in dashboard.get('title', ''):
                 description = content_config.get('ward_dashboard_description', dashboard.get('description', ''))
+            else:
+                description = dashboard.get('description', '')
                 
             update_time = dashboard.get('update_time', '不明')
+            
+            title_with_icon = dashboard['title']
+            if dashboard.get('type') == 'external':
+                title_with_icon = f"🔗 {dashboard['title']}"
+            
             dashboard_cards += f"""
             <div class="dashboard-card">
                 <div class="card-number">{str(i+1).zfill(2)}</div>
-                <h3>{dashboard['title']}</h3>
+                <h3>{title_with_icon}</h3>
                 <p>{description}</p>
                 <div class="card-footer">
                     <span class="update-time">更新: {update_time}</span>
@@ -499,19 +554,25 @@ class GitHubPublisher:
 </html>"""
 
     def _create_mobile_first_layout(self, dashboards_info, content_config):
-        """モバイルファーストなレイアウト"""
+        """モバイルファーストなレイアウト（外部ダッシュボード対応）"""
         dashboard_list = ""
         
         for dashboard in dashboards_info:
             if 'department' in dashboard.get('file', '').lower() or '診療科' in dashboard.get('title', ''):
                 description = content_config.get('department_dashboard_description', dashboard.get('description', ''))
-            else:
+            elif 'ward' in dashboard.get('file', '').lower() or '病棟' in dashboard.get('title', ''):
                 description = content_config.get('ward_dashboard_description', dashboard.get('description', ''))
+            else:
+                description = dashboard.get('description', '')
                 
             update_time = dashboard.get('update_time', '不明')
+            
+            # アイコンの設定
+            icon = "🔗" if dashboard.get('type') == 'external' else "📊"
+            
             dashboard_list += f"""
             <a href="{dashboard['file']}" class="dashboard-item">
-                <div class="item-icon">📊</div>
+                <div class="item-icon">{icon}</div>
                 <div class="item-content">
                     <h3>{dashboard['title']}</h3>
                     <p>{description}</p>
@@ -647,16 +708,21 @@ class ContentCustomizer:
     def __init__(self):
         self.default_content = {
             # ヘッダー部分
-            "main_title": "🏥 病院パフォーマンスダッシュボード",
-            "subtitle": "スマートフォン対応・リアルタイム更新",
+            "main_title": "🏥 統合ダッシュボード",
+            "subtitle": "入院管理・手術分析・スマートフォン対応",
             
             # 機能紹介部分
             "show_features": True,
             "features": [
                 {
                     "icon": "📊",
-                    "title": "リアルタイム指標",
-                    "description": "最新の病院パフォーマンス指標"
+                    "title": "入院パフォーマンス",
+                    "description": "病棟・診療科別の入院指標"
+                },
+                {
+                    "icon": "🏥",
+                    "title": "手術分析",
+                    "description": "手術実績と効率性の分析"
                 },
                 {
                     "icon": "📱",
@@ -667,11 +733,6 @@ class ContentCustomizer:
                     "icon": "🔄",
                     "title": "自動更新",
                     "description": "データは定期的に自動更新"
-                },
-                {
-                    "icon": "🔒",
-                    "title": "プライバシー保護",
-                    "description": "個人情報は含まれません"
                 }
             ],
             
@@ -680,39 +741,39 @@ class ContentCustomizer:
             "ward_dashboard_description": "各病棟の入院患者数、新入院患者数、平均在院日数の実績と目標達成率",
             
             # フッター
-            "footer_text": "🏥 病院パフォーマンス分析システム",
+            "footer_text": "🏥 病院統合分析システム",
             "footer_note": "",
             
             # ボタンテキスト
             "dashboard_button_text": "ダッシュボードを開く"
         }
         
-        # プリセット定義（安全版）
+        # プリセット定義（統合版）
         self.presets = {
             "hospital": {
-                "main_title": "🏥 [病院名] パフォーマンスダッシュボード",
-                "subtitle": "医療の質向上と効率化を目指して",
-                "footer_text": "🏥 [病院名] 医療情報管理システム",
+                "main_title": "🏥 [病院名] 統合ダッシュボード",
+                "subtitle": "入院・手術分析で医療の質向上を目指して",
+                "footer_text": "🏥 [病院名] 医療情報統合システム",
                 "footer_note": "お問い合わせ：情報システム部門（内線xxxx）"
             },
             "executive": {
-                "main_title": "経営管理ダッシュボード",
-                "subtitle": "Hospital Performance Management System",
-                "footer_text": "Hospital Management Intelligence System",
+                "main_title": "経営統合ダッシュボード",
+                "subtitle": "Hospital Performance & Surgery Analytics",
+                "footer_text": "Hospital Integrated Intelligence System",
                 "footer_note": "Confidential - Internal Use Only"
             },
             "friendly": {
-                "main_title": "📊 みんなのダッシュボード",
-                "subtitle": "スマホで簡単！病院の「今」をチェック",
+                "main_title": "📊 みんなの統合ダッシュボード",
+                "subtitle": "入院も手術も！スマホで簡単チェック",
                 "footer_text": "🌟 みんなで作る より良い病院",
                 "footer_note": "質問があったら情報システム課まで気軽にどうぞ♪"
             }
         }
     
     def create_streamlit_interface(self):
-        """Streamlitで内容編集インターフェースを作成（安全版）"""
+        """Streamlitで内容編集インターフェースを作成（統合版）"""
         
-        # プリセット選択（安全な方法）
+        # プリセット選択
         st.sidebar.markdown("---")
         st.sidebar.markdown("### ⚡ プリセット選択")
         
@@ -723,7 +784,6 @@ class ContentCustomizer:
             "friendly": "👥 職員親近"
         }
         
-        # プリセット選択（この方法なら安全）
         selected_preset = st.sidebar.selectbox(
             "テンプレート選択",
             list(preset_options.keys()),
@@ -739,7 +799,7 @@ class ContentCustomizer:
         else:
             preset_values = {}
         
-        # 実際の入力フィールド（プリセット値を初期値として使用）
+        # 実際の入力フィールド
         st.sidebar.markdown("### 📝 トップページ内容編集")
         
         # ヘッダー部分
@@ -767,8 +827,8 @@ class ContentCustomizer:
         )
         
         if show_features:
-            # 機能入力は簡略化（スペースの都合）
-            st.sidebar.markdown("**主要機能アイコン・タイトル・説明**")
+            # 機能入力
+            st.sidebar.markdown("**主要機能設定**")
             for i in range(4):
                 default_feature = self.default_content["features"][i] if i < len(self.default_content["features"]) else {"icon": "📊", "title": "", "description": ""}
                 
@@ -974,11 +1034,153 @@ def generate_ward_dashboard_html(df, target_data, period="直近4週間"):
         logger.error(f"病棟別ダッシュボード生成エラー: {e}", exc_info=True)
         return None, f"エラー: {str(e)}"
 
-def create_github_publisher_interface():
-    """Streamlit用のGitHub自動公開インターフェース（修正版）"""
+def create_external_dashboard_uploader():
+    """外部ダッシュボード（手術分析など）アップロード機能"""
     
     st.sidebar.markdown("---")
-    st.sidebar.header("🌐 職員向け自動公開")
+    st.sidebar.header("🔗 外部ダッシュボード追加")
+    
+    with st.sidebar.expander("📤 HTMLファイルアップロード", expanded=False):
+        st.markdown("**手術分析アプリなど、他システムで生成されたダッシュボードを追加**")
+        
+        # アップロード方式選択
+        upload_method = st.radio(
+            "アップロード方式",
+            ["HTMLファイル直接アップロード", "HTMLコード貼り付け"],
+            key="external_upload_method"
+        )
+        
+        if upload_method == "HTMLファイル直接アップロード":
+            # ファイルアップロード
+            uploaded_file = st.file_uploader(
+                "HTMLファイルを選択",
+                type=['html'],
+                help="手術分析アプリなどで生成されたHTMLファイル",
+                key="external_html_file"
+            )
+            
+            if uploaded_file:
+                try:
+                    html_content = uploaded_file.read().decode('utf-8')
+                    st.success(f"✅ ファイル読み込み完了: {uploaded_file.name}")
+                    st.session_state.external_html_content = html_content
+                    st.session_state.external_suggested_filename = uploaded_file.name
+                except Exception as e:
+                    st.error(f"❌ ファイル読み込みエラー: {str(e)}")
+        
+        else:  # HTMLコード貼り付け
+            html_content = st.text_area(
+                "HTMLコードを貼り付け",
+                height=200,
+                help="手術分析アプリなどで生成されたHTMLコード全体",
+                key="external_html_code"
+            )
+            
+            if html_content:
+                st.session_state.external_html_content = html_content
+                st.session_state.external_suggested_filename = "custom_dashboard.html"
+        
+        # ダッシュボード情報入力
+        if st.session_state.get('external_html_content'):
+            st.markdown("**📝 ダッシュボード情報**")
+            
+            dashboard_title = st.text_input(
+                "ダッシュボードタイトル",
+                value="手術分析ダッシュボード",
+                key="external_dashboard_title",
+                help="トップページに表示されるタイトル"
+            )
+            
+            dashboard_description = st.text_area(
+                "説明文",
+                value="手術実績、手術時間、効率性指標の分析結果",
+                key="external_dashboard_description",
+                height=60,
+                help="トップページに表示される説明文"
+            )
+            
+            filename = st.text_input(
+                "ファイル名",
+                value=st.session_state.get('external_suggested_filename', 'surgery_analysis.html'),
+                key="external_filename",
+                help="GitHub上に保存されるファイル名（.html自動追加）"
+            )
+            
+            # アップロード実行
+            if st.button("🚀 外部ダッシュボードを追加", key="upload_external_dashboard", type="primary"):
+                
+                if st.session_state.get('github_publisher'):
+                    publisher = st.session_state.github_publisher
+                    
+                    # HTMLアップロード
+                    success, message = publisher.upload_external_html(
+                        st.session_state.external_html_content,
+                        filename,
+                        dashboard_title
+                    )
+                    
+                    if success:
+                        # 外部ダッシュボード情報をセッションに保存
+                        external_dashboards = st.session_state.get('external_dashboards', [])
+                        
+                        # 既存のダッシュボード情報を更新または追加
+                        updated = False
+                        for i, dash in enumerate(external_dashboards):
+                            if dash['file'] == filename or dash['title'] == dashboard_title:
+                                external_dashboards[i] = {
+                                    "title": dashboard_title,
+                                    "description": dashboard_description,
+                                    "file": filename if filename.endswith('.html') else filename + '.html',
+                                    "type": "external",
+                                    "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
+                                }
+                                updated = True
+                                break
+                        
+                        if not updated:
+                            external_dashboards.append({
+                                "title": dashboard_title,
+                                "description": dashboard_description,
+                                "file": filename if filename.endswith('.html') else filename + '.html',
+                                "type": "external",
+                                "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
+                            })
+                        
+                        st.session_state.external_dashboards = external_dashboards
+                        
+                        st.success(f"✅ 外部ダッシュボード追加成功: {dashboard_title}")
+                        st.info("💡 次回の統合公開時に、このダッシュボードもインデックスページに含まれます")
+                        
+                        # 入力内容をクリア
+                        st.session_state.external_html_content = ""
+                        st.rerun()
+                    else:
+                        st.error(f"❌ アップロード失敗: {message}")
+                
+                else:
+                    st.error("❌ GitHub設定が必要です")
+    
+    # 登録済み外部ダッシュボード一覧
+    external_dashboards = st.session_state.get('external_dashboards', [])
+    if external_dashboards:
+        with st.sidebar.expander("📋 登録済み外部ダッシュボード", expanded=False):
+            for i, dash in enumerate(external_dashboards):
+                st.markdown(f"**{dash['title']}**")
+                st.markdown(f"ファイル: `{dash['file']}`")
+                st.markdown(f"更新: {dash.get('update_time', '不明')}")
+                
+                if st.button(f"🗑️ 削除", key=f"delete_external_{i}"):
+                    external_dashboards.pop(i)
+                    st.session_state.external_dashboards = external_dashboards
+                    st.rerun()
+                
+                st.markdown("---")
+
+def create_github_publisher_interface():
+    """Streamlit用のGitHub自動公開インターフェース（統合版）"""
+    
+    st.sidebar.markdown("---")
+    st.sidebar.header("🌐 統合ダッシュボード公開")
     
     # GitHub設定
     with st.sidebar.expander("⚙️ GitHub設定", expanded=False):
@@ -1035,26 +1237,49 @@ def create_github_publisher_interface():
             else:
                 st.error("すべての項目を入力してください")
     
-    # 内容カスタマイズ機能（修正版）
+    # 外部ダッシュボードアップロード機能
+    create_external_dashboard_uploader()
+    
+    # 内容カスタマイズ機能
     content_customizer = ContentCustomizer()
     content_customizer.create_streamlit_interface()
     
-    # 公開機能（データが読み込まれている場合のみ）
-    if (st.session_state.get('github_publisher') and 
-        st.session_state.get('data_processed') and 
-        st.session_state.get('df') is not None):
+    # 統合公開機能
+    if st.session_state.get('github_publisher'):
         
-        st.sidebar.markdown("### 🚀 ダッシュボード公開")
+        st.sidebar.markdown("### 🚀 統合ダッシュボード公開")
         
-        # 期間選択
-        period_options = ["直近4週間", "直近8週", "直近12週", "今年度"]
-        selected_period = st.sidebar.selectbox(
-            "公開データ期間",
-            period_options,
-            index=0,
-            help="職員向けダッシュボードに使用するデータ期間",
-            key="github_publish_period"
-        )
+        # データ読み込み状況に応じた選択肢
+        publish_options_all = []
+        
+        # 入院ダッシュボード（データが読み込まれている場合）
+        if (st.session_state.get('data_processed') and st.session_state.get('df') is not None):
+            publish_options_all.extend(["診療科別パフォーマンス", "病棟別パフォーマンス"])
+        
+        # 外部ダッシュボード
+        external_dashboards = st.session_state.get('external_dashboards', [])
+        for dash in external_dashboards:
+            publish_options_all.append(f"外部: {dash['title']}")
+        
+        # インデックスページは常に選択可能
+        publish_options_all.append("統合インデックス")
+        
+        if not publish_options_all:
+            st.sidebar.info("📊 データ読み込みまたは外部ダッシュボード追加後に公開機能が利用可能になります")
+            return
+        
+        # 期間選択（入院ダッシュボードがある場合のみ）
+        if any(opt in ["診療科別パフォーマンス", "病棟別パフォーマンス"] for opt in publish_options_all):
+            period_options = ["直近4週間", "直近8週", "直近12週", "今年度"]
+            selected_period = st.sidebar.selectbox(
+                "入院データ期間",
+                period_options,
+                index=0,
+                help="入院ダッシュボードに使用するデータ期間",
+                key="github_publish_period"
+            )
+        else:
+            selected_period = "直近4週間"  # デフォルト値
         
         # レイアウトスタイルの選択
         layout_styles = {
@@ -1069,16 +1294,16 @@ def create_github_publisher_interface():
             list(layout_styles.keys()),
             format_func=lambda x: layout_styles[x],
             index=0,
-            help="職員向けトップページのデザインスタイル",
+            help="統合トップページのデザインスタイル",
             key="github_layout_style"
         )
         
         # 公開するダッシュボードの選択
         publish_options = st.sidebar.multiselect(
             "公開ダッシュボード",
-            ["診療科別パフォーマンス", "病棟別パフォーマンス", "統合インデックス"],
-            default=["診療科別パフォーマンス", "病棟別パフォーマンス", "統合インデックス"],
-            help="職員向けに公開するダッシュボード",
+            publish_options_all,
+            default=publish_options_all,
+            help="統合公開するダッシュボード",
             key="github_publish_options"
         )
         
@@ -1088,15 +1313,13 @@ def create_github_publisher_interface():
             st.markdown(f"**タイトル:** {content_config.get('main_title', 'デフォルト')}")
             st.markdown(f"**サブタイトル:** {content_config.get('subtitle', 'デフォルト')}")
             st.markdown(f"**レイアウト:** {layout_styles[selected_layout]}")
-            st.markdown(f"**ボタンテキスト:** {content_config.get('dashboard_button_text', 'デフォルト')}")
+            st.markdown(f"**公開項目数:** {len(publish_options)}")
         
-        # 自動公開実行
-        if st.sidebar.button("🚀 GitHub Pagesに自動公開", key="execute_github_publish", type="primary"):
+        # 統合自動公開実行
+        if st.sidebar.button("🚀 統合ダッシュボード公開", key="execute_integrated_publish", type="primary"):
             
             publisher = st.session_state.github_publisher
             publish_path = st.session_state.get('github_publish_path_config', 'docs/')
-            df = st.session_state['df']
-            target_data = st.session_state.get('target_data', pd.DataFrame())
             
             # カスタム内容設定を取得
             content_config = content_customizer.get_current_config()
@@ -1109,10 +1332,13 @@ def create_github_publisher_interface():
             current_task = 0
             
             try:
-                # 診療科別ダッシュボード
+                # 入院ダッシュボード処理
                 if "診療科別パフォーマンス" in publish_options:
                     status_text.text("診療科別ダッシュボードを生成中...")
                     progress_bar.progress(current_task / total_tasks)
+                    
+                    df = st.session_state['df']
+                    target_data = st.session_state.get('target_data', pd.DataFrame())
                     
                     dept_html, dept_message = generate_department_dashboard_html(
                         df, target_data, selected_period
@@ -1131,9 +1357,11 @@ def create_github_publisher_interface():
                     current_task += 1
                     progress_bar.progress(current_task / total_tasks)
                 
-                # 病棟別ダッシュボード
                 if "病棟別パフォーマンス" in publish_options:
                     status_text.text("病棟別ダッシュボードを生成中...")
+                    
+                    df = st.session_state['df']
+                    target_data = st.session_state.get('target_data', pd.DataFrame())
                     
                     ward_html, ward_message = generate_ward_dashboard_html(
                         df, target_data, selected_period
@@ -1152,12 +1380,24 @@ def create_github_publisher_interface():
                     current_task += 1
                     progress_bar.progress(current_task / total_tasks)
                 
-                # インデックスページ（カスタム内容・レイアウト対応）
+                # 外部ダッシュボード処理（既にアップロード済みなのでスキップ）
+                external_count = 0
+                for option in publish_options:
+                    if option.startswith("外部: "):
+                        external_count += 1
+                        current_task += 1
+                        progress_bar.progress(current_task / total_tasks)
+                
+                if external_count > 0:
+                    results.append(("外部ダッシュボード", True, f"{external_count}件の外部ダッシュボードを統合"))
+                
+                # 統合インデックスページ
                 if "統合インデックス" in publish_options:
-                    status_text.text("インデックスページを生成中...")
+                    status_text.text("統合インデックスページを生成中...")
                     
                     dashboards_info = []
                     
+                    # 入院ダッシュボード情報追加
                     if "診療科別パフォーマンス" in publish_options:
                         dashboards_info.append({
                             "title": "診療科別パフォーマンス",
@@ -1176,20 +1416,35 @@ def create_github_publisher_interface():
                             "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
                         })
                     
-                    # カスタム内容・レイアウトでインデックスページ生成
-                    index_html = publisher.create_index_page(dashboards_info, selected_layout, content_config)
+                    # 外部ダッシュボード情報追加
+                    external_included = []
+                    for option in publish_options:
+                        if option.startswith("外部: "):
+                            external_title = option[3:]  # "外部: " を削除
+                            for dash in external_dashboards:
+                                if dash['title'] == external_title:
+                                    external_included.append(dash)
+                                    break
+                    
+                    # 統合インデックスページ生成
+                    index_html = publisher.create_index_page(
+                        dashboards_info, 
+                        selected_layout, 
+                        content_config, 
+                        external_included
+                    )
                     
                     success, message = publisher.upload_html_file(
                         index_html,
                         f"{publish_path}index.html",
-                        f"Update dashboard index page - {selected_period} - {layout_styles[selected_layout]}"
+                        f"Update integrated dashboard index - {selected_period} - {layout_styles[selected_layout]}"
                     )
-                    results.append(("インデックス", success, message))
+                    results.append(("統合インデックス", success, message))
                     
                     current_task += 1
                     progress_bar.progress(1.0)
                 
-                status_text.text("公開完了！")
+                status_text.text("統合公開完了！")
                 
                 # 結果表示
                 all_success = True
@@ -1203,17 +1458,18 @@ def create_github_publisher_interface():
                 if all_success and results:
                     public_url = publisher.get_public_url()
                     
-                    st.sidebar.success("🎉 カスタム公開完了！")
+                    st.sidebar.success("🎉 統合ダッシュボード公開完了！")
                     st.sidebar.markdown("### 📱 職員への配布方法")
                     
                     st.sidebar.text_input(
-                        "公開URL（QRコード生成用）",
+                        "統合公開URL（QRコード生成用）",
                         value=public_url,
-                        key="github_public_url_display"
+                        key="github_integrated_url_display"
                     )
                     
                     st.sidebar.markdown(f"""
-                    **✨ 公開内容:**
+                    **✨ 統合公開内容:**
+                    - 入院ダッシュボード + 手術分析
                     - レイアウト: {layout_styles[selected_layout]}
                     - カスタム内容適用済み
                     - 期間: {selected_period}
@@ -1225,14 +1481,12 @@ def create_github_publisher_interface():
                     """)
                 
             except Exception as e:
-                st.sidebar.error(f"❌ 公開処理エラー: {str(e)}")
-                logger.error(f"GitHub公開エラー: {e}", exc_info=True)
+                st.sidebar.error(f"❌ 統合公開処理エラー: {str(e)}")
+                logger.error(f"GitHub統合公開エラー: {e}", exc_info=True)
             
             finally:
                 progress_bar.empty()
                 status_text.empty()
     
-    elif st.session_state.get('github_publisher'):
-        st.sidebar.info("📊 データを読み込み後に公開機能が利用可能になります")
     else:
         st.sidebar.info("⚙️ 上記でGitHub設定を行ってください")
