@@ -1219,8 +1219,6 @@ def create_external_dashboard_uploader():
     else:
         st.sidebar.warning("⚠️ 外部ダッシュボードが登録されていません")
 
-from comprehensive_report_generator import ComprehensiveReportGenerator
-
 def create_github_publisher_interface():
     """Streamlit用のGitHub自動公開インターフェース（統合版）"""
     
@@ -1296,8 +1294,7 @@ def create_github_publisher_interface():
                 st.success("✅ GitHub設定を保存しました")
                 
                 st.info(f"""
-                **GitHub Pages設定**  
-                1. GitHubリポジトリ → Settings → Pages  
+                **GitHub Pages設定** 1. GitHubリポジトリ → Settings → Pages  
                 2. Source: Deploy from a branch  
                 3. Branch: main / {publish_path or 'root'}  
                 
