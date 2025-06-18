@@ -198,16 +198,7 @@ class GitHubPublisher:
 <body>
     <div class="container">
         <h1>🏥 病院パフォーマンスダッシュボード</h1>
-        <p class="subtitle">スマートフォン対応・リアルタイム更新</p>
-        
-        <div class="qr-info">
-            <h2>📱 スマートフォンでのアクセス</h2>
-            <p>以下のURLをQRコードにして職員に配布できます</p>
-            <div class="url">https://{self.repo_owner}.github.io/{self.repo_name}/</div>
-            <p style="color: #666; font-size: 0.9em;">
-                ブックマーク推奨 | 自動更新 | 個人情報なし
-            </p>
-        </div>
+        <p class="subtitle">スマートフォン対応・たぶん週更新</p>
         
         <div class="features">
             <div class="feature">
@@ -238,7 +229,7 @@ class GitHubPublisher:
         
         <footer style="text-align: center; margin-top: 50px; color: #999; border-top: 1px solid #eee; padding-top: 30px;">
             <p>最終更新: {datetime.now().strftime('%Y年%m月%d日 %H:%M')}</p>
-            <p>🏥 病院パフォーマンス分析システム</p>
+            <p>🏥 経営企画室</p>
         </footer>
     </div>
 </body>
