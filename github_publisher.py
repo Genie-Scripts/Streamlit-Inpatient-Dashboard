@@ -367,7 +367,7 @@ def generate_ward_dashboard_html(df, target_data, period="直近4週間"):
         return None, f"エラー: {str(e)}"
 
 def create_github_publisher_interface():
-    """Streamlit用のGitHub自動公開インターフェース"""
+    """Streamlit用のGitHub自動公開インターフェース（修正版）"""
     
     st.sidebar.markdown("---")
     st.sidebar.header("🌐 職員向け自動公開")
@@ -400,12 +400,13 @@ def create_github_publisher_interface():
                 key="github_publisher_repo"
             )
         
+        # キー名を変更してエラーを回避
         publish_path = st.selectbox(
             "公開フォルダ",
             ["docs/", "public/", ""],
             index=0,
             help="GitHub Pagesの公開元フォルダ",
-            key="github_publish_path"
+            key="github_publish_folder_select"  # キー名を変更
         )
         
         if st.button("💾 GitHub設定を保存", key="save_github_publisher_settings"):
@@ -413,7 +414,8 @@ def create_github_publisher_interface():
                 st.session_state.github_publisher = GitHubPublisher(
                     repo_owner, repo_name, github_token, "main"
                 )
-                st.session_state.github_publish_path = publish_path
+                # キー名を変更してエラーを回避
+                st.session_state.github_publish_path_config = publish_path
                 st.success("✅ GitHub設定を保存しました")
                 
                 # GitHub Pages設定の案内
@@ -458,7 +460,7 @@ def create_github_publisher_interface():
         if st.sidebar.button("🚀 GitHub Pagesに自動公開", key="execute_github_publish", type="primary"):
             
             publisher = st.session_state.github_publisher
-            publish_path = st.session_state.get('github_publish_path', 'docs/')
+            publish_path = st.session_state.get('github_publish_path_config', 'docs/')
             df = st.session_state['df']
             target_data = st.session_state.get('target_data', pd.DataFrame())
             
