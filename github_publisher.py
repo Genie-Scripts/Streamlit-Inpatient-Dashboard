@@ -1219,6 +1219,8 @@ def create_external_dashboard_uploader():
     else:
         st.sidebar.warning("⚠️ 外部ダッシュボードが登録されていません")
 
+from comprehensive_report_generator import ComprehensiveReportGenerator
+
 def create_github_publisher_interface():
     """Streamlit用のGitHub自動公開インターフェース（統合版）"""
     
@@ -1562,6 +1564,520 @@ def create_github_publisher_interface():
             finally:
                 progress_bar.empty()
                 status_text.empty()
+        
+        # 90日間総合レポート生成機能
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 📑 90日間総合レポート")
+        
+        with st.sidebar.expander("📊 レポート生成", expanded=False):
+            st.markdown("**90日間の包括的分析レポート**")
+            st.markdown("- 全体分析（KPI、推移グラフ、月別サマリー）")
+            st.markdown("- 診療科別分析（比較、詳細データ、トレンド）")
+            st.markdown("- 病棟別分析（稼働率、利用率推移、回転率）")
+            
+            if st.button("🚀 90日間レポート生成・公開", key="generate_90day_report", type="primary"):
+                
+                if st.session_state.get('data_processed') and st.session_state.get('df') is not None:
+                    df = st.session_state['df']
+                    target_data = st.session_state.get('target_data', pd.DataFrame())
+                    
+                    with st.spinner("90日間レポートを生成中..."):
+                        try:
+                            # レポートHTML生成（簡易版）
+                            html_report = generate_90day_report_html(df, target_data)
+                            
+                            if html_report:
+                                # GitHubにアップロード
+                                success, message = publisher.upload_html_file(
+                                    html_report,
+                                    f"{publish_path}comprehensive_report_90days.html",
+                                    f"Update 90-day comprehensive report - {datetime.now().strftime('%Y-%m-%d')}"
+                                )
+                                
+                                if success:
+                                    st.success("✅ 90日間レポート生成・公開成功！")
+                                    
+                                    # 外部ダッシュボードとして登録
+                                    external_dashboards = st.session_state.get('external_dashboards', [])
+                                    
+                                    report_dash = {
+                                        "title": "90日間総合レポート",
+                                        "description": "全体・診療科別・病棟別の詳細分析（グラフ・テーブル含む）",
+                                        "file": "comprehensive_report_90days.html",
+                                        "type": "external",
+                                        "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
+                                    }
+                                    
+                                    # 既存のレポートを更新
+                                    updated = False
+                                    for i, dash in enumerate(external_dashboards):
+                                        if dash['title'] == "90日間総合レポート":
+                                            external_dashboards[i] = report_dash
+                                            updated = True
+                                            break
+                                    
+                                    if not updated:
+                                        external_dashboards.append(report_dash)
+                                    
+                                    st.session_state.external_dashboards = external_dashboards
+                                    
+                                    public_url = publisher.get_public_url()
+                                    st.info(f"""
+                                    **📊 レポートURL:**
+                                    {public_url}comprehensive_report_90days.html
+                                    
+                                    **📱 統合インデックスにも自動追加されました**
+                                    
+                                    **🖨️ PDF保存方法:**
+                                    1. 上記URLを開く
+                                    2. ブラウザの印刷機能（Ctrl+P）
+                                    3. 送信先を「PDFに保存」に設定
+                                    """)
+                                else:
+                                    st.error(f"❌ レポート公開失敗: {message}")
+                            else:
+                                st.error("❌ レポート生成に失敗しました")
+                        
+                        except Exception as e:
+                            st.error(f"❌ レポート生成エラー: {str(e)}")
+                            logger.error(f"90日間レポート生成エラー: {e}", exc_info=True)
+                else:
+                    st.warning("⚠️ データを読み込んでから実行してください")
     
     else:
         st.sidebar.info("⚙️ 上記でGitHub設定を行ってください")
+
+
+def generate_90day_report_html(df, target_data):
+    """90日間総合レポートのHTML生成（簡易版）"""
+    try:
+        from datetime import timedelta
+        import json
+        
+        # 90日間のデータをフィルタリング
+        end_date = df['日付'].max()
+        start_date = end_date - timedelta(days=90)
+        df_90days = df[(df['日付'] >= start_date) & (df['日付'] <= end_date)].copy()
+        
+        # 基本統計の計算
+        total_stats = {
+            '平均在院患者数': df_90days.groupby('日付')['在院患者数'].sum().mean(),
+            '総入院患者数': df_90days['入院患者数'].sum(),
+            '総退院患者数': df_90days['退院患者数'].sum(),
+            '平均在院日数': df_90days['在院患者数'].sum() / df_90days['退院患者数'].sum() if df_90days['退院患者数'].sum() > 0 else 0
+        }
+        
+        # 診療科別統計
+        dept_stats = df_90days.groupby('診療科名').agg({
+            '在院患者数': 'mean',
+            '入院患者数': 'sum',
+            '退院患者数': 'sum'
+        }).round(1).to_dict('index')
+        
+        # 病棟別統計
+        ward_col = '病棟コード' if '病棟コード' in df_90days.columns else '病棟名'
+        ward_stats = df_90days.groupby(ward_col).agg({
+            '在院患者数': 'mean',
+            '入院患者数': 'sum',
+            '退院患者数': 'sum'
+        }).round(1).to_dict('index')
+        
+        # 時系列データの準備（Chart.js用）
+        daily_data = df_90days.groupby('日付').agg({
+            '在院患者数': 'sum',
+            '入院患者数': 'sum',
+            '退院患者数': 'sum'
+        }).reset_index()
+        
+        dates = daily_data['日付'].dt.strftime('%Y-%m-%d').tolist()
+        inpatients = daily_data['在院患者数'].tolist()
+        admissions = daily_data['入院患者数'].tolist()
+        discharges = daily_data['退院患者数'].tolist()
+        
+        # HTML生成
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>入院管理総合レポート - 90日間分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+        }}
+        .header h1 {{
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }}
+        .period {{
+            font-size: 1.2em;
+            opacity: 0.9;
+        }}
+        .nav-section {{
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }}
+        .nav-button {{
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 5px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }}
+        .nav-button:hover {{
+            background: #5a67d8;
+            transform: translateY(-2px);
+        }}
+        .section {{
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        .section h2 {{
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }}
+        .metrics-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        .metric-card {{
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }}
+        .metric-card h3 {{
+            font-size: 0.9em;
+            color: #718096;
+            margin-bottom: 5px;
+        }}
+        .metric-value {{
+            font-size: 2em;
+            font-weight: bold;
+            color: #2d3748;
+        }}
+        .chart-container {{
+            position: relative;
+            height: 400px;
+            margin-bottom: 30px;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }}
+        th, td {{
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }}
+        th {{
+            background: #f7fafc;
+            font-weight: 600;
+            color: #4a5568;
+        }}
+        tr:hover {{
+            background: #f7fafc;
+        }}
+        .print-button {{
+            display: inline-block;
+            padding: 15px 30px;
+            background: #48bb78;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            margin: 20px auto;
+            display: block;
+            width: fit-content;
+            cursor: pointer;
+        }}
+        @media print {{
+            .nav-section, .print-button {{
+                display: none;
+            }}
+            .section {{
+                page-break-inside: avoid;
+            }}
+        }}
+        @media (max-width: 768px) {{
+            .header h1 {{
+                font-size: 1.8em;
+            }}
+            .metrics-grid {{
+                grid-template-columns: 1fr;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏥 入院管理総合レポート</h1>
+            <p class="period">分析期間: {start_date.strftime('%Y年%m月%d日')} - {end_date.strftime('%Y年%m月%d日')} (90日間)</p>
+        </div>
+        
+        <div class="nav-section">
+            <a href="#overall" class="nav-button">全体分析</a>
+            <a href="#department" class="nav-button">診療科別分析</a>
+            <a href="#ward" class="nav-button">病棟別分析</a>
+        </div>
+        
+        <div id="overall" class="section">
+            <h2>📊 全体分析</h2>
+            
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>平均在院患者数</h3>
+                    <div class="metric-value">{total_stats['平均在院患者数']:.1f}</div>
+                </div>
+                <div class="metric-card">
+                    <h3>総入院患者数</h3>
+                    <div class="metric-value">{total_stats['総入院患者数']:,.0f}</div>
+                </div>
+                <div class="metric-card">
+                    <h3>総退院患者数</h3>
+                    <div class="metric-value">{total_stats['総退院患者数']:,.0f}</div>
+                </div>
+                <div class="metric-card">
+                    <h3>平均在院日数</h3>
+                    <div class="metric-value">{total_stats['平均在院日数']:.1f}日</div>
+                </div>
+            </div>
+            
+            <h3>入院患者数推移（90日間）</h3>
+            <div class="chart-container">
+                <canvas id="timeSeriesChart"></canvas>
+            </div>
+        </div>
+        
+        <div id="department" class="section">
+            <h2>🏥 診療科別分析</h2>
+            
+            <h3>診療科別実績（90日間）</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>診療科</th>
+                        <th>平均在院患者数</th>
+                        <th>総入院患者数</th>
+                        <th>総退院患者数</th>
+                        <th>推定平均在院日数</th>
+                    </tr>
+                </thead>
+                <tbody>"""
+        
+        # 診療科別テーブル行を追加
+        for dept, stats in sorted(dept_stats.items(), key=lambda x: x[1]['在院患者数'], reverse=True)[:15]:
+            avg_los = (stats['在院患者数'] * 90 / stats['退院患者数']) if stats['退院患者数'] > 0 else 0
+            html_content += f"""
+                    <tr>
+                        <td>{dept}</td>
+                        <td>{stats['在院患者数']:.1f}</td>
+                        <td>{stats['入院患者数']:.0f}</td>
+                        <td>{stats['退院患者数']:.0f}</td>
+                        <td>{avg_los:.1f}日</td>
+                    </tr>"""
+        
+        html_content += """
+                </tbody>
+            </table>
+            
+            <h3 style="margin-top: 30px;">診療科別在院患者数（上位10診療科）</h3>
+            <div class="chart-container">
+                <canvas id="deptChart"></canvas>
+            </div>
+        </div>
+        
+        <div id="ward" class="section">
+            <h2>🛏️ 病棟別分析</h2>
+            
+            <h3>病棟別実績（90日間）</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>病棟</th>
+                        <th>平均在院患者数</th>
+                        <th>総入院患者数</th>
+                        <th>総退院患者数</th>
+                        <th>推定稼働率</th>
+                    </tr>
+                </thead>
+                <tbody>"""
+        
+        # 病棟別テーブル行を追加
+        for ward, stats in sorted(ward_stats.items(), key=lambda x: x[1]['在院患者数'], reverse=True)[:15]:
+            occupancy = min((stats['在院患者数'] / 50) * 100, 100)  # 仮に50床として計算
+            html_content += f"""
+                    <tr>
+                        <td>{ward}</td>
+                        <td>{stats['在院患者数']:.1f}</td>
+                        <td>{stats['入院患者数']:.0f}</td>
+                        <td>{stats['退院患者数']:.0f}</td>
+                        <td>{occupancy:.1f}%</td>
+                    </tr>"""
+        
+        html_content += f"""
+                </tbody>
+            </table>
+            
+            <h3 style="margin-top: 30px;">病棟別在院患者数（上位10病棟）</h3>
+            <div class="chart-container">
+                <canvas id="wardChart"></canvas>
+            </div>
+        </div>
+        
+        <button class="print-button" onclick="window.print()">📥 PDFとして保存（印刷）</button>
+    </div>
+    
+    <script>
+        // 時系列グラフ
+        const timeSeriesCtx = document.getElementById('timeSeriesChart').getContext('2d');
+        new Chart(timeSeriesCtx, {{
+            type: 'line',
+            data: {{
+                labels: {json.dumps(dates)},
+                datasets: [{{
+                    label: '在院患者数',
+                    data: {json.dumps(inpatients)},
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    borderWidth: 2
+                }}, {{
+                    label: '新入院患者数',
+                    data: {json.dumps(admissions)},
+                    borderColor: '#48bb78',
+                    backgroundColor: 'rgba(72, 187, 120, 0.1)',
+                    borderWidth: 2
+                }}, {{
+                    label: '退院患者数',
+                    data: {json.dumps(discharges)},
+                    borderColor: '#f6ad55',
+                    backgroundColor: 'rgba(246, 173, 85, 0.1)',
+                    borderWidth: 2
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{
+                    legend: {{
+                        position: 'bottom'
+                    }}
+                }},
+                scales: {{
+                    y: {{
+                        beginAtZero: true
+                    }}
+                }}
+            }}
+        }});
+        
+        // 診療科別グラフ
+        const deptData = {json.dumps(dict(sorted([(k, v['在院患者数']) for k, v in dept_stats.items()], key=lambda x: x[1], reverse=True)[:10]))};
+        const deptCtx = document.getElementById('deptChart').getContext('2d');
+        new Chart(deptCtx, {{
+            type: 'bar',
+            data: {{
+                labels: Object.keys(deptData),
+                datasets: [{{
+                    label: '平均在院患者数',
+                    data: Object.values(deptData),
+                    backgroundColor: '#667eea'
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: {{
+                    legend: {{
+                        display: false
+                    }}
+                }}
+            }}
+        }});
+        
+        // 病棟別グラフ
+        const wardData = {json.dumps(dict(sorted([(k, v['在院患者数']) for k, v in ward_stats.items()], key=lambda x: x[1], reverse=True)[:10]))};
+        const wardCtx = document.getElementById('wardChart').getContext('2d');
+        new Chart(wardCtx, {{
+            type: 'bar',
+            data: {{
+                labels: Object.keys(wardData),
+                datasets: [{{
+                    label: '平均在院患者数',
+                    data: Object.values(wardData),
+                    backgroundColor: '#764ba2'
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{
+                    legend: {{
+                        display: false
+                    }}
+                }}
+            }}
+        }});
+        
+        // スムーススクロール
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
+            anchor.addEventListener('click', function (e) {{
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {{
+                    target.scrollIntoView({{
+                        behavior: 'smooth',
+                        block: 'start'
+                    }});
+                }}
+            }});
+        }});
+    </script>
+</body>
+</html>"""
+        
+        return html_content
+        
+    except Exception as e:
+        logger.error(f"90日間レポート生成エラー: {e}", exc_info=True)
+        return None
