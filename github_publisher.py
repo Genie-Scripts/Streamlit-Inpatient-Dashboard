@@ -1201,6 +1201,8 @@ def create_external_dashboard_uploader():
     
     # 登録済み外部ダッシュボード一覧
     external_dashboards = st.session_state.get('external_dashboards', [])
+    st.sidebar.info(f"登録済み外部ダッシュボード総数: {len(external_dashboards)}")
+    
     if external_dashboards:
         with st.sidebar.expander("📋 登録済み外部ダッシュボード", expanded=False):
             for i, dash in enumerate(external_dashboards):
@@ -1214,9 +1216,35 @@ def create_external_dashboard_uploader():
                     st.rerun()
                 
                 st.markdown("---")
+    else:
+        st.sidebar.warning("⚠️ 外部ダッシュボードが登録されていません")
 
 def create_github_publisher_interface():
     """Streamlit用のGitHub自動公開インターフェース（統合版）"""
+    
+    # デバッグ情報表示（開発用）
+    with st.sidebar.expander("🐛 デバッグ情報", expanded=False):
+        st.markdown("**セッションステート内容:**")
+        if 'external_dashboards' in st.session_state:
+            st.json(st.session_state.external_dashboards)
+        else:
+            st.warning("external_dashboardsが存在しません")
+        
+        # テスト用ボタン
+        if st.button("🧪 テスト用外部ダッシュボード追加", key="add_test_external"):
+            if 'external_dashboards' not in st.session_state:
+                st.session_state.external_dashboards = []
+            
+            test_dashboard = {
+                "title": "手術分析ダッシュボード",
+                "description": "手術実績、手術時間、効率性指標の分析結果",
+                "file": "surgery_analysis.html",
+                "type": "external",
+                "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')
+            }
+            st.session_state.external_dashboards.append(test_dashboard)
+            st.success("テスト用外部ダッシュボードを追加しました")
+            st.rerun()
     
     st.sidebar.markdown("---")
     st.sidebar.header("🌐 統合ダッシュボード公開")
@@ -1297,6 +1325,7 @@ def create_github_publisher_interface():
         
         # 外部ダッシュボード
         external_dashboards = st.session_state.get('external_dashboards', [])
+        st.sidebar.info(f"セッションの外部ダッシュボード数: {len(external_dashboards)}")
         for dash in external_dashboards:
             # タイトルを短縮せずに完全表示
             publish_options_all.append(f"外部: {dash['title']}")
