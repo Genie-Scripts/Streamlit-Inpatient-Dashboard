@@ -30,7 +30,8 @@ from pdf_generator import (
     create_dual_axis_chart_for_pdf, # pdf_generator内のMatplotlib二軸グラフ関数
     get_chart_cache_key as get_pdf_gen_chart_cache_key, # pdf_generatorのキャッシュキー関数
     compute_data_hash as compute_pdf_gen_data_hash,   # pdf_generatorのハッシュ関数
-    get_chart_cache as get_pdf_gen_main_process_cache # メインプロセス用キャッシュ取得
+    get_chart_cache as get_pdf_gen_main_process_cache, # メインプロセス用キャッシュ取得
+    cleanup_matplotlib_figure as cleanup_matplotlib_resources # クリーンアップ関数をインポート
 )
 
 # ロガーの設定
@@ -160,7 +161,6 @@ def find_department_code_in_targets_for_pdf(dept_name, target_data_df, metric_na
     
     return None, False
 
-@safe_pdf_worker_wrapper
 def process_pdf_in_worker_revised(
     df_path, filter_type, filter_value, display_name, latest_date_str, landscape,
     target_data_path=None, reduced_graphs=True,
@@ -264,6 +264,11 @@ def process_pdf_in_worker_revised(
         
         return (title_prefix_for_pdf, pdf_bytes_io_result) if pdf_bytes_io_result else None
 
+    except MemoryError:
+        logger.error(f"メモリ不足エラー (PID: {os.getpid()})")
+        cleanup_matplotlib_resources()
+        gc.collect()
+        return None
     except Exception as e:
         logger.error(f"PID {os.getpid()}: Error in worker for {filter_type} {filter_value} ('{display_name}'): {e}")
         import traceback
@@ -272,6 +277,8 @@ def process_pdf_in_worker_revised(
     finally:
         # 性能監視終了
         monitor.end_monitoring(f"PDF生成: {display_name}")
+        # 強制的なクリーンアップ
+        cleanup_matplotlib_resources()
 
 def get_optimized_worker_count(max_workers=None):
     """最適化されたワーカー数を算出"""
@@ -861,6 +868,8 @@ def test_pdf_optimization():
     """PDF最適化のテスト関数"""
     import numpy as np
     
+    logger.info("PDF最適化テストを開始します")
+    
     # テストデータ作成
     test_data = pd.DataFrame({
         '日付': pd.date_range('2024-01-01', periods=1000),
@@ -874,21 +883,28 @@ def test_pdf_optimization():
     # 処理時間測定
     start_time = time.time()
     
-    # 最適化されたPDF生成を実行
-    zip_result = batch_generate_pdfs_full_optimized(
-        test_data, 
-        mode="all",
-        fast_mode=True,
-        max_workers=2,
-        use_parallel=True
-    )
-    
-    end_time = time.time()
-    
-    logger.info(f"テスト完了: {end_time - start_time:.2f}秒")
-    logger.info(f"ZIPサイズ: {len(zip_result.getvalue()) / 1024:.1f} KB")
-    
-    return zip_result
+    try:
+        # 最適化されたPDF生成を実行
+        zip_result = batch_generate_pdfs_full_optimized(
+            test_data, 
+            mode="all",
+            fast_mode=True,
+            max_workers=2,
+            use_parallel=True
+        )
+        
+        end_time = time.time()
+        
+        logger.info(f"テスト完了: {end_time - start_time:.2f}秒")
+        logger.info(f"ZIPサイズ: {len(zip_result.getvalue()) / 1024:.1f} KB")
+        
+        return zip_result
+        
+    except Exception as e:
+        logger.error(f"PDF最適化テストでエラー: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return BytesIO()
 
 # 使用例
 if __name__ == "__main__":

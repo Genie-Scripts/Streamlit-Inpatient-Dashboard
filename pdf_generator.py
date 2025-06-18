@@ -137,6 +137,9 @@ def cleanup_matplotlib_figure(fig):
     try:
         if fig:
             plt.close(fig)
+        # 追加のクリーンアップ
+        plt.close('all')
+        gc.collect()
     except Exception as e:
         logger.debug(f"Figure cleanup error: {e}")
 
