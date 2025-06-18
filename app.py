@@ -78,8 +78,14 @@ except ImportError as e:
     WARD_PERFORMANCE_AVAILABLE = False
     create_ward_performance_tab = lambda: st.error("病棟別パフォーマンス機能は利用できません。")
 
+try:
+    from github_publisher import create_github_publisher_interface
+    GITHUB_PUBLISHER_AVAILABLE = True
+except ImportError:
+    GITHUB_PUBLISHER_AVAILABLE = False
+    st.sidebar.info("GitHub自動公開機能は github_publisher.py が必要です")
+    
 inject_global_css(FONT_SCALE)
-
 
 def get_analysis_period():
     if not st.session_state.get('data_processed', False):
@@ -525,11 +531,8 @@ def create_sidebar_target_file_status():
                         else:
                             st.sidebar.write(f"「{keyword}」: 該当なし")
 
-# --- メインのサイドバー作成関数 ---
-# app.py の create_sidebar() 関数内の設定値初期化部分を修正
-
 def create_sidebar():
-    """サイドバーの設定UI（設定値初期化強化版）"""
+    """サイドバーの設定UI（既存のコード + GitHub自動公開機能）"""
 
     # 1. 分析フィルター (データロード後に表示)
     st.sidebar.header("🔍 分析フィルター")
@@ -689,6 +692,16 @@ def create_sidebar():
 
     # 4. 目標値ファイル状況（既存関数を呼び出し）
     create_sidebar_target_file_status()
+
+    # 5. 🌐 GitHub自動公開機能（新規追加）
+    try:
+        from github_publisher import create_github_publisher_interface
+        create_github_publisher_interface()
+    except ImportError as e:
+        st.sidebar.markdown("---")
+        st.sidebar.header("🌐 職員向け自動公開")
+        st.sidebar.error("GitHub自動公開機能を使用するには github_publisher.py が必要です")
+        st.sidebar.info("github_publisher.py をプロジェクトに追加してください")
 
     return True
 
