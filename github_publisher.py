@@ -1,3 +1,4 @@
+# github_publisher.py (エンコーディング修正版)
 import os
 import json
 import requests
@@ -9,7 +10,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ===== このファイル内で利用するインポートを追加 =====
+# このファイル内で利用するインポート
 try:
     from chart import (
         create_interactive_alos_chart,
@@ -36,7 +37,9 @@ class GitHubPublisher:
             file_url = f"{self.base_url}/contents/{file_path}"
             headers = {
                 "Authorization": f"token {self.token}",
-                "Accept": "application/vnd.github.v3+json"
+                "Accept": "application/vnd.github.v3+json",
+                # ★★★ 修正箇所: Content-Typeをヘッダーで明示 ★★★
+                "Content-Type": "application/json; charset=utf-8"
             }
             
             response = requests.get(file_url, headers=headers)
@@ -58,7 +61,10 @@ class GitHubPublisher:
             if sha:
                 data["sha"] = sha
             
-            response = requests.put(file_url, json=data, headers=headers)
+            # ★★★ 修正箇所: jsonパラメータではなく、dataパラメータを使い、手動でUTF-8にエンコード ★★★
+            json_payload_bytes = json.dumps(data).encode('utf-8')
+            
+            response = requests.put(file_url, data=json_payload_bytes, headers=headers)
             
             if response.status_code in [200, 201]:
                 return True, f"Successfully uploaded: {file_path}"
@@ -324,9 +330,6 @@ def create_external_dashboard_uploader():
                     st.session_state.external_dashboards = external_dashboards
                     st.rerun()
                 st.markdown("---")
-
-# ★★★ 修正箇所: この行を削除 ★★★
-# from comprehensive_report_generator import ComprehensiveReportGenerator
 
 def generate_individual_analysis_html(df_filtered):
     """現在の個別分析ビューから単体のHTMLレポートを生成する"""
