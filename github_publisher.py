@@ -1176,8 +1176,6 @@ def create_external_dashboard_uploader():
     else:
         st.sidebar.warning("⚠️ 外部ダッシュボードが登録されていません")
 
-# ★★★ ここから新規追加・修正箇所 ★★★
-
 def generate_individual_analysis_html(df_filtered):
     """
     現在の個別分析ビューから単体のHTMLレポートを生成する
@@ -1192,12 +1190,12 @@ def generate_individual_analysis_html(df_filtered):
         # 現在のフィルター条件を取得
         filter_summary = get_unified_filter_summary()
         
-        # ★★★ 追加: 目標値データの取得 ★★★
-        target_data = st.session_state.get('target_data')
+        # ★★★ 追加: 目標値の取得処理 ★★★
         target_value = None
+        target_data = st.session_state.get('target_data')
         
         if target_data is not None and not target_data.empty:
-            # 目標値辞書の作成（individual_analysis_tab.pyと同じロジック）
+            # 目標値辞書の作成
             target_dict = {}
             period_col_name = '区分' if '区分' in target_data.columns else '期間区分'
             indicator_col_name = '指標タイプ'
@@ -1210,21 +1208,26 @@ def generate_individual_analysis_html(df_filtered):
                     key = (dept_code, indicator, period)
                     target_dict[key] = row['目標値']
             
-            # フィルター対象の特定
+            # 現在のフィルター設定から対象を特定
             filter_code_for_target = "全体"
-            filter_config = get_unified_filter_config() if get_unified_filter_config else {}
             
-            if filter_config:
-                selected_departments = (filter_config.get('selected_departments', []) or filter_config.get('selected_depts', []))
-                selected_wards = (filter_config.get('selected_wards', []) or filter_config.get('selected_ward', []))
+            # unified_filtersモジュールからフィルター設定を取得
+            if 'unified_filters' in sys.modules:
+                from unified_filters import get_unified_filter_config
+                filter_config = get_unified_filter_config()
                 
-                if selected_departments and len(selected_departments) == 1:
-                    filter_code_for_target = str(selected_departments[0]).strip()
-                elif selected_wards and len(selected_wards) == 1:
-                    filter_code_for_target = str(selected_wards[0]).strip()
+                if filter_config:
+                    selected_departments = filter_config.get('selected_departments', [])
+                    selected_wards = filter_config.get('selected_wards', [])
+                    
+                    if selected_departments and len(selected_departments) == 1:
+                        filter_code_for_target = str(selected_departments[0]).strip()
+                    elif selected_wards and len(selected_wards) == 1:
+                        filter_code_for_target = str(selected_wards[0]).strip()
             
-            # 目標値の取得
-            key = (filter_code_for_target, '日平均在院患者数', '全日')
+            # 目標値の検索
+            METRIC_FOR_CHART = '日平均在院患者数'
+            key = (filter_code_for_target, METRIC_FOR_CHART, '全日')
             if key in target_dict:
                 target_value = float(target_dict[key])
         # ★★★ 追加部分ここまで ★★★
@@ -1232,7 +1235,16 @@ def generate_individual_analysis_html(df_filtered):
         # 3つのグラフを生成
         with st.spinner("個別分析レポートのグラフを生成中..."):
             fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
-            fig_patient = create_interactive_patient_chart(df_filtered, title="入院患者数推移", days=90)
+            
+            # ★★★ 修正: target_valueを明示的に渡す ★★★
+            fig_patient = create_interactive_patient_chart(
+                df_filtered, 
+                title="入院患者数推移", 
+                days=90,
+                show_moving_average=True,
+                target_value=target_value  # 目標値を追加
+            )
+            
             fig_dual_axis = create_interactive_dual_axis_chart(df_filtered, title="患者移動推移", days=90)
 
         # グラフをHTMLコンポーネントに変換
