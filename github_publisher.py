@@ -1955,4 +1955,48 @@ def generate_90day_report_html(df, target_data):
         }});
         
         // 病棟別グラフ
-        const wardData = {json.dumps(dict(sorted([(k, v['在院患者数']) for k, v
+        const wardData = {json.dumps(dict(sorted([(k, v['在院患者数']) for k, v in ward_stats.items()], key=lambda x: x[1], reverse=True)[:10]))};
+        const wardCtx = document.getElementById('wardChart').getContext('2d');
+        new Chart(wardCtx, {{
+            type: 'bar',
+            data: {{
+                labels: Object.keys(wardData),
+                datasets: [{{
+                    label: '平均在院患者数',
+                    data: Object.values(wardData),
+                    backgroundColor: '#764ba2'
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{
+                    legend: {{
+                        display: false
+                    }}
+                }}
+            }}
+        }});
+        
+        // スムーススクロール
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
+            anchor.addEventListener('click', function (e) {{
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {{
+                    target.scrollIntoView({{
+                        behavior: 'smooth',
+                        block: 'start'
+                    }});
+                }}
+            }});
+        }});
+    </script>
+</body>
+</html>"""
+        
+        return html_content
+        
+    except Exception as e:
+        logger.error(f"90日間レポート生成エラー: {e}", exc_info=True)
+        return None
