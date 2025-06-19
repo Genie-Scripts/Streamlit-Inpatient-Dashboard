@@ -695,18 +695,21 @@ def create_sidebar():
 
     # 5. 🌐 GitHub自動公開機能（新規追加）
     try:
-        from github_publisher import create_github_publisher_interface
-        # ★★★ 修正箇所: フィルター適用後のデータを渡す ★★★
-        df_for_publishing = apply_unified_filters(st.session_state.get('df'))
-        create_github_publisher_interface(df_for_publishing)
-    except ImportError as e:
+        if GITHUB_PUBLISHER_AVAILABLE:
+            # ★★★ 修正箇所: フィルター適用後のデータを渡す ★★★
+            create_github_publisher_interface(df_for_publishing)
+        else:
+            st.sidebar.markdown("---")
+            st.sidebar.header("🌐 職員向け自動公開")
+            st.sidebar.info("GitHub自動公開機能は github_publisher.py が必要です")
+    except Exception as e:
         st.sidebar.markdown("---")
         st.sidebar.header("🌐 職員向け自動公開")
-        st.sidebar.error("GitHub自動公開機能を使用するには github_publisher.py が必要です")
-        st.sidebar.info("github_publisher.py をプロジェクトに追加してください")
+        st.sidebar.error("GitHub自動公開機能でエラーが発生しました。")
+        logger.error(f"GitHub Publisher Error: {e}", exc_info=True)
 
     return True
-
+    
 def create_management_dashboard_tab():
     st.header("📊 主要指標")
     
