@@ -1,4 +1,4 @@
-# chart.py (修正・機能追加版)
+# chart.py (再修正版)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -95,7 +95,6 @@ def _create_patient_chart_core(data, title="入院患者数推移", days=90, sho
         buf.seek(0)
 
         end_time = time.time()
-        # デバッグログはlogger.debugに変更（本番では出力されない）
         logger.debug(f"グラフ '{title}' 生成完了, 処理時間: {end_time - start_time:.2f}秒")
         return buf
         
@@ -202,7 +201,7 @@ def _create_dual_axis_chart_core(data, title="入院患者数と患者移動の�
 # ===== インタラクティブグラフ関数 =====
 
 def create_interactive_patient_chart(data, title="入院患者数推移", days=90, show_moving_average=True, target_value=None, chart_type="全日"):
-    """【修正】インタラクティブな患者数推移グラフを作成する (Plotly) - PDF版の表示内容に準拠"""
+    """【修正】インタラクティブな患者数推移グラフを作成する (Plotly) - ゾーン表示を追加"""
     try:
         if not isinstance(data, pd.DataFrame) or data.empty:
             logger.warning(f"create_interactive_patient_chart: '{title}' のデータが空です。")
@@ -241,8 +240,44 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
 
         fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[avg, avg], mode='lines', name=f'平均: {avg:.1f}', line=dict(color='#e74c3c', dash='dash')))
 
+        # ★★★ 修正箇所: 達成ゾーンと注意ゾーンの追加 ★★★
         if target_value is not None and pd.notna(target_value):
+            # 目標線
             fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[target_value, target_value], mode='lines', name=f'目標値: {target_value:.1f}', line=dict(color='#9b59b6', dash='dot')))
+
+            # Y軸の範囲を計算
+            data_min = grouped["入院患者数（在院）"].min()
+            data_max = grouped["入院患者数（在院）"].max()
+            y_min = data_min * 0.9 if data_min > 0 else 0
+            y_max = max(data_max, target_value) * 1.05
+            
+            # 達成ゾーン（目標値以上）- 薄い緑色
+            fig.add_trace(go.Scatter(
+                x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
+                y=[target_value, target_value, y_max, y_max], 
+                fill='toself', 
+                fillcolor='rgba(46, 204, 113, 0.15)',
+                line=dict(color='rgba(46, 204, 113, 0)', width=0), 
+                name='達成ゾーン',
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+            
+            # 注意ゾーン（目標値の97%～目標値）- 薄いオレンジ色
+            caution_threshold = target_value * 0.97
+            fig.add_trace(go.Scatter(
+                x=[grouped["日付"].min(), grouped["日付"].max(), grouped["日付"].max(), grouped["日付"].min()], 
+                y=[caution_threshold, caution_threshold, target_value, target_value], 
+                fill='toself', 
+                fillcolor='rgba(255, 165, 0, 0.15)',
+                line=dict(color='rgba(255, 165, 0, 0)', width=0), 
+                name='注意ゾーン',
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+            
+            fig.update_yaxes(range=[y_min, y_max])
+        # ★★★ 修正箇所ここまで ★★★
 
         fig.update_layout(
             title={'text': title, 'x': 0.5},
@@ -260,12 +295,13 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
         return None
 
 def create_interactive_dual_axis_chart(data, title="患者移動と在院数の推移", days=90):
-    """【修正】インタラクティブな患者移動グラフ (Plotly) - PDF版の表示内容に準拠"""
+    """【修正】インタラクティブな患者移動グラフ (Plotly) - 緊急入院を追加"""
     try:
         if data is None or data.empty:
             return None
-            
-        required_cols = ["日付", "入院患者数（在院）", "新入院患者数", "総退院患者数"]
+        
+        # ★★★ 修正箇所: `required_cols` に '緊急入院患者数' を追加 ★★★
+        required_cols = ["日付", "入院患者数（在院）", "新入院患者数", "総退院患者数", "緊急入院患者数"]
         if any(col not in data.columns for col in required_cols):
             return None
 
@@ -288,8 +324,12 @@ def create_interactive_dual_axis_chart(data, title="患者移動と在院数の�
         # 主軸: 在院患者数
         fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）_7日MA"], name="在院患者数(7日MA)", line=dict(color='#3498db', width=2.5)), secondary_y=False)
 
-        # 副軸: 患者移動
-        colors_map = {"新入院患者数": "#2ecc71", "総退院患者数": "#f39c12"}
+        # ★★★ 修正箇所: `colors_map` に '緊急入院患者数' を追加 ★★★
+        colors_map = {
+            "新入院患者数": "#2ecc71",
+            "総退院患者数": "#f39c12",
+            "緊急入院患者数": "#e74c3c" # 赤色で緊急性を表現
+        }
         for col, color in colors_map.items():
             fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped[f'{col}_7日MA'], name=f"{col}(7日MA)", line=dict(color=color, width=2)), secondary_y=True)
 
@@ -308,7 +348,7 @@ def create_interactive_dual_axis_chart(data, title="患者移動と在院数の�
         logger.error(f"インタラクティブ2軸グラフ '{title}' 作成中にエラー: {e}", exc_info=True)
         return None
 
-# ★★★ 新規追加関数 ★★★
+# ★★★ 新規追加関数 ★★★ (前回から変更なし)
 def create_interactive_alos_chart(chart_data, title="ALOS推移", days_to_show=90, moving_avg_window=30):
     """【新規】インタラクティブなALOS（平均在院日数）グラフを作成する (Plotly) - PDF版のロジックを移植"""
     try:
@@ -350,15 +390,12 @@ def create_interactive_alos_chart(chart_data, title="ALOS推移", days_to_show=9
         daily_df = pd.DataFrame(daily_metrics).sort_values('日付')
         if daily_df.empty: return None
 
-        # Plotlyで二軸グラフを作成
         fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-        # 主軸: 平均在院日数
         fig.add_trace(
             go.Scatter(x=daily_df['日付'], y=daily_df['平均在院日数'], name=f'平均在院日数 ({moving_avg_window}日MA)', line=dict(color='#3498db', width=2)),
             secondary_y=False
         )
-        # 副軸: 平均在院患者数
         fig.add_trace(
             go.Scatter(x=daily_df['日付'], y=daily_df['平均在院患者数'], name='平均在院患者数', line=dict(color='#e74c3c', width=2, dash='dash')),
             secondary_y=True
@@ -393,7 +430,7 @@ def create_forecast_comparison_chart(actual_series, forecast_results, title="年
         if not actual_series.index.is_monotonic_increasing:
              actual_series = actual_series.sort_index()
         
-        actual_display_data = actual_series # デフォルトでは全期間
+        actual_display_data = actual_series
         if display_days_past > 0 and len(actual_series) > display_days_past:
             actual_display_start_date = actual_series.index.max() - pd.Timedelta(days=display_days_past -1)
             actual_display_data = actual_series[actual_series.index >= actual_display_start_date]
@@ -412,10 +449,8 @@ def create_forecast_comparison_chart(actual_series, forecast_results, title="年
             if forecast_series is None or forecast_series.empty:
                 continue
 
-            # 予測開始日と終了日を設定
             forecast_display_data = forecast_series
             if display_days_future > 0 :
-                # 予測開始日を実績の最終日の翌日にするか、予測の最初の日付にするか
                 pred_start_date = forecast_series.index.min()
                 if not actual_series.empty:
                     pred_start_date = max(pred_start_date, actual_series.index.max() + pd.Timedelta(days=1))
