@@ -1,4 +1,4 @@
-# github_publisher.py (機能追加・修正版)
+# github_publisher.py (修正版 - 引数エラー対応)
 
 import os
 import json
@@ -755,17 +755,6 @@ class ContentCustomizer:
         self.presets = {"hospital": {"main_title": "🏥 [病院名] 統合ダッシュボード", "subtitle": "入院・手術分析で医療の質向上を目指して", "footer_text": "🏥 [病院名] 医療情報統合システム", "footer_note": "お問い合わせ：情報システム部門（内線xxxx）"}, "executive": {"main_title": "経営統合ダッシュボード", "subtitle": "Hospital Performance & Surgery Analytics", "footer_text": "Hospital Integrated Intelligence System", "footer_note": "Confidential - Internal Use Only"}, "friendly": {"main_title": "📊 みんなの統合ダッシュボード", "subtitle": "入院も手術も！スマホで簡単チェック", "footer_text": "🌟 みんなで作る より良い病院", "footer_note": "質問があったら情報システム課まで気軽にどうぞ♪"}}
     
     def create_streamlit_interface(self):
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### ⚡ プリセット選択")
-        preset_options = {"custom": "カスタム（手動設定）", "hospital": "🏥 病院標準", "executive": "🏢 経営層向け", "friendly": "👥 職員親近"}
-        selected_preset = st.sidebar.selectbox("テンプレート選択", list(preset_options.keys()), format_func=lambda x: preset_options[x], key="content_preset_selection")
-        preset_values = self.presets.get(selected_preset, {})
-        st.sidebar.markdown("### 📝 トップページ内容編集")
-        main_title = st.sidebar.text_input("メインタイトル", value=preset_values.get('main_title', self.default_content["main_title"]), key="content_main_title")
-        if st.sidebar.button("💾 内容設定を保存", key="save_content_settings", type="primary"):
-            st.sidebar.success("✅ 内容設定を保存しました")
-
-    def create_streamlit_interface(self):
         """Streamlitで内容編集インターフェースを作成（統合版）"""
         
         # プリセット選択
@@ -1250,7 +1239,7 @@ def generate_individual_analysis_html(df_filtered):
         logger.error(f"個別分析HTMLの生成中にエラー: {e}", exc_info=True)
         return None, f"エラー: {str(e)}"
 
-def create_github_publisher_interface():
+def create_github_publisher_interface(df_filtered=None):  # ★★★ 修正: 引数を追加 ★★★
     """Streamlit用のGitHub自動公開インターフェース（統合版）"""
     
     # デバッグ情報表示（開発用）
@@ -1966,48 +1955,4 @@ def generate_90day_report_html(df, target_data):
         }});
         
         // 病棟別グラフ
-        const wardData = {json.dumps(dict(sorted([(k, v['在院患者数']) for k, v in ward_stats.items()], key=lambda x: x[1], reverse=True)[:10]))};
-        const wardCtx = document.getElementById('wardChart').getContext('2d');
-        new Chart(wardCtx, {{
-            type: 'bar',
-            data: {{
-                labels: Object.keys(wardData),
-                datasets: [{{
-                    label: '平均在院患者数',
-                    data: Object.values(wardData),
-                    backgroundColor: '#764ba2'
-                }}]
-            }},
-            options: {{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {{
-                    legend: {{
-                        display: false
-                    }}
-                }}
-            }}
-        }});
-        
-        // スムーススクロール
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
-            anchor.addEventListener('click', function (e) {{
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                if (target) {{
-                    target.scrollIntoView({{
-                        behavior: 'smooth',
-                        block: 'start'
-                    }});
-                }}
-            }});
-        }});
-    </script>
-</body>
-</html>"""
-        
-        return html_content
-        
-    except Exception as e:
-        logger.error(f"90日間レポート生成エラー: {e}", exc_info=True)
-        return None
+        const wardData = {json.dumps(dict(sorted([(k, v['在院患者数']) for k, v
