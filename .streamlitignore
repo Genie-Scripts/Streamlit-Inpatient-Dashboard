@@ -1,1 +1,59 @@
+# .streamlitignore
 
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# データファイル
+*.csv
+*.xlsx
+*.xls
+*.json
+data/
+saved_data/
+backups/
+
+# 一時ファイル・ログ
+*.tmp
+*.log
+*.bak
+*.backup
+
+# GitHubページ用
+docs/
+*.html
+
+# メディアファイル
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+fonts/
+images/
+
+# 開発用ファイル
+.git/
+.gitignore
+.vscode/
+.idea/
+*.code-workspace
+
+# ドキュメント
+README.md
+*.md
+
+# 環境・設定ファイル
+.env
+.venv/
+env/
+venv/
+requirements.txt
+pyproject.toml
+poetry.lock
+
+# テストファイル
+.pytest_cache/
+test/
+tests/
