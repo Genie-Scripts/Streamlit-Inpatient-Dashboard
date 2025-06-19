@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 import logging
-# ★★★ 修正箇所: 必要なモジュールを追加 ★★★
 from config import EXCLUDED_WARDS
 import numpy as np
 import re
@@ -26,6 +25,10 @@ try:
     CHARTS_AVAILABLE = True
 except ImportError:
     CHARTS_AVAILABLE = False
+    # ★★★ 修正箇所: 必要な関数がインポートできない場合のフォールバックを追加 ★★★
+    create_interactive_alos_chart = None
+    create_interactive_patient_chart = None
+    create_interactive_dual_axis_chart = None
     
 class GitHubPublisher:
     def __init__(self, repo_owner, repo_name, token, branch="main"):
@@ -1574,18 +1577,20 @@ def create_github_publisher_interface(df_filtered=None):  # ★★★ 修正: �
         st.sidebar.info("⚙️ 上記でGitHub設定を行ってください")
 
 
-# ★★★ 修正箇所: KeyErrorを修正し、ロジックを堅牢にした関数 ★★★
+# ★★★ 修正箇所: Plotlyグラフを埋め込むように全面的に書き換え ★★★
 def generate_90day_report_html(df, target_data):
-    """90日間総合レポートのHTML生成（PDFジェネレーター風のレイアウト）"""
+    """90日間総合レポートのHTML生成（Plotlyグラフ埋め込み版）"""
     try:
         # --- データ準備 ---
+        if not all([create_interactive_alos_chart, create_interactive_patient_chart, create_interactive_dual_axis_chart]):
+            return "グラフ生成に必要なモジュール（chart.py）がインポートできませんでした。"
+
         df_copy = df.copy()
         if '病棟コード' in df_copy.columns and EXCLUDED_WARDS:
             df_copy = df_copy[~df_copy['病棟コード'].isin(EXCLUDED_WARDS)]
 
         if not pd.api.types.is_datetime64_any_dtype(df_copy['日付']):
             df_copy['日付'] = pd.to_datetime(df_copy['日付'], errors='coerce')
-        
         df_copy.dropna(subset=['日付'], inplace=True)
         
         end_date = df_copy['日付'].max()
@@ -1595,32 +1600,28 @@ def generate_90day_report_html(df, target_data):
         if df_90days.empty:
             return None
 
-        # --- 全体分析データ計算 ---
-        total_stats = {}
-        if not df_90days.empty:
-            total_stats = {
-                '平均在院患者数': df_90days.groupby('日付')['在院患者数'].sum().mean(),
-                '総入院患者数': df_90days['新入院患者数'].sum(),
-                '総退院患者数': df_90days['総退院患者数'].sum(),
-                '平均在院日数': df_90days['在院患者数'].sum() / df_90days['総退院患者数'].sum() if df_90days['総退院患者数'].sum() > 0 else 0
-            }
+        # --- グラフ生成 (chart.pyの関数を利用) ---
+        graph_days = 90
+        fig_alos = create_interactive_alos_chart(df_90days, title="", days_to_show=graph_days)
+        fig_patient = create_interactive_patient_chart(df_90days, title="", days=graph_days)
+        fig_dual = create_interactive_dual_axis_chart(df_90days, title="", days=graph_days)
+        
+        # グラフをHTMLに変換
+        # 最初のグラフにのみPlotly.jsライブラリを含める (include_plotlyjs='cdn')
+        alos_graph_html = fig_alos.to_html(full_html=False, include_plotlyjs='cdn') if fig_alos else "<div>ALOSグラフの生成に失敗しました。</div>"
+        patient_graph_html = fig_patient.to_html(full_html=False, include_plotlyjs=False) if fig_patient else "<div>患者数推移グラフの生成に失敗しました。</div>"
+        dual_axis_graph_html = fig_dual.to_html(full_html=False, include_plotlyjs=False) if fig_dual else "<div>患者移動グラフの生成に失敗しました。</div>"
 
-        daily_data = df_90days.groupby('日付').agg({
-            '在院患者数': 'sum', '新入院患者数': 'sum', '総退院患者数': 'sum'
-        }).reset_index()
-
-        # --- 部門別実績データ計算 (pdf_generator.pyロジック参考) ---
+        # --- 部門別実績テーブルの計算とHTML生成 ---
         period_definitions = {
             "直近7日": (end_date - timedelta(days=6), end_date),
-            "直近14日": (end_date - timedelta(days=13), end_date),
             "直近30日": (end_date - timedelta(days=29), end_date),
-            "直近60日": (end_date - timedelta(days=59), end_date),
             "90日間": (start_date, end_date),
         }
         
         unique_depts = sorted(df_90days["診療科名"].unique())
         unique_wards = sorted(df_90days["病棟コード"].astype(str).unique())
-
+        
         dept_metrics = {dept: {} for dept in unique_depts}
         ward_metrics = {ward: {} for ward in unique_wards}
 
@@ -1628,35 +1629,23 @@ def generate_90day_report_html(df, target_data):
             period_df = df_90days[(df_90days['日付'] >= start_dt) & (df_90days['日付'] <= end_dt)]
             num_days = period_df['日付'].nunique()
             if num_days == 0: continue
-
-            # 診療科別
+            
             if not period_df.empty:
                 dept_period_stats = period_df.groupby('診療科名')['在院患者数'].sum() / num_days
                 for dept, avg_census in dept_period_stats.items():
-                    # ★★★ 修正点1: キーを文字列に統一し、存在チェックを行う ★★★
-                    dept_key = str(dept)
-                    if dept_key in dept_metrics:
-                        dept_metrics[dept_key][period_label] = avg_census
+                    if str(dept) in dept_metrics:
+                        dept_metrics[str(dept)][period_label] = avg_census
 
-                # 病棟別
                 ward_period_stats = period_df.groupby('病棟コード')['在院患者数'].sum() / num_days
                 for ward, avg_census in ward_period_stats.items():
-                    # ★★★ 修正点2: キーを文字列に統一し、存在チェックを行う ★★★
-                    ward_key = str(ward)
-                    if ward_key in ward_metrics:
-                        ward_metrics[ward_key][period_label] = avg_census
+                    if str(ward) in ward_metrics:
+                        ward_metrics[str(ward)][period_label] = avg_census
 
-        # --- HTML生成 ---
-        
-        # 診療科テーブルHTML生成
+        # 診療科テーブルHTML
         dept_table_html = "<table><thead><tr><th>診療科</th>"
-        for label in period_definitions.keys():
-            dept_table_html += f"<th>{label}</th>"
+        for label in period_definitions.keys(): dept_table_html += f"<th>{label}</th>"
         dept_table_html += "</tr></thead><tbody>"
-        
-        # 上位15診療科でソート
-        sorted_depts = sorted(unique_depts, key=lambda d: dept_metrics.get(str(d), {}).get("90日間", 0), reverse=True)[:15]
-
+        sorted_depts = sorted(unique_depts, key=lambda d: dept_metrics.get(str(d), {}).get("90日間", 0), reverse=True)
         for dept in sorted_depts:
             dept_table_html += f"<tr><td>{dept}</td>"
             for period in period_definitions.keys():
@@ -1665,15 +1654,11 @@ def generate_90day_report_html(df, target_data):
             dept_table_html += "</tr>"
         dept_table_html += "</tbody></table>"
         
-        # 病棟テーブルHTML生成
+        # 病棟テーブルHTML
         ward_table_html = "<table><thead><tr><th>病棟</th>"
-        for label in period_definitions.keys():
-            ward_table_html += f"<th>{label}</th>"
+        for label in period_definitions.keys(): ward_table_html += f"<th>{label}</th>"
         ward_table_html += "</tr></thead><tbody>"
-
-        # 上位15病棟でソート
-        sorted_wards = sorted(unique_wards, key=lambda w: ward_metrics.get(str(w), {}).get("90日間", 0), reverse=True)[:15]
-
+        sorted_wards = sorted(unique_wards, key=lambda w: ward_metrics.get(str(w), {}).get("90日間", 0), reverse=True)
         for ward in sorted_wards:
             ward_table_html += f"<tr><td>{ward}</td>"
             for period in period_definitions.keys():
@@ -1682,11 +1667,7 @@ def generate_90day_report_html(df, target_data):
             ward_table_html += "</tr>"
         ward_table_html += "</tbody></table>"
 
-        # グラフ用データ
-        dept_chart_data = {dept: dept_metrics.get(str(dept), {}).get("90日間", 0) for dept in sorted_depts}
-        ward_chart_data = {ward: ward_metrics.get(str(ward), {}).get("90日間", 0) for ward in sorted_wards}
-
-        # メインのHTMLコンテンツ
+        # --- メインのHTMLコンテンツ ---
         html_content = f"""
 <!DOCTYPE html>
 <html lang="ja">
@@ -1694,7 +1675,6 @@ def generate_90day_report_html(df, target_data):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>入院管理総合レポート - 90日間分析</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }}
@@ -1707,11 +1687,8 @@ def generate_90day_report_html(df, target_data):
         .nav-button:hover {{ background: #5a67d8; transform: translateY(-2px); }}
         .section {{ background: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
         .section h2 {{ color: #667eea; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0; }}
-        .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }}
-        .metric-card {{ background: #f7fafc; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea; }}
-        .metric-card h3 {{ font-size: 0.9em; color: #718096; margin-bottom: 5px; }}
-        .metric-value {{ font-size: 2em; font-weight: bold; color: #2d3748; }}
-        .chart-container {{ position: relative; height: 400px; margin-top: 30px; }}
+        .section h3 {{ color: #4a5568; margin-top: 25px; margin-bottom: 10px; font-size: 1.2em; }}
+        .chart-wrapper {{ border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin-top: 15px; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
         th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
         th {{ background: #f7fafc; font-weight: 600; color: #4a5568; text-align: center; }}
@@ -1720,7 +1697,7 @@ def generate_90day_report_html(df, target_data):
         tr:hover {{ background: #f7fafc; }}
         .print-button {{ display: block; width: fit-content; margin: 20px auto; padding: 15px 30px; background: #48bb78; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; cursor: pointer; }}
         @media print {{ .nav-section, .print-button {{ display: none; }} .section {{ page-break-inside: avoid; }} }}
-        @media (max-width: 768px) {{ .header h1 {{ font-size: 1.8em; }} .metrics-grid {{ grid-template-columns: 1fr; }} }}
+        @media (max-width: 768px) {{ .header h1 {{ font-size: 1.8em; }} }}
     </style>
 </head>
 <body>
@@ -1730,68 +1707,35 @@ def generate_90day_report_html(df, target_data):
             <p class="period">分析期間: {start_date.strftime('%Y年%m月%d日')} - {end_date.strftime('%Y年%m月%d日')} (90日間)</p>
         </div>
         <div class="nav-section">
-            <a href="#overall" class="nav-button">全体分析</a> <a href="#department" class="nav-button">診療科別分析</a> <a href="#ward" class="nav-button">病棟別分析</a>
+            <a href="#overall" class="nav-button">全体グラフ</a> <a href="#department" class="nav-button">診療科別</a> <a href="#ward" class="nav-button">病棟別</a>
         </div>
         
         <div id="overall" class="section">
-            <h2>📊 全体分析</h2>
-            <div class="metrics-grid">
-                <div class="metric-card"><h3>平均在院患者数</h3><div class="metric-value">{total_stats.get('平均在院患者数', 0):.1f}</div></div>
-                <div class="metric-card"><h3>総入院患者数</h3><div class="metric-value">{total_stats.get('総入院患者数', 0):,.0f}</div></div>
-                <div class="metric-card"><h3>総退院患者数</h3><div class="metric-value">{total_stats.get('総退院患者数', 0):,.0f}</div></div>
-                <div class="metric-card"><h3>平均在院日数</h3><div class="metric-value">{total_stats.get('平均在院日数', 0):.1f}日</div></div>
-            </div>
+            <h2>📊 全体グラフ分析</h2>
+            <h3>平均在院日数推移（90日間）</h3>
+            <div class="chart-wrapper">{alos_graph_html}</div>
             <h3>入院患者数推移（90日間）</h3>
-            <div class="chart-container"><canvas id="timeSeriesChart"></canvas></div>
+            <div class="chart-wrapper">{patient_graph_html}</div>
+            <h3>患者移動推移（90日間）</h3>
+            <div class="chart-wrapper">{dual_axis_graph_html}</div>
         </div>
         
         <div id="department" class="section">
             <h2>🏥 診療科別分析</h2>
             <h3>診療科別 平均在院患者数</h3>
             {dept_table_html}
-            <div class="chart-container"><canvas id="deptChart"></canvas></div>
         </div>
         
         <div id="ward" class="section">
             <h2>🛏️ 病棟別分析</h2>
             <h3>病棟別 平均在院患者数</h3>
             {ward_table_html}
-            <div class="chart-container"><canvas id="wardChart"></canvas></div>
         </div>
         
         <button class="print-button" onclick="window.print()">📥 PDFとして保存（印刷）</button>
     </div>
     
     <script>
-        // Data for charts
-        const dailyLabels = {json.dumps(daily_data['日付'].dt.strftime('%Y-%m-%d').tolist())};
-        const dailyInpatients = {json.dumps(daily_data['在院患者数'].tolist())};
-        const dailyAdmissions = {json.dumps(daily_data['新入院患者数'].tolist())};
-        const dailyDischarges = {json.dumps(daily_data['総退院患者数'].tolist())};
-        const deptChartData = {json.dumps(dept_chart_data)};
-        const wardChartData = {json.dumps(ward_chart_data)};
-        
-        // Time Series Chart
-        new Chart(document.getElementById('timeSeriesChart'), {{
-            type: 'line', data: {{ labels: dailyLabels, datasets: [
-                {{ label: '在院患者数', data: dailyInpatients, borderColor: '#667eea', backgroundColor: 'rgba(102, 126, 234, 0.1)', borderWidth: 2, tension: 0.1 }},
-                {{ label: '新入院患者数', data: dailyAdmissions, borderColor: '#48bb78', backgroundColor: 'rgba(72, 187, 120, 0.1)', borderWidth: 2, tension: 0.1 }},
-                {{ label: '退院患者数', data: dailyDischarges, borderColor: '#f6ad55', backgroundColor: 'rgba(246, 173, 85, 0.1)', borderWidth: 2, tension: 0.1 }}
-            ]}}, options: {{ responsive: true, maintainAspectRatio: false, scales: {{ y: {{ beginAtZero: true }} }} }}
-        }});
-        
-        // Department Chart
-        new Chart(document.getElementById('deptChart'), {{
-            type: 'bar', data: {{ labels: Object.keys(deptChartData), datasets: [{{ label: '平均在院患者数 (90日間)', data: Object.values(deptChartData), backgroundColor: '#667eea' }}] }},
-            options: {{ responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: {{ legend: {{ display: false }} }} }}
-        }});
-        
-        // Ward Chart
-        new Chart(document.getElementById('wardChart'), {{
-            type: 'bar', data: {{ labels: Object.keys(wardChartData), datasets: [{{ label: '平均在院患者数 (90日間)', data: Object.values(wardChartData), backgroundColor: '#764ba2' }}] }},
-            options: {{ responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: {{ legend: {{ display: false }} }} }}
-        }});
-        
         // Smooth scroll
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
             anchor.addEventListener('click', function (e) {{ e.preventDefault(); document.querySelector(this.getAttribute('href')).scrollIntoView({{ behavior: 'smooth' }}); }});
