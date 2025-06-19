@@ -696,7 +696,9 @@ def create_sidebar():
     # 5. 🌐 GitHub自動公開機能（新規追加）
     try:
         from github_publisher import create_github_publisher_interface
-        create_github_publisher_interface()
+        # ★★★ 修正箇所: フィルター適用後のデータを渡す ★★★
+        df_for_publishing = apply_unified_filters(st.session_state.get('df'))
+        create_github_publisher_interface(df_for_publishing)
     except ImportError as e:
         st.sidebar.markdown("---")
         st.sidebar.header("🌐 職員向け自動公開")
