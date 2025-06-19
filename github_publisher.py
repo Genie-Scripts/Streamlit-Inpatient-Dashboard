@@ -1835,7 +1835,7 @@ def generate_90day_report_html(df, target_data):
                         <td>{avg_los:.1f}日</td>
                     </tr>"""
         
-        html_content += """
+        html_content += ｆ"""
                 </tbody>
             </table>
             
