@@ -22,7 +22,8 @@ try:
         create_interactive_patient_chart,
         create_interactive_dual_axis_chart
     )
-    from unified_filters import get_unified_filter_summary
+    # ★★★ get_unified_filter_summary に加えて get_unified_filter_config もインポート ★★★
+    from unified_filters import get_unified_filter_summary, get_unified_filter_config
     CHARTS_AVAILABLE = True
 except ImportError:
     CHARTS_AVAILABLE = False
@@ -30,7 +31,9 @@ except ImportError:
     create_interactive_alos_chart = None
     create_interactive_patient_chart = None
     create_interactive_dual_axis_chart = None
-    
+    get_unified_filter_summary = None
+    get_unified_filter_config = None # ★★★ フォールバックを追加 ★★★
+
 class GitHubPublisher:
     def __init__(self, repo_owner, repo_name, token, branch="main"):
         self.repo_owner = repo_owner
@@ -1179,7 +1182,7 @@ def create_external_dashboard_uploader():
 
 def generate_individual_analysis_html(df_filtered):
     """
-    現在の個別分析ビューから単体のHTMLレポートを生成する
+    現在の個別分析ビューから単体のHTMLレポートを生成する (★★ 修正版 ★★)
     """
     if df_filtered is None or df_filtered.empty:
         return None, "分析対象のデータがありません。"
@@ -1191,7 +1194,7 @@ def generate_individual_analysis_html(df_filtered):
         # 現在のフィルター条件を取得
         filter_summary = get_unified_filter_summary()
         
-        # ★★★ 追加: 目標値の取得処理（individual_analysis_tab.pyと同じロジック） ★★★
+        # ★★★ ここから追加: 目標値の取得処理 (individual_analysis_tab.py と同じロジック) ★★★
         target_value = None
         target_data = st.session_state.get('target_data')
         METRIC_FOR_CHART = '日平均在院患者数'
@@ -1212,6 +1215,7 @@ def generate_individual_analysis_html(df_filtered):
             
             # 現在のフィルター設定から対象を特定
             filter_code_for_target = "全体"
+            # get_unified_filter_config がインポートされていることを確認
             filter_config = get_unified_filter_config() if get_unified_filter_config else {}
             
             if filter_config:
@@ -1232,13 +1236,15 @@ def generate_individual_analysis_html(df_filtered):
         # 3つのグラフを生成
         with st.spinner("個別分析レポートのグラフを生成中..."):
             fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
-            # ★★★ 修正: target_valueを追加 ★★★
+            
+            # ★★★ 修正: create_interactive_patient_chart に target_value を渡す ★★★
             fig_patient = create_interactive_patient_chart(
                 df_filtered, 
                 title="入院患者数推移", 
                 days=90,
                 target_value=target_value  # 目標値を渡す
             )
+            
             fig_dual_axis = create_interactive_dual_axis_chart(df_filtered, title="患者移動推移", days=90)
 
         # グラフをHTMLコンポーネントに変換
@@ -1247,8 +1253,8 @@ def generate_individual_analysis_html(df_filtered):
         div_dual_axis = fig_dual_axis.to_html(full_html=False, include_plotlyjs=False) if fig_dual_axis else "<div>患者移動グラフの生成に失敗しました。</div>"
 
 
-        # HTMLテンプレート
-        html_template = f"""
+        # HTMLテンプレート (変更なし)
+        html_template = f\"\"\"
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -1283,7 +1289,7 @@ def generate_individual_analysis_html(df_filtered):
     </div>
 </body>
 </html>
-"""
+\"\"\"
         return html_template, "成功"
 
     except Exception as e:
