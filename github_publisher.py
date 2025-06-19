@@ -1574,7 +1574,7 @@ def create_github_publisher_interface(df_filtered=None):  # ★★★ 修正: �
         st.sidebar.info("⚙️ 上記でGitHub設定を行ってください")
 
 
-# ★★★ 修正箇所: PDFジェネレーター風のHTMLレポートを生成する関数に全面的に書き換え ★★★
+# ★★★ 修正箇所: KeyErrorを修正し、ロジックを堅牢にした関数 ★★★
 def generate_90day_report_html(df, target_data):
     """90日間総合レポートのHTML生成（PDFジェネレーター風のレイアウト）"""
     try:
@@ -1630,14 +1630,21 @@ def generate_90day_report_html(df, target_data):
             if num_days == 0: continue
 
             # 診療科別
-            dept_period_stats = period_df.groupby('診療科名')['在院患者数'].sum() / num_days
-            for dept, avg_census in dept_period_stats.items():
-                dept_metrics[dept][period_label] = avg_census
+            if not period_df.empty:
+                dept_period_stats = period_df.groupby('診療科名')['在院患者数'].sum() / num_days
+                for dept, avg_census in dept_period_stats.items():
+                    # ★★★ 修正点1: キーを文字列に統一し、存在チェックを行う ★★★
+                    dept_key = str(dept)
+                    if dept_key in dept_metrics:
+                        dept_metrics[dept_key][period_label] = avg_census
 
-            # 病棟別
-            ward_period_stats = period_df.groupby('病棟コード')['在院患者数'].sum() / num_days
-            for ward, avg_census in ward_period_stats.items():
-                ward_metrics[ward][period_label] = avg_census
+                # 病棟別
+                ward_period_stats = period_df.groupby('病棟コード')['在院患者数'].sum() / num_days
+                for ward, avg_census in ward_period_stats.items():
+                    # ★★★ 修正点2: キーを文字列に統一し、存在チェックを行う ★★★
+                    ward_key = str(ward)
+                    if ward_key in ward_metrics:
+                        ward_metrics[ward_key][period_label] = avg_census
 
         # --- HTML生成 ---
         
@@ -1648,12 +1655,12 @@ def generate_90day_report_html(df, target_data):
         dept_table_html += "</tr></thead><tbody>"
         
         # 上位15診療科でソート
-        sorted_depts = sorted(unique_depts, key=lambda d: dept_metrics.get(d, {}).get("90日間", 0), reverse=True)[:15]
+        sorted_depts = sorted(unique_depts, key=lambda d: dept_metrics.get(str(d), {}).get("90日間", 0), reverse=True)[:15]
 
         for dept in sorted_depts:
             dept_table_html += f"<tr><td>{dept}</td>"
             for period in period_definitions.keys():
-                val = dept_metrics.get(dept, {}).get(period)
+                val = dept_metrics.get(str(dept), {}).get(period)
                 dept_table_html += f"<td>{val:.1f}</td>" if pd.notna(val) else "<td>-</td>"
             dept_table_html += "</tr>"
         dept_table_html += "</tbody></table>"
@@ -1665,19 +1672,19 @@ def generate_90day_report_html(df, target_data):
         ward_table_html += "</tr></thead><tbody>"
 
         # 上位15病棟でソート
-        sorted_wards = sorted(unique_wards, key=lambda w: ward_metrics.get(w, {}).get("90日間", 0), reverse=True)[:15]
+        sorted_wards = sorted(unique_wards, key=lambda w: ward_metrics.get(str(w), {}).get("90日間", 0), reverse=True)[:15]
 
         for ward in sorted_wards:
             ward_table_html += f"<tr><td>{ward}</td>"
             for period in period_definitions.keys():
-                val = ward_metrics.get(ward, {}).get(period)
+                val = ward_metrics.get(str(ward), {}).get(period)
                 ward_table_html += f"<td>{val:.1f}</td>" if pd.notna(val) else "<td>-</td>"
             ward_table_html += "</tr>"
         ward_table_html += "</tbody></table>"
 
         # グラフ用データ
-        dept_chart_data = {dept: dept_metrics.get(dept, {}).get("90日間", 0) for dept in sorted_depts}
-        ward_chart_data = {ward: ward_metrics.get(ward, {}).get("90日間", 0) for ward in sorted_wards}
+        dept_chart_data = {dept: dept_metrics.get(str(dept), {}).get("90日間", 0) for dept in sorted_depts}
+        ward_chart_data = {ward: ward_metrics.get(str(ward), {}).get("90日間", 0) for ward in sorted_wards}
 
         # メインのHTMLコンテンツ
         html_content = f"""
