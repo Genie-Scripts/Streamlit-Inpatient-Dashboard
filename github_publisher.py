@@ -1192,6 +1192,43 @@ def generate_individual_analysis_html(df_filtered):
         # 現在のフィルター条件を取得
         filter_summary = get_unified_filter_summary()
         
+        # ★★★ 追加: 目標値データの取得 ★★★
+        target_data = st.session_state.get('target_data')
+        target_value = None
+        
+        if target_data is not None and not target_data.empty:
+            # 目標値辞書の作成（individual_analysis_tab.pyと同じロジック）
+            target_dict = {}
+            period_col_name = '区分' if '区分' in target_data.columns else '期間区分'
+            indicator_col_name = '指標タイプ'
+            
+            if all(col in target_data.columns for col in ['部門コード', '目標値', period_col_name, indicator_col_name]):
+                for _, row in target_data.iterrows():
+                    dept_code = str(row['部門コード']).strip()
+                    indicator = str(row[indicator_col_name]).strip()
+                    period = str(row[period_col_name]).strip()
+                    key = (dept_code, indicator, period)
+                    target_dict[key] = row['目標値']
+            
+            # フィルター対象の特定
+            filter_code_for_target = "全体"
+            filter_config = get_unified_filter_config() if get_unified_filter_config else {}
+            
+            if filter_config:
+                selected_departments = (filter_config.get('selected_departments', []) or filter_config.get('selected_depts', []))
+                selected_wards = (filter_config.get('selected_wards', []) or filter_config.get('selected_ward', []))
+                
+                if selected_departments and len(selected_departments) == 1:
+                    filter_code_for_target = str(selected_departments[0]).strip()
+                elif selected_wards and len(selected_wards) == 1:
+                    filter_code_for_target = str(selected_wards[0]).strip()
+            
+            # 目標値の取得
+            key = (filter_code_for_target, '日平均在院患者数', '全日')
+            if key in target_dict:
+                target_value = float(target_dict[key])
+        # ★★★ 追加部分ここまで ★★★
+        
         # 3つのグラフを生成
         with st.spinner("個別分析レポートのグラフを生成中..."):
             fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
