@@ -1,4 +1,3 @@
-# github_publisher.py (修正版)
 import os
 import json
 import requests
@@ -10,7 +9,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# このファイル内で利用するインポート
+# ===== このファイル内で利用するインポートを追加 =====
 try:
     from chart import (
         create_interactive_alos_chart,
@@ -266,41 +265,24 @@ def generate_ward_dashboard_html(df, target_data, period="直近4週間"):
         logger.error(f"病棟別ダッシュボード生成エラー: {e}", exc_info=True)
         return None, f"エラー: {str(e)}"
 
-# ★★★ 修正箇所: この関数の中身を完全に復元 ★★★
 def create_external_dashboard_uploader():
     """外部ダッシュボード（手術分析など）アップロード機能"""
-    
     st.sidebar.markdown("---")
     st.sidebar.header("🔗 外部ダッシュボード追加")
-    
     with st.sidebar.expander("📤 HTMLファイルアップロード", expanded=False):
         st.markdown("**手術分析アプリなど、他システムで生成されたダッシュボードを追加**")
-        
-        upload_method = st.radio(
-            "アップロード方式",
-            ["HTMLファイル直接アップロード", "HTMLコード貼り付け"],
-            key="external_upload_method"
-        )
-        
+        upload_method = st.radio("アップロード方式", ["HTMLファイル直接アップロード", "HTMLコード貼り付け"], key="external_upload_method")
         if upload_method == "HTMLファイル直接アップロード":
-            uploaded_file = st.file_uploader(
-                "HTMLファイルを選択", type=['html'],
-                help="手術分析アプリなどで生成されたHTMLファイル", key="external_html_file"
-            )
+            uploaded_file = st.file_uploader("HTMLファイルを選択", type=['html'], help="手術分析アプリなどで生成されたHTMLファイル", key="external_html_file")
             if uploaded_file:
                 try:
                     html_content = uploaded_file.read().decode('utf-8')
                     st.success(f"✅ ファイル読み込み完了: {uploaded_file.name}")
                     st.session_state.external_html_content = html_content
                     st.session_state.external_suggested_filename = uploaded_file.name
-                except Exception as e:
-                    st.error(f"❌ ファイル読み込みエラー: {str(e)}")
-        
+                except Exception as e: st.error(f"❌ ファイル読み込みエラー: {str(e)}")
         else:
-            html_content = st.text_area(
-                "HTMLコードを貼り付け", height=200,
-                help="手術分析アプリなどで生成されたHTMLコード全体", key="external_html_code"
-            )
+            html_content = st.text_area("HTMLコードを貼り付け", height=200, help="手術分析アプリなどで生成されたHTMLコード全体", key="external_html_code")
             if html_content:
                 st.session_state.external_html_content = html_content
                 st.session_state.external_suggested_filename = "custom_dashboard.html"
@@ -315,30 +297,22 @@ def create_external_dashboard_uploader():
                 if st.session_state.get('github_publisher'):
                     publisher = st.session_state.github_publisher
                     safe_filename = filename.lower().replace(' ', '_').replace('　', '_')
-                    if not safe_filename.endswith('.html'):
-                        safe_filename += '.html'
-                    
+                    if not safe_filename.endswith('.html'): safe_filename += '.html'
                     success, message = publisher.upload_external_html(st.session_state.external_html_content, filename, dashboard_title)
-                    
                     if success:
                         external_dashboards = st.session_state.get('external_dashboards', [])
                         updated = False
                         for i, dash in enumerate(external_dashboards):
                             if dash['file'] == safe_filename or dash['title'] == dashboard_title:
                                 external_dashboards[i] = {"title": dashboard_title, "description": dashboard_description, "file": safe_filename, "type": "external", "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')}
-                                updated = True
-                                break
-                        if not updated:
-                            external_dashboards.append({"title": dashboard_title, "description": dashboard_description, "file": safe_filename, "type": "external", "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')})
-                        
+                                updated = True; break
+                        if not updated: external_dashboards.append({"title": dashboard_title, "description": dashboard_description, "file": safe_filename, "type": "external", "update_time": datetime.now().strftime('%Y/%m/%d %H:%M')})
                         st.session_state.external_dashboards = external_dashboards
                         st.success(f"✅ 外部ダッシュボード追加成功: {dashboard_title}")
                         st.session_state.external_html_content = ""
                         st.rerun()
-                    else:
-                        st.error(f"❌ アップロード失敗: {message}")
-                else:
-                    st.error("❌ GitHub設定が必要です")
+                    else: st.error(f"❌ アップロード失敗: {message}")
+                else: st.error("❌ GitHub設定が必要です")
     
     external_dashboards = st.session_state.get('external_dashboards', [])
     if external_dashboards:
@@ -350,6 +324,9 @@ def create_external_dashboard_uploader():
                     st.session_state.external_dashboards = external_dashboards
                     st.rerun()
                 st.markdown("---")
+
+# ★★★ 修正箇所: この行を削除 ★★★
+# from comprehensive_report_generator import ComprehensiveReportGenerator
 
 def generate_individual_analysis_html(df_filtered):
     """現在の個別分析ビューから単体のHTMLレポートを生成する"""
