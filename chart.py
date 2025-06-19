@@ -232,13 +232,24 @@ def create_interactive_patient_chart(data, title="入院患者数推移", days=9
 
         fig = go.Figure()
         
-        # グラフ要素
-        fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）"], mode='lines', name='入院患者数', line=dict(color='#3498db')))
+        # グラフ要素（マーカー付きに変更）
+        fig.add_trace(go.Scatter(
+            x=grouped["日付"], 
+            y=grouped["入院患者数（在院）"], 
+            mode='lines+markers',  # ★修正: 'lines' → 'lines+markers'
+            name='入院患者数', 
+            line=dict(color='#3498db', width=2),
+            marker=dict(size=6, color='#3498db')  # ★追加: マーカー設定
+        ))
         
         if show_moving_average and '7日移動平均' in grouped.columns:
-            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped['7日移動平均'], mode='lines', name='7日移動平均', line=dict(color='#2ecc71')))
-
-        fig.add_trace(go.Scatter(x=[grouped["日付"].min(), grouped["日付"].max()], y=[avg, avg], mode='lines', name=f'平均: {avg:.1f}', line=dict(color='#e74c3c', dash='dash')))
+            fig.add_trace(go.Scatter(
+                x=grouped["日付"], 
+                y=grouped['7日移動平均'], 
+                mode='lines',  # 移動平均はラインのみ
+                name='7日移動平均', 
+                line=dict(color='#2ecc71', width=2)
+            ))
 
         # ★★★ 修正箇所: 達成ゾーンと注意ゾーンの追加 ★★★
         if target_value is not None and pd.notna(target_value):
@@ -321,17 +332,32 @@ def create_interactive_dual_axis_chart(data, title="患者移動と在院数の�
 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         
-        # 主軸: 在院患者数
-        fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped["入院患者数（在院）_7日MA"], name="在院患者数(7日MA)", line=dict(color='#3498db', width=2.5)), secondary_y=False)
+        # 主軸: 在院患者数（マーカー付き）
+        fig.add_trace(go.Scatter(
+            x=grouped["日付"], 
+            y=grouped["入院患者数（在院）_7日MA"], 
+            name="在院患者数(7日MA)", 
+            mode='lines+markers',  # ★修正: マーカー付きに
+            line=dict(color='#3498db', width=2.5),
+            marker=dict(size=6, color='#3498db')  # ★追加: マーカー設定
+        ), secondary_y=False)
 
-        # ★★★ 修正箇所: `colors_map` に '緊急入院患者数' を追加 ★★★
+        # 副軸の線（新入院、退院など）は移動平均なのでマーカーなし
         colors_map = {
             "新入院患者数": "#2ecc71",
             "総退院患者数": "#f39c12",
-            "緊急入院患者数": "#e74c3c" # 赤色で緊急性を表現
+            "緊急入院患者数": "#e74c3c"
         }
         for col, color in colors_map.items():
-            fig.add_trace(go.Scatter(x=grouped["日付"], y=grouped[f'{col}_7日MA'], name=f"{col}(7日MA)", line=dict(color=color, width=2)), secondary_y=True)
+            ma_col_name = f"{col}_7日MA"
+            if ma_col_name in grouped.columns:
+                fig.add_trace(go.Scatter(
+                    x=grouped["日付"], 
+                    y=grouped[ma_col_name], 
+                    name=f"{col}(7日MA)", 
+                    mode='lines',  # ラインのみ
+                    line=dict(color=color, width=2)
+                ), secondary_y=True)
 
         fig.update_layout(
             title={'text': title, 'x': 0.5},
@@ -392,15 +418,31 @@ def create_interactive_alos_chart(chart_data, title="ALOS推移", days_to_show=9
 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
 
+        # 平均在院日数（マーカー付き）
         fig.add_trace(
-            go.Scatter(x=daily_df['日付'], y=daily_df['平均在院日数'], name=f'平均在院日数 ({moving_avg_window}日MA)', line=dict(color='#3498db', width=2)),
+            go.Scatter(
+                x=daily_df['日付'], 
+                y=daily_df['平均在院日数'], 
+                name=f'平均在院日数 ({moving_avg_window}日MA)', 
+                mode='lines+markers',  # ★修正: マーカー付きに
+                line=dict(color='#3498db', width=2),
+                marker=dict(size=6, color='#3498db')  # ★追加: マーカー設定
+            ),
             secondary_y=False
         )
+        
+        # 平均在院患者数（破線、マーカーなし）
         fig.add_trace(
-            go.Scatter(x=daily_df['日付'], y=daily_df['平均在院患者数'], name='平均在院患者数', line=dict(color='#e74c3c', width=2, dash='dash')),
+            go.Scatter(
+                x=daily_df['日付'], 
+                y=daily_df['平均在院患者数'], 
+                name='平均在院患者数', 
+                mode='lines',  # ラインのみ
+                line=dict(color='#e74c3c', width=2, dash='dash')
+            ),
             secondary_y=True
         )
-
+        
         fig.update_layout(
             title={'text': title, 'x': 0.5},
             xaxis_title='日付',
