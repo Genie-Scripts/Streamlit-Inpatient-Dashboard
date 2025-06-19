@@ -1191,9 +1191,10 @@ def generate_individual_analysis_html(df_filtered):
         # 現在のフィルター条件を取得
         filter_summary = get_unified_filter_summary()
         
-        # ★★★ 追加: 目標値の取得処理 ★★★
+        # ★★★ 追加: 目標値の取得処理（individual_analysis_tab.pyと同じロジック） ★★★
         target_value = None
         target_data = st.session_state.get('target_data')
+        METRIC_FOR_CHART = '日平均在院患者数'
         
         if target_data is not None and not target_data.empty:
             # 目標値辞書の作成
@@ -1211,23 +1212,18 @@ def generate_individual_analysis_html(df_filtered):
             
             # 現在のフィルター設定から対象を特定
             filter_code_for_target = "全体"
+            filter_config = get_unified_filter_config() if get_unified_filter_config else {}
             
-            # unified_filtersモジュールからフィルター設定を取得
-            if 'unified_filters' in sys.modules:
-                from unified_filters import get_unified_filter_config
-                filter_config = get_unified_filter_config()
+            if filter_config:
+                selected_departments = (filter_config.get('selected_departments', []) or filter_config.get('selected_depts', []))
+                selected_wards = (filter_config.get('selected_wards', []) or filter_config.get('selected_ward', []))
                 
-                if filter_config:
-                    selected_departments = filter_config.get('selected_departments', [])
-                    selected_wards = filter_config.get('selected_wards', [])
-                    
-                    if selected_departments and len(selected_departments) == 1:
-                        filter_code_for_target = str(selected_departments[0]).strip()
-                    elif selected_wards and len(selected_wards) == 1:
-                        filter_code_for_target = str(selected_wards[0]).strip()
+                if selected_departments and len(selected_departments) == 1:
+                    filter_code_for_target = str(selected_departments[0]).strip()
+                elif selected_wards and len(selected_wards) == 1:
+                    filter_code_for_target = str(selected_wards[0]).strip()
             
             # 目標値の検索
-            METRIC_FOR_CHART = '日平均在院患者数'
             key = (filter_code_for_target, METRIC_FOR_CHART, '全日')
             if key in target_dict:
                 target_value = float(target_dict[key])
@@ -1236,22 +1232,20 @@ def generate_individual_analysis_html(df_filtered):
         # 3つのグラフを生成
         with st.spinner("個別分析レポートのグラフを生成中..."):
             fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
-            
-            # ★★★ 修正: target_valueを明示的に渡す ★★★
+            # ★★★ 修正: target_valueを追加 ★★★
             fig_patient = create_interactive_patient_chart(
                 df_filtered, 
                 title="入院患者数推移", 
                 days=90,
-                show_moving_average=True,
-                target_value=target_value  # 目標値を追加
+                target_value=target_value  # 目標値を渡す
             )
-            
             fig_dual_axis = create_interactive_dual_axis_chart(df_filtered, title="患者移動推移", days=90)
 
         # グラフをHTMLコンポーネントに変換
         div_alos = fig_alos.to_html(full_html=False, include_plotlyjs='cdn') if fig_alos else "<div>平均在院日数グラフの生成に失敗しました。</div>"
         div_patient = fig_patient.to_html(full_html=False, include_plotlyjs=False) if fig_patient else "<div>入院患者数グラフの生成に失敗しました。</div>"
         div_dual_axis = fig_dual_axis.to_html(full_html=False, include_plotlyjs=False) if fig_dual_axis else "<div>患者移動グラフの生成に失敗しました。</div>"
+
 
         # HTMLテンプレート
         html_template = f"""
