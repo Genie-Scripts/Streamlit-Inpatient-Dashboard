@@ -1372,6 +1372,55 @@ def create_github_publisher_interface(df_filtered=None):  # ★★★ 修正: �
         publish_options = st.sidebar.multiselect("公開ダッシュボード", publish_options_all, default=publish_options_all, key="github_publish_options")
         
         if st.sidebar.button("🚀 統合ダッシュボード公開", key="execute_integrated_publish", type="primary"):
+            
+            # ★★★ ここからデバッグコードを追加 ★★★
+            with st.sidebar.expander("🐛 公開処理デバッグ情報", expanded=True):
+                st.info("これは問題解決のための一時的な表示です。")
+                
+                # 1. フィルター済みデータの確認
+                if df_filtered is not None and not df_filtered.empty:
+                    st.success(f"✅ (1) フィルター済みデータ: {len(df_filtered)} 行受け取りました。")
+                else:
+                    st.error("❌ (1) フィルター済みデータが渡されていないか、空です。app.pyの修正が正しく反映されているか確認してください。")
+                    # データがなければここで処理を中断
+                    st.stop() 
+
+                # 2. 目標値データの確認
+                target_data = st.session_state.get('target_data')
+                if target_data is not None and not target_data.empty:
+                    st.success(f"✅ (2) 目標値データ(target_data): {len(target_data)} 行見つかりました。")
+                else:
+                    st.warning("⚠️ (2) 目標値データ(target_data)がセッションにありません。「データ入力」タブで目標値ファイルをアップロードしましたか？")
+
+                # 3. フィルター設定と目標値検索キーの確認
+                try:
+                    # この関数内で利用するためにインポート
+                    from unified_filters import get_unified_filter_config
+                    filter_config = get_unified_filter_config() or {}
+                    
+                    filter_mode = filter_config.get('filter_mode', '全体')
+                    st.info(f"🔍 (3) 現在のフィルターモード: `{filter_mode}`")
+
+                    filter_code_for_target = "全体"
+                    if filter_mode == '特定診療科':
+                        selected_depts = filter_config.get('selected_depts', [])
+                        if len(selected_depts) == 1:
+                            filter_code_for_target = str(selected_depts[0])
+                        elif len(selected_depts) > 1:
+                            filter_code_for_target = "複数診療科"
+                    elif filter_mode == '特定病棟':
+                        selected_wards = filter_config.get('selected_wards', [])
+                        if len(selected_wards) == 1:
+                            filter_code_for_target = str(selected_wards[0])
+                        elif len(selected_wards) > 1:
+                             filter_code_for_target = "複数病棟"
+                    
+                    st.info(f"🎯 (4) 目標値の検索に使われるキー: `{filter_code_for_target}`")
+                    st.caption("ここで「全体」や特定の診療科・病棟名が表示されていれば正常です。")
+
+                except Exception as e:
+                    st.error(f"デバッグ情報取得中にエラー: {e}")
+            # ★★★ デバッグコードここまで ★★★
             content_config = content_customizer.get_current_config()
             results = []
             progress_bar = st.sidebar.progress(0)
