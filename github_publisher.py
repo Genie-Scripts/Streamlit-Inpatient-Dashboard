@@ -1182,7 +1182,7 @@ def create_external_dashboard_uploader():
 
 def generate_individual_analysis_html(df_filtered):
     """
-    現在の個別分析ビューから単体のHTMLレポートを生成する (★★ 修正版 ★★)
+    現在の個別分析ビューから単体のHTMLレポートを生成する (★★ 構文エラー修正版 ★★)
     """
     if df_filtered is None or df_filtered.empty:
         return None, "分析対象のデータがありません。"
@@ -1194,7 +1194,7 @@ def generate_individual_analysis_html(df_filtered):
         # 現在のフィルター条件を取得
         filter_summary = get_unified_filter_summary()
         
-        # ★★★ ここから追加: 目標値の取得処理 (individual_analysis_tab.py と同じロジック) ★★★
+        # 目標値の取得処理 (individual_analysis_tab.py と同じロジック)
         target_value = None
         target_data = st.session_state.get('target_data')
         METRIC_FOR_CHART = '日平均在院患者数'
@@ -1215,7 +1215,6 @@ def generate_individual_analysis_html(df_filtered):
             
             # 現在のフィルター設定から対象を特定
             filter_code_for_target = "全体"
-            # get_unified_filter_config がインポートされていることを確認
             filter_config = get_unified_filter_config() if get_unified_filter_config else {}
             
             if filter_config:
@@ -1231,18 +1230,16 @@ def generate_individual_analysis_html(df_filtered):
             key = (filter_code_for_target, METRIC_FOR_CHART, '全日')
             if key in target_dict:
                 target_value = float(target_dict[key])
-        # ★★★ 追加部分ここまで ★★★
         
         # 3つのグラフを生成
         with st.spinner("個別分析レポートのグラフを生成中..."):
             fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
             
-            # ★★★ 修正: create_interactive_patient_chart に target_value を渡す ★★★
             fig_patient = create_interactive_patient_chart(
                 df_filtered, 
                 title="入院患者数推移", 
                 days=90,
-                target_value=target_value  # 目標値を渡す
+                target_value=target_value
             )
             
             fig_dual_axis = create_interactive_dual_axis_chart(df_filtered, title="患者移動推移", days=90)
@@ -1253,8 +1250,8 @@ def generate_individual_analysis_html(df_filtered):
         div_dual_axis = fig_dual_axis.to_html(full_html=False, include_plotlyjs=False) if fig_dual_axis else "<div>患者移動グラフの生成に失敗しました。</div>"
 
 
-        # HTMLテンプレート (変更なし)
-        html_template = f\"\"\"
+        # ★★★ 修正: f""" の前の不要なバックスラッシュを削除 ★★★
+        html_template = f"""
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -1289,13 +1286,13 @@ def generate_individual_analysis_html(df_filtered):
     </div>
 </body>
 </html>
-\"\"\"
+"""
         return html_template, "成功"
 
     except Exception as e:
         logger.error(f"個別分析HTMLの生成中にエラー: {e}", exc_info=True)
         return None, f"エラー: {str(e)}"
-
+        
 def create_github_publisher_interface(df_filtered=None):  # ★★★ 修正: 引数を追加 ★★★
     """Streamlit用のGitHub自動公開インターフェース（統合版）"""
     
