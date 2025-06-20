@@ -4,7 +4,7 @@ import plotly.io as pio
 import base64
 
 def create_interactive_patient_chart(
-    data, title="入院患者数推移", days=90, 
+    data, title="入院患者数推移", days_to_show=90, 
     target_line=None, target_zone=None
 ):
     if not isinstance(data, pd.DataFrame) or data.empty:
@@ -15,8 +15,8 @@ def create_interactive_patient_chart(
     df = df.dropna(subset=["日付"])
     df["日付"] = pd.to_datetime(df["日付"], errors='coerce')
     df = df.sort_values("日付")
-    if days > 0 and len(df) > days:
-        df = df.tail(days)
+    if days_to_show > 0 and len(df) > days_to_show:
+        df = df.tail(days_to_show)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["日付"], y=df["入院患者数（在院）"],
@@ -50,7 +50,7 @@ def create_interactive_patient_chart(
     return fig
 
 def create_interactive_dual_axis_chart(
-    data, title="入院患者数と患者移動の推移", days=90, 
+    data, title="入院患者数と患者移動の推移", days_to_show=90, 
     left_col="入院患者数（在院）", right_col="新入院患者数"
 ):
     if not isinstance(data, pd.DataFrame) or data.empty:
@@ -61,8 +61,8 @@ def create_interactive_dual_axis_chart(
     df = df.dropna(subset=["日付"])
     df["日付"] = pd.to_datetime(df["日付"], errors='coerce')
     df = df.sort_values("日付")
-    if days > 0 and len(df) > days:
-        df = df.tail(days)
+    if days_to_show > 0 and len(df) > days_to_show:
+        df = df.tail(days_to_show)
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=df["日付"], y=df[right_col], name=right_col,
@@ -82,7 +82,7 @@ def create_interactive_dual_axis_chart(
     return fig
 
 def create_interactive_alos_chart(
-    data, title="平均在院日数推移", days=90, 
+    data, title="平均在院日数推移", days_to_show=90, 
     los_col="平均在院日数", census_col="平均在院患者数"
 ):
     if not isinstance(data, pd.DataFrame) or data.empty:
@@ -93,8 +93,8 @@ def create_interactive_alos_chart(
     df = df.dropna(subset=["日付"])
     df["日付"] = pd.to_datetime(df["日付"], errors='coerce')
     df = df.sort_values("日付")
-    if days > 0 and len(df) > days:
-        df = df.tail(days)
+    if days_to_show > 0 and len(df) > days_to_show:
+        df = df.tail(days_to_show)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["日付"], y=df[los_col], mode="lines+markers", name="平均在院日数",
