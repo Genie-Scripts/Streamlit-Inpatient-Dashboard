@@ -3,10 +3,18 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import base64
 
+def _get_days_value(days, days_to_show, default=90):
+    if days is not None:
+        return days
+    if days_to_show is not None:
+        return days_to_show
+    return default
+
 def create_interactive_patient_chart(
-    data, title="入院患者数推移", days_to_show=90, 
+    data, title="入院患者数推移", days=None, days_to_show=None, 
     target_line=None, target_zone=None
 ):
+    days_val = _get_days_value(days, days_to_show)
     if not isinstance(data, pd.DataFrame) or data.empty:
         return go.Figure()
     if "日付" not in data.columns or "入院患者数（在院）" not in data.columns:
@@ -15,8 +23,8 @@ def create_interactive_patient_chart(
     df = df.dropna(subset=["日付"])
     df["日付"] = pd.to_datetime(df["日付"], errors='coerce')
     df = df.sort_values("日付")
-    if days_to_show > 0 and len(df) > days_to_show:
-        df = df.tail(days_to_show)
+    if days_val > 0 and len(df) > days_val:
+        df = df.tail(days_val)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["日付"], y=df["入院患者数（在院）"],
@@ -50,9 +58,10 @@ def create_interactive_patient_chart(
     return fig
 
 def create_interactive_dual_axis_chart(
-    data, title="入院患者数と患者移動の推移", days_to_show=90, 
+    data, title="入院患者数と患者移動の推移", days=None, days_to_show=None, 
     left_col="入院患者数（在院）", right_col="新入院患者数"
 ):
+    days_val = _get_days_value(days, days_to_show)
     if not isinstance(data, pd.DataFrame) or data.empty:
         return go.Figure()
     if "日付" not in data.columns or left_col not in data.columns or right_col not in data.columns:
@@ -61,8 +70,8 @@ def create_interactive_dual_axis_chart(
     df = df.dropna(subset=["日付"])
     df["日付"] = pd.to_datetime(df["日付"], errors='coerce')
     df = df.sort_values("日付")
-    if days_to_show > 0 and len(df) > days_to_show:
-        df = df.tail(days_to_show)
+    if days_val > 0 and len(df) > days_val:
+        df = df.tail(days_val)
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=df["日付"], y=df[right_col], name=right_col,
@@ -82,9 +91,10 @@ def create_interactive_dual_axis_chart(
     return fig
 
 def create_interactive_alos_chart(
-    data, title="平均在院日数推移", days_to_show=90, 
+    data, title="平均在院日数推移", days=None, days_to_show=None, 
     los_col="平均在院日数", census_col="平均在院患者数"
 ):
+    days_val = _get_days_value(days, days_to_show)
     if not isinstance(data, pd.DataFrame) or data.empty:
         return go.Figure()
     if "日付" not in data.columns or los_col not in data.columns or census_col not in data.columns:
@@ -93,8 +103,8 @@ def create_interactive_alos_chart(
     df = df.dropna(subset=["日付"])
     df["日付"] = pd.to_datetime(df["日付"], errors='coerce')
     df = df.sort_values("日付")
-    if days_to_show > 0 and len(df) > days_to_show:
-        df = df.tail(days_to_show)
+    if days_val > 0 and len(df) > days_val:
+        df = df.tail(days_val)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["日付"], y=df[los_col], mode="lines+markers", name="平均在院日数",
