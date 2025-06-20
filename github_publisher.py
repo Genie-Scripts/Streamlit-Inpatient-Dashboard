@@ -1179,7 +1179,7 @@ def create_external_dashboard_uploader():
 
 def generate_individual_analysis_html(df_filtered):
     """
-    現在の個別分析ビューから単体のHTMLレポートを生成する
+    現在の個別分析ビューから単体のHTMLレポートを生成する（モバイル対応版）
     """
     if df_filtered is None or df_filtered.empty:
         return None, "分析対象のデータがありません。"
@@ -1242,59 +1242,265 @@ def generate_individual_analysis_html(df_filtered):
                 if fallback_key in target_dict:
                     target_value = float(target_dict[fallback_key])
                     logger.info(f"全体の目標値を使用: {target_value}")
-        
-        # 3つのグラフを生成
+
+        # 3つのグラフを生成（モバイル対応の設定を追加）
         with st.spinner("個別分析レポートのグラフを生成中..."):
-            fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
+            # Plotlyグラフの共通設定
+            plotly_config = {
+                'responsive': True,  # レスポンシブ対応
+                'displayModeBar': True,  # ツールバー表示
+                'displaylogo': False,  # Plotlyロゴ非表示
+                'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],  # 不要なボタンを削除
+                'toImageButtonOptions': {
+                    'format': 'png',
+                    'filename': 'chart',
+                    'height': 500,
+                    'width': 700,
+                    'scale': 1
+                }
+            }
             
-            # ★★★ 修正: target_valueを明示的に渡す ★★★
+            fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
             fig_patient = create_interactive_patient_chart(
                 df_filtered, 
                 title="入院患者数推移", 
                 days=90,
                 show_moving_average=True,
-                target_value=target_value  # 目標値を追加
+                target_value=target_value
             )
-            
             fig_dual_axis = create_interactive_dual_axis_chart(df_filtered, title="患者移動推移", days=90)
 
-        # グラフをHTMLコンポーネントに変換
-        div_alos = fig_alos.to_html(full_html=False, include_plotlyjs='cdn') if fig_alos else "<div>平均在院日数グラフの生成に失敗しました。</div>"
-        div_patient = fig_patient.to_html(full_html=False, include_plotlyjs=False) if fig_patient else "<div>入院患者数グラフの生成に失敗しました。</div>"
-        div_dual_axis = fig_dual_axis.to_html(full_html=False, include_plotlyjs=False) if fig_dual_axis else "<div>患者移動グラフの生成に失敗しました。</div>"
+        # グラフをHTMLコンポーネントに変換（config追加）
+        div_alos = fig_alos.to_html(
+            full_html=False, 
+            include_plotlyjs='cdn',
+            config=plotly_config,
+            div_id="alos-chart"
+        ) if fig_alos else "<div>平均在院日数グラフの生成に失敗しました。</div>"
+        
+        div_patient = fig_patient.to_html(
+            full_html=False, 
+            include_plotlyjs=False,
+            config=plotly_config,
+            div_id="patient-chart"
+        ) if fig_patient else "<div>入院患者数グラフの生成に失敗しました。</div>"
+        
+        div_dual_axis = fig_dual_axis.to_html(
+            full_html=False, 
+            include_plotlyjs=False,
+            config=plotly_config,
+            div_id="dual-chart"
+        ) if fig_dual_axis else "<div>患者移動グラフの生成に失敗しました。</div>"
 
-        # HTMLテンプレート
+        # HTMLテンプレート（モバイル対応強化版）
         html_template = f"""
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>個別分析レポート</title>
     <style>
-        body {{ font-family: sans-serif; margin: 2em; background-color: #f9f9f9; }}
-        .container {{ max-width: 1000px; margin: auto; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
-        h1 {{ color: #333; }}
-        .filter-summary {{ background-color: #eef; padding: 10px; border-radius: 5px; margin-bottom: 20px; }}
-        .chart-container {{ margin-bottom: 40px; }}
-        .debug-info {{ background-color: #fef; padding: 10px; border-radius: 5px; margin-bottom: 20px; font-size: 0.9em; }}
+        * {{
+            box-sizing: border-box;
+        }}
+        
+        body {{ 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            margin: 0;
+            padding: 1em;
+            background-color: #f9f9f9;
+        }}
+        
+        .container {{ 
+            max-width: 1000px; 
+            margin: auto; 
+            background-color: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }}
+        
+        h1 {{ 
+            color: #333;
+            font-size: 1.8em;
+            margin-bottom: 0.5em;
+        }}
+        
+        .filter-summary {{ 
+            background-color: #eef; 
+            padding: 10px; 
+            border-radius: 5px; 
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }}
+        
+        .chart-container {{ 
+            margin-bottom: 40px;
+            position: relative;
+            width: 100%;
+            min-height: 300px;
+        }}
+        
+        /* Plotlyチャートのレスポンシブ対応 */
+        .js-plotly-plot {{
+            width: 100% !important;
+            height: auto !important;
+        }}
+        
+        .plotly {{
+            width: 100% !important;
+            height: auto !important;
+        }}
+        
+        /* モバイル縦向き */
+        @media screen and (max-width: 767px) and (orientation: portrait) {{
+            body {{
+                padding: 0.5em;
+            }}
+            
+            .container {{
+                padding: 15px;
+                border-radius: 0;
+            }}
+            
+            h1 {{
+                font-size: 1.5em;
+            }}
+            
+            .chart-container {{
+                min-height: 250px;
+                margin-bottom: 30px;
+            }}
+            
+            /* 横スクロール可能にする */
+            .chart-container > div {{
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }}
+        }}
+        
+        /* モバイル横向き */
+        @media screen and (max-width: 1024px) and (orientation: landscape) {{
+            body {{
+                padding: 0.5em;
+            }}
+            
+            .container {{
+                padding: 15px;
+                max-width: 100%;
+            }}
+            
+            h1 {{
+                font-size: 1.6em;
+                margin-bottom: 0.3em;
+            }}
+            
+            .filter-summary {{
+                margin-bottom: 15px;
+                padding: 8px;
+            }}
+            
+            .chart-container {{
+                min-height: 350px;
+                margin-bottom: 25px;
+            }}
+        }}
+        
+        /* タブレット */
+        @media screen and (min-width: 768px) and (max-width: 1024px) {{
+            .chart-container {{
+                min-height: 400px;
+            }}
+        }}
+        
+        /* 印刷時 */
+        @media print {{
+            body {{
+                background-color: white;
+            }}
+            
+            .container {{
+                box-shadow: none;
+                max-width: 100%;
+            }}
+            
+            .chart-container {{
+                page-break-inside: avoid;
+            }}
+        }}
+        
+        /* 向き変更のヒント（オプション） */
+        .orientation-hint {{
+            display: none;
+            background-color: #fff3cd;
+            color: #856404;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+            text-align: center;
+        }}
+        
+        @media screen and (max-width: 767px) and (orientation: portrait) {{
+            .orientation-hint {{
+                display: block;
+            }}
+        }}
     </style>
+    <script>
+        // ページ読み込み時にPlotlyグラフをリサイズ
+        window.addEventListener('load', function() {{
+            setTimeout(function() {{
+                window.dispatchEvent(new Event('resize'));
+            }}, 100);
+        }});
+        
+        // 画面回転時にグラフをリサイズ
+        window.addEventListener('orientationchange', function() {{
+            setTimeout(function() {{
+                window.dispatchEvent(new Event('resize'));
+            }}, 500);
+        }});
+        
+        // リサイズ時の処理
+        let resizeTimer;
+        window.addEventListener('resize', function() {{
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(function() {{
+                // Plotlyグラフを再描画
+                var plots = document.getElementsByClassName('js-plotly-plot');
+                for (var i = 0; i < plots.length; i++) {{
+                    Plotly.Plots.resize(plots[i]);
+                }}
+            }}, 250);
+        }});
+    </script>
 </head>
 <body>
     <div class="container">
-        <h1>個別分析レポート</h1>
+        <h1>📊 個別分析レポート</h1>
         <p><strong>生成日時:</strong> {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}</p>
+        
+        <div class="orientation-hint">
+            📱 グラフを見やすくするには、デバイスを横向きにしてください
+        </div>
+        
         <div class="filter-summary">
             <strong>適用フィルター:</strong> {filter_summary}
         </div>
-        {'<div class="debug-info"><strong>目標値:</strong> ' + (f'{target_value:.1f}' if target_value else '未設定') + '</div>' if target_value is not None else ''}
-
+        
+        <h2>平均在院日数推移</h2>
         <div class="chart-container">
             {div_alos}
         </div>
+        
+        <h2>入院患者数推移</h2>
         <div class="chart-container">
             {div_patient}
         </div>
+        
+        <h2>患者移動推移</h2>
         <div class="chart-container">
             {div_dual_axis}
         </div>
