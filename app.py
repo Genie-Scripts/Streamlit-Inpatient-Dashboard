@@ -531,7 +531,7 @@ def create_sidebar_target_file_status():
                         else:
                             st.sidebar.write(f"「{keyword}」: 該当なし")
 
-def create_sidebar(df_filtered=None): # ★★★ df_filtered を引数として受け取る ★★★
+def create_sidebar():
     """サイドバーの設定UI（既存のコード + GitHub自動公開機能）"""
 
     # 1. 分析フィルター (データロード後に表示)
@@ -693,11 +693,11 @@ def create_sidebar(df_filtered=None): # ★★★ df_filtered を引数として
     # 4. 目標値ファイル状況（既存関数を呼び出し）
     create_sidebar_target_file_status()
 
-    # 5. 🌐 GitHub自動公開機能
+    # 5. 🌐 GitHub自動公開機能（新規追加）
     try:
         from github_publisher import create_github_publisher_interface
-        # ★★★ 修正箇所: df_filtered を引数として渡す ★★★
-        create_github_publisher_interface(df_filtered)
+        # ★★★ 修正箇所: 引数なしで呼び出す ★★★
+        create_github_publisher_interface()
     except ImportError as e:
         st.sidebar.markdown("---")
         st.sidebar.header("🌐 職員向け自動公開")
@@ -824,7 +824,9 @@ def main():
     # メインヘッダー
     st.markdown(f'<h1 class="main-header">{APP_ICON} {APP_TITLE}</h1>', unsafe_allow_html=True)
     
-    # メニュー項目定義
+    # ----------- ここからタブUI→ドロップダウン型に切替 -----------
+
+    # メニュー項目定義（予測分析の有無も考慮）
     menu_options = [
         "📊 主要指標", "🏥 診療科別パフォーマンス", "🏨 病棟別パフォーマンス",
         "🗓️ 平均在院日数分析", "📅 曜日別入退院分析", "🔍 個別分析"
@@ -833,17 +835,11 @@ def main():
         menu_options.append("🔮 予測分析")
     menu_options.extend(["📤 データ出力", "📥 データ入力"])
 
-    # ★★★ ここから修正 ★★★
-    # 先にフィルター適用後データを作成
-    df_filtered_unified = None
-    if st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
-        df_original_main_for_filter = st.session_state.get('df')
-        df_filtered_unified = filter_data_by_analysis_period(df_original_main_for_filter)
-
-    # サイドバーのメニュー選択と作成
+    # サイドバーのドロップダウンで選択
     selected_menu = st.sidebar.selectbox("画面選択", menu_options, index=0)
-    create_sidebar(df_filtered_unified) # ★★★ df_filtered_unified を引数として渡す ★★★
-    # ★★★ ここまで修正 ★★★
+
+    # サイドバー作成
+    create_sidebar()
 
     # データ入力画面
     if selected_menu == "📥 データ入力":
@@ -857,9 +853,9 @@ def main():
 
     # データが読み込まれている場合
     elif st.session_state.get('data_processed', False) and st.session_state.get('df') is not None:
-        # df_filtered_unified はサイドバー作成時に計算済みなので、そのまま使用
         df_original_main = st.session_state.get('df')
         common_config_main = st.session_state.get('common_config', {})
+        df_filtered_unified = filter_data_by_analysis_period(df_original_main)
         current_filter_config = get_unified_filter_config()
 
         if selected_menu == "📊 主要指標":
