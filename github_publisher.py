@@ -1191,7 +1191,7 @@ def generate_individual_analysis_html(df_filtered):
         # 現在のフィルター条件を取得
         filter_summary = get_unified_filter_summary()
         
-        # ★★★ 追加: 目標値の取得処理 ★★★
+        # ★★★ 修正: 目標値の取得処理を改善 ★★★
         target_value = None
         target_data = st.session_state.get('target_data')
         
@@ -1218,20 +1218,30 @@ def generate_individual_analysis_html(df_filtered):
                 filter_config = get_unified_filter_config()
                 
                 if filter_config:
-                    selected_departments = filter_config.get('selected_departments', [])
-                    selected_wards = filter_config.get('selected_wards', [])
+                    filter_mode = filter_config.get('filter_mode', '全体')
                     
-                    if selected_departments and len(selected_departments) == 1:
-                        filter_code_for_target = str(selected_departments[0]).strip()
-                    elif selected_wards and len(selected_wards) == 1:
-                        filter_code_for_target = str(selected_wards[0]).strip()
+                    if filter_mode == '特定診療科':
+                        selected_departments = filter_config.get('selected_depts', [])
+                        if selected_departments and len(selected_departments) == 1:
+                            filter_code_for_target = str(selected_departments[0]).strip()
+                    elif filter_mode == '特定病棟':
+                        selected_wards = filter_config.get('selected_wards', [])
+                        if selected_wards and len(selected_wards) == 1:
+                            filter_code_for_target = str(selected_wards[0]).strip()
             
             # 目標値の検索
             METRIC_FOR_CHART = '日平均在院患者数'
             key = (filter_code_for_target, METRIC_FOR_CHART, '全日')
             if key in target_dict:
                 target_value = float(target_dict[key])
-        # ★★★ 追加部分ここまで ★★★
+                logger.info(f"目標値取得成功: {filter_code_for_target} = {target_value}")
+            else:
+                logger.warning(f"目標値が見つかりません: {key}")
+                # 全体の目標値をフォールバックとして使用
+                fallback_key = ("全体", METRIC_FOR_CHART, '全日')
+                if fallback_key in target_dict:
+                    target_value = float(target_dict[fallback_key])
+                    logger.info(f"全体の目標値を使用: {target_value}")
         
         # 3つのグラフを生成
         with st.spinner("個別分析レポートのグラフを生成中..."):
@@ -1267,6 +1277,7 @@ def generate_individual_analysis_html(df_filtered):
         h1 {{ color: #333; }}
         .filter-summary {{ background-color: #eef; padding: 10px; border-radius: 5px; margin-bottom: 20px; }}
         .chart-container {{ margin-bottom: 40px; }}
+        .debug-info {{ background-color: #fef; padding: 10px; border-radius: 5px; margin-bottom: 20px; font-size: 0.9em; }}
     </style>
 </head>
 <body>
@@ -1276,6 +1287,7 @@ def generate_individual_analysis_html(df_filtered):
         <div class="filter-summary">
             <strong>適用フィルター:</strong> {filter_summary}
         </div>
+        {'<div class="debug-info"><strong>目標値:</strong> ' + (f'{target_value:.1f}' if target_value else '未設定') + '</div>' if target_value is not None else ''}
 
         <div class="chart-container">
             {div_alos}
@@ -1650,12 +1662,42 @@ def generate_90day_report_html(df, target_data):
         if df_90days.empty:
             return None
 
+        # --- 目標値の取得（個別分析と同じロジック）---
+        target_value = None
+        if target_data is not None and not target_data.empty:
+            target_dict = {}
+            period_col_name = '区分' if '区分' in target_data.columns else '期間区分'
+            indicator_col_name = '指標タイプ'
+            
+            if all(col in target_data.columns for col in ['部門コード', '目標値', period_col_name, indicator_col_name]):
+                for _, row in target_data.iterrows():
+                    dept_code = str(row['部門コード']).strip()
+                    indicator = str(row[indicator_col_name]).strip()
+                    period = str(row[period_col_name]).strip()
+                    key = (dept_code, indicator, period)
+                    target_dict[key] = row['目標値']
+            
+            # 全体の目標値を使用
+            METRIC_FOR_CHART = '日平均在院患者数'
+            key = ("全体", METRIC_FOR_CHART, '全日')
+            if key in target_dict:
+                target_value = float(target_dict[key])
+
         # --- グラフ生成 (chart.pyの関数を利用) ---
         graph_days = 90
         fig_alos = create_interactive_alos_chart(df_90days, title="", days_to_show=graph_days)
-        fig_patient = create_interactive_patient_chart(df_90days, title="", days=graph_days)
-        fig_dual = create_interactive_dual_axis_chart(df_90days, title="", days=graph_days)
         
+        # 目標値を渡す
+        fig_patient = create_interactive_patient_chart(
+            df_90days, 
+            title="", 
+            days=graph_days,
+            show_moving_average=True,
+            target_value=target_value  # 目標値を追加
+        )
+        
+        fig_dual = create_interactive_dual_axis_chart(df_90days, title="", days=graph_days)
+
         # グラフをHTMLに変換
         # 最初のグラフにのみPlotly.jsライブラリを含める (include_plotlyjs='cdn')
         alos_graph_html = fig_alos.to_html(full_html=False, include_plotlyjs='cdn') if fig_alos else "<div>ALOSグラフの生成に失敗しました。</div>"
