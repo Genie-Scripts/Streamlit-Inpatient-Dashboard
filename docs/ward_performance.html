@@ -5,326 +5,131 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>病棟別パフォーマンスダッシュボード - 直近4週間 (05/23～06/19)</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
             background: #f5f7fa;
             font-family: 'Noto Sans JP', Meiryo, sans-serif;
             padding: 20px;
         }
-        
         .container {
-            max-width: 1920px;
+            max-width: 1200px;
             margin: 0 auto;
         }
-        
         h1 {
             text-align: center;
             color: #293a27;
             margin-bottom: 20px;
             font-size: 1.8em;
         }
-        
-        .controls {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
+        .kpi-section {
+            margin-bottom: 40px;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+            padding: 24px 24px 10px 24px;
         }
-        
-        .metric-selector {
-            display: flex;
-            gap: 10px;
-            background: white;
-            padding: 5px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        .kpi-section h2 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.1em;
         }
-        
-        .metric-btn {
-            padding: 10px 20px;
-            border: none;
-            background: #e0e0e0;
-            color: #666;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: all 0.3s ease;
+        .kpi-graph {
+            text-align: center;
+            margin-bottom: 10px;
         }
-        
-        .metric-btn:hover {
-            background: #d0d0d0;
+        .kpi-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
         }
-        
-        .metric-btn.active {
-            background: #4CAF50;
-            color: white;
+        .kpi-table th, .kpi-table td {
+            border: 1px solid #ccc;
+            padding: 6px 10px;
+            text-align: center;
+            font-size: 1em;
         }
-        
-        .period-info {
-            background: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            font-weight: 600;
+        .kpi-table th {
+            background: #e0f2f1;
             color: #333;
         }
-        
-        .grid-container {
-            display: grid;
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        /* レスポンシブグリッド */
-        @media (min-width: 1600px) {
-            .grid-container { grid-template-columns: repeat(5, 1fr); }
-        }
-        
-        @media (min-width: 1200px) and (max-width: 1599px) {
-            .grid-container { grid-template-columns: repeat(4, 1fr); }
-        }
-        
-        @media (min-width: 900px) and (max-width: 1199px) {
-            .grid-container { grid-template-columns: repeat(3, 1fr); }
-        }
-        
-        @media (min-width: 600px) and (max-width: 899px) {
-            .grid-container { grid-template-columns: repeat(2, 1fr); }
-        }
-        
-        @media (max-width: 599px) {
-            .grid-container { grid-template-columns: 1fr; }
-        }
-        
-        .metric-card {
-            background: white;
-            border-radius: 11px;
-            border-left: 6px solid #ccc;
-            padding: 16px;
-            transition: all 0.3s ease;
-            height: 100%;
-        }
-        
-        .metric-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-        
-        .card-title {
-            font-size: 1.13em;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #293a27;
-        }
-        
-        .card-content {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        
-        .metric-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .metric-label {
-            font-size: 0.93em;
-            color: #7b8a7a;
-        }
-        
-        .metric-value {
-            font-size: 1.07em;
-            font-weight: 700;
-            color: #2e3532;
-        }
-        
-        .achievement-row {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #e0e0e0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .achievement-label {
-            font-weight: 700;
-            font-size: 1.03em;
-        }
-        
-        .achievement-value {
-            font-weight: 700;
-            font-size: 1.20em;
-        }
-        
-        .bed-info {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #e0e0e0;
-        }
-        
-        .bed-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 3px;
-        }
-        
-        .bed-label {
-            font-size: 0.85em;
-            color: #999;
-        }
-        
-        .bed-value {
-            font-size: 0.9em;
-            color: #666;
-            font-weight: 600;
-        }
-        
-        /* 達成率による色分け */
-        .achievement-high { color: #7fb069; }
-        .achievement-medium { color: #f5d76e; }
-        .achievement-low { color: #e08283; }
-        
-        .border-high { border-left-color: #7fb069; }
-        .border-medium { border-left-color: #f5d76e; }
-        .border-low { border-left-color: #e08283; }
-        
-        @media print {
-            body { padding: 10px; }
-            .controls { display: none; }
-            .grid-container { 
-                grid-template-columns: repeat(5, 1fr);
-                gap: 15px;
+        @media (max-width: 768px) {
+            .container {
+                max-width: 98vw;
+                padding: 0;
+            }
+            .kpi-section {
+                padding: 14px 3vw 4px 3vw;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>病棟別パフォーマンスダッシュボード</h1>
-        
-        <div class="controls">
-            <div class="metric-selector">
-                <button class="metric-btn active" onclick="showMetric('daily_census')">日平均在院患者数</button>
-                <button class="metric-btn" onclick="showMetric('weekly_admissions')">週合計新入院患者数</button>
-                <button class="metric-btn" onclick="showMetric('avg_los')">平均在院日数</button>
-            </div>
-            <div class="period-info">期間: 直近4週間 (05/23～06/19)</div>
-        </div>
-        
-        <div id="grid-container" class="grid-container"></div>
-    </div>
-    
-    <script>
-        // 全ての指標データ
-        const metricsData = {"daily_census": [{"name": "5階A病棟", "avg": 43.75, "recent": 42.142857142857146, "target": 44.1, "achievement": 99.2063492063492, "bed_count": null, "bed_occupancy_rate": null}, {"name": "4階A病棟", "avg": 5.25, "recent": 5.0, "target": 5.4, "achievement": 97.22222222222221, "bed_count": null, "bed_occupancy_rate": null}, {"name": "2階B病棟", "avg": 44.857142857142854, "recent": 44.0, "target": 46.6, "achievement": 96.25996321275291, "bed_count": null, "bed_occupancy_rate": null}, {"name": "9階B病棟", "avg": 45.642857142857146, "recent": 44.714285714285715, "target": 47.5, "achievement": 96.09022556390978, "bed_count": null, "bed_occupancy_rate": null}, {"name": "7階A病棟", "avg": 41.107142857142854, "recent": 41.0, "target": 43.2, "achievement": 95.15542328042326, "bed_count": null, "bed_occupancy_rate": null}, {"name": "8階A病棟", "avg": 43.0, "recent": 43.857142857142854, "target": 45.6, "achievement": 94.29824561403508, "bed_count": null, "bed_occupancy_rate": null}, {"name": "6階B病棟", "avg": 44.035714285714285, "recent": 44.57142857142857, "target": 47.5, "achievement": 92.70676691729322, "bed_count": null, "bed_occupancy_rate": null}, {"name": "6階A病棟", "avg": 44.035714285714285, "recent": 42.857142857142854, "target": 47.5, "achievement": 92.70676691729322, "bed_count": null, "bed_occupancy_rate": null}, {"name": "3階A病棟", "avg": 40.92857142857143, "recent": 39.42857142857143, "target": 45.6, "achievement": 89.75563909774436, "bed_count": null, "bed_occupancy_rate": null}, {"name": "4階C病棟", "avg": 15.785714285714286, "recent": 15.571428571428571, "target": 18.0, "achievement": 87.6984126984127, "bed_count": null, "bed_occupancy_rate": null}, {"name": "7階B病棟", "avg": 26.678571428571427, "recent": 25.857142857142858, "target": 30.6, "achievement": 87.18487394957982, "bed_count": null, "bed_occupancy_rate": null}, {"name": "5階B病棟", "avg": 31.678571428571427, "recent": 32.142857142857146, "target": 37.8, "achievement": 83.80574452003023, "bed_count": null, "bed_occupancy_rate": null}, {"name": "2階A病棟", "avg": 39.392857142857146, "recent": 39.714285714285715, "target": 47.5, "achievement": 82.93233082706767, "bed_count": null, "bed_occupancy_rate": null}, {"name": "9階A病棟", "avg": 17.607142857142858, "recent": 17.285714285714285, "target": 22.1, "achievement": 79.67032967032966, "bed_count": null, "bed_occupancy_rate": null}, {"name": "8階B病棟", "avg": 26.035714285714285, "recent": 38.285714285714285, "target": 42.8, "achievement": 60.83110814419226, "bed_count": null, "bed_occupancy_rate": null}, {"name": "4階B病棟", "avg": 15.142857142857142, "recent": 4.857142857142857, "target": 37.8, "achievement": 40.06046863189721, "bed_count": null, "bed_occupancy_rate": null}], "weekly_admissions": [{"name": "4階A病棟", "avg": 23.75, "recent": 24.0, "target": 2.0, "achievement": 1187.5}, {"name": "5階A病棟", "avg": 42.5, "recent": 50.0, "target": 37.0, "achievement": 114.86486486486487}, {"name": "2階B病棟", "avg": 20.5, "recent": 21.0, "target": 18.0, "achievement": 113.88888888888889}, {"name": "7階A病棟", "avg": 29.75, "recent": 37.0, "target": 28.0, "achievement": 106.25}, {"name": "3階A病棟", "avg": 36.0, "recent": 35.0, "target": 39.0, "achievement": 92.3076923076923}, {"name": "2階A病棟", "avg": 20.75, "recent": 20.0, "target": 23.0, "achievement": 90.21739130434783}, {"name": "9階B病棟", "avg": 17.5, "recent": 20.0, "target": 20.0, "achievement": 87.5}, {"name": "7階B病棟", "avg": 41.0, "recent": 50.0, "target": 47.0, "achievement": 87.2340425531915}, {"name": "9階A病棟", "avg": 15.0, "recent": 15.0, "target": 19.0, "achievement": 78.94736842105263}, {"name": "5階B病棟", "avg": 33.25, "recent": 32.0, "target": 44.0, "achievement": 75.56818181818183}, {"name": "8階A病棟", "avg": 13.5, "recent": 13.0, "target": 18.0, "achievement": 75.0}, {"name": "6階B病棟", "avg": 19.5, "recent": 16.0, "target": 27.0, "achievement": 72.22222222222221}, {"name": "6階A病棟", "avg": 21.5, "recent": 23.0, "target": 30.0, "achievement": 71.66666666666667}, {"name": "8階B病棟", "avg": 7.0, "recent": 11.0, "target": 20.0, "achievement": 35.0}, {"name": "4階C病棟", "avg": 13.25, "recent": 18.0, "target": 41.0, "achievement": 32.31707317073171}, {"name": "4階B病棟", "avg": 4.25, "recent": 1.0, "target": 23.0, "achievement": 18.478260869565215}], "avg_los": [{"name": "3階A病棟", "avg": 7.2993630573248405, "recent": 7.2631578947368425, "target": null, "achievement": 0}, {"name": "2階B病棟", "avg": 13.802197802197803, "recent": 11.846153846153847, "target": null, "achievement": 0}, {"name": "8階B病棟", "avg": 17.357142857142858, "recent": 16.75, "target": null, "achievement": 0}, {"name": "4階A病棟", "avg": 13.363636363636363, "recent": 11.666666666666666, "target": null, "achievement": 0}, {"name": "7階B病棟", "avg": 13.339285714285714, "recent": 10.647058823529411, "target": null, "achievement": 0}, {"name": "9階A病棟", "avg": 8.216666666666667, "recent": 6.05, "target": null, "achievement": 0}, {"name": "2階A病棟", "avg": 10.40566037735849, "recent": 11.12, "target": null, "achievement": 0}, {"name": "5階B病棟", "avg": 6.823076923076923, "recent": 7.03125, "target": null, "achievement": 0}, {"name": "6階B病棟", "avg": 11.416666666666666, "recent": 15.6, "target": null, "achievement": 0}, {"name": "4階B病棟", "avg": 12.848484848484848, "recent": 34.0, "target": null, "achievement": 0}, {"name": "4階C病棟", "avg": 27.625, "recent": 15.571428571428571, "target": null, "achievement": 0}, {"name": "6階A病棟", "avg": 11.742857142857142, "recent": 10.344827586206897, "target": null, "achievement": 0}, {"name": "5階A病棟", "avg": 6.282051282051282, "recent": 5.267857142857143, "target": null, "achievement": 0}, {"name": "8階A病棟", "avg": 15.435897435897436, "recent": 20.466666666666665, "target": null, "achievement": 0}, {"name": "7階A病棟", "avg": 9.134920634920634, "recent": 8.2, "target": null, "achievement": 0}, {"name": "9階B病棟", "avg": 15.397590361445783, "recent": 14.227272727272727, "target": null, "achievement": 0}]};
-        
-        // 指標の設定
-        const metricsConfig = {"daily_census": {"title": "日平均在院患者数", "unit": "人", "fields": {"avg": "daily_avg_census", "recent": "recent_week_daily_census", "target": "daily_census_target", "achievement": "daily_census_achievement"}}, "weekly_admissions": {"title": "週合計新入院患者数", "unit": "件", "fields": {"avg": "weekly_avg_admissions", "recent": "recent_week_admissions", "target": "weekly_admissions_target", "achievement": "weekly_admissions_achievement"}}, "avg_los": {"title": "平均在院日数", "unit": "日", "fields": {"avg": "avg_length_of_stay", "recent": "recent_week_avg_los", "target": "avg_los_target", "achievement": "avg_los_achievement"}}};
-        
-        // 現在表示中の指標
-        let currentMetric = 'daily_census';
-        
-        // 達成率による色クラスを取得
-        function getColorClass(achievement) {
-            if (achievement >= 100) return 'high';
-            if (achievement >= 80) return 'medium';
-            return 'low';
-        }
-        
-        // 数値のフォーマット
-        function formatValue(value, decimals = 1) {
-            if (value === null || value === undefined) return '--';
-            return value.toFixed(decimals);
-        }
-        
-        // カードのHTMLを生成
-        function createCard(item, metric) {
-            const colorClass = getColorClass(item.achievement);
-            const config = metricsConfig[metric];
-            const unit = config.unit;
-            
-            let bedInfoHtml = '';
-            if (metric === 'daily_census' && item.bed_count) {
-                const occupancyStr = item.bed_occupancy_rate !== null ? 
-                    formatValue(item.bed_occupancy_rate) + '%' : '--';
-                bedInfoHtml = `
-                    <div class="bed-info">
-                        <div class="bed-row">
-                            <span class="bed-label">病床数:</span>
-                            <span class="bed-value">${item.bed_count}床</span>
-                        </div>
-                        <div class="bed-row">
-                            <span class="bed-label">稼働率:</span>
-                            <span class="bed-value">${occupancyStr}</span>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            return `
-                <div class="metric-card border-${colorClass}">
-                    <div class="card-title">${item.name}</div>
-                    <div class="card-content">
-                        <div class="metric-row">
-                            <span class="metric-label">期間平均:</span>
-                            <span class="metric-value">${formatValue(item.avg)} ${unit}</span>
-                        </div>
-                        <div class="metric-row">
-                            <span class="metric-label">直近週実績:</span>
-                            <span class="metric-value">${formatValue(item.recent)} ${unit}</span>
-                        </div>
-                        <div class="metric-row">
-                            <span class="metric-label">目標:</span>
-                            <span class="metric-value">${item.target ? formatValue(item.target) : '--'} ${unit}</span>
-                        </div>
-                    </div>
-                    <div class="achievement-row">
-                        <span class="achievement-label achievement-${colorClass}">達成率:</span>
-                        <span class="achievement-value achievement-${colorClass}">${formatValue(item.achievement)}%</span>
-                    </div>
-                    ${bedInfoHtml}
-                </div>
-            `;
-        }
-        
-        // 指標を表示
-        function showMetric(metric) {
-            currentMetric = metric;
-            
-            // ボタンのアクティブ状態を更新
-            document.querySelectorAll('.metric-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-            
-            // グリッドをクリアして再描画
-            const container = document.getElementById('grid-container');
-            container.innerHTML = '';
-            
-            const data = metricsData[metric];
-            data.forEach(item => {
-                container.innerHTML += createCard(item, metric);
-            });
-        }
-        
-        // 初期表示
-        document.addEventListener('DOMContentLoaded', function() {
-            const container = document.getElementById('grid-container');
-            const data = metricsData[currentMetric];
-            data.forEach(item => {
-                container.innerHTML += createCard(item, currentMetric);
-            });
-        });
-    </script>
+<div class="container">
+    <h1>病棟別パフォーマンスダッシュボード <span style="font-size:0.8em;">直近4週間 (05/23～06/19)</span></h1>
+<div class="kpi-section">
+  <h2>3階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>40.92857142857143</td><td>45.6</td><td>89.75563909774436</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>2階B病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>44.857142857142854</td><td>46.6</td><td>96.25996321275291</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>8階B病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>26.035714285714285</td><td>42.8</td><td>60.83110814419226</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>4階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>5.25</td><td>5.4</td><td>97.22222222222221</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>7階B病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>26.678571428571427</td><td>30.6</td><td>87.18487394957982</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>9階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>17.607142857142858</td><td>22.1</td><td>79.67032967032966</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>2階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>39.392857142857146</td><td>47.5</td><td>82.93233082706767</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>5階B病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>31.678571428571427</td><td>37.8</td><td>83.80574452003023</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>6階B病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>44.035714285714285</td><td>47.5</td><td>92.70676691729322</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>4階B病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>15.142857142857142</td><td>37.8</td><td>40.06046863189721</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>4階C病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>15.785714285714286</td><td>18.0</td><td>87.6984126984127</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>6階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>44.035714285714285</td><td>47.5</td><td>92.70676691729322</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>5階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>43.75</td><td>44.1</td><td>99.2063492063492</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>8階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>43.0</td><td>45.6</td><td>94.29824561403508</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>7階A病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>41.107142857142854</td><td>43.2</td><td>95.15542328042326</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>9階B病棟</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>45.642857142857146</td><td>47.5</td><td>96.09022556390978</td></tr></table>
+</div>
+
+</div>
 </body>
 </html>
