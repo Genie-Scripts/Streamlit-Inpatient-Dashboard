@@ -5,326 +5,167 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>診療科別パフォーマンスダッシュボード - 直近4週間 (05/23～06/19)</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
             background: #f5f7fa;
             font-family: 'Noto Sans JP', Meiryo, sans-serif;
             padding: 20px;
         }
-        
         .container {
-            max-width: 1920px;
+            max-width: 1200px;
             margin: 0 auto;
         }
-        
         h1 {
             text-align: center;
             color: #293a27;
             margin-bottom: 20px;
             font-size: 1.8em;
         }
-        
-        .controls {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
+        .kpi-section {
+            margin-bottom: 40px;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+            padding: 24px 24px 10px 24px;
         }
-        
-        .metric-selector {
-            display: flex;
-            gap: 10px;
-            background: white;
-            padding: 5px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        .kpi-section h2 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.1em;
         }
-        
-        .metric-btn {
-            padding: 10px 20px;
-            border: none;
-            background: #e0e0e0;
-            color: #666;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: all 0.3s ease;
+        .kpi-graph {
+            text-align: center;
+            margin-bottom: 10px;
         }
-        
-        .metric-btn:hover {
-            background: #d0d0d0;
+        .kpi-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
         }
-        
-        .metric-btn.active {
-            background: #4CAF50;
-            color: white;
+        .kpi-table th, .kpi-table td {
+            border: 1px solid #ccc;
+            padding: 6px 10px;
+            text-align: center;
+            font-size: 1em;
         }
-        
-        .period-info {
-            background: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            font-weight: 600;
+        .kpi-table th {
+            background: #e0f2f1;
             color: #333;
         }
-        
-        .grid-container {
-            display: grid;
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        /* レスポンシブグリッド */
-        @media (min-width: 1600px) {
-            .grid-container { grid-template-columns: repeat(5, 1fr); }
-        }
-        
-        @media (min-width: 1200px) and (max-width: 1599px) {
-            .grid-container { grid-template-columns: repeat(4, 1fr); }
-        }
-        
-        @media (min-width: 900px) and (max-width: 1199px) {
-            .grid-container { grid-template-columns: repeat(3, 1fr); }
-        }
-        
-        @media (min-width: 600px) and (max-width: 899px) {
-            .grid-container { grid-template-columns: repeat(2, 1fr); }
-        }
-        
-        @media (max-width: 599px) {
-            .grid-container { grid-template-columns: 1fr; }
-        }
-        
-        .metric-card {
-            background: white;
-            border-radius: 11px;
-            border-left: 6px solid #ccc;
-            padding: 16px;
-            transition: all 0.3s ease;
-            height: 100%;
-        }
-        
-        .metric-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-        
-        .card-title {
-            font-size: 1.13em;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #293a27;
-        }
-        
-        .card-content {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        
-        .metric-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .metric-label {
-            font-size: 0.93em;
-            color: #7b8a7a;
-        }
-        
-        .metric-value {
-            font-size: 1.07em;
-            font-weight: 700;
-            color: #2e3532;
-        }
-        
-        .achievement-row {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #e0e0e0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .achievement-label {
-            font-weight: 700;
-            font-size: 1.03em;
-        }
-        
-        .achievement-value {
-            font-weight: 700;
-            font-size: 1.20em;
-        }
-        
-        .bed-info {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #e0e0e0;
-        }
-        
-        .bed-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 3px;
-        }
-        
-        .bed-label {
-            font-size: 0.85em;
-            color: #999;
-        }
-        
-        .bed-value {
-            font-size: 0.9em;
-            color: #666;
-            font-weight: 600;
-        }
-        
-        /* 達成率による色分け */
-        .achievement-high { color: #7fb069; }
-        .achievement-medium { color: #f5d76e; }
-        .achievement-low { color: #e08283; }
-        
-        .border-high { border-left-color: #7fb069; }
-        .border-medium { border-left-color: #f5d76e; }
-        .border-low { border-left-color: #e08283; }
-        
-        @media print {
-            body { padding: 10px; }
-            .controls { display: none; }
-            .grid-container { 
-                grid-template-columns: repeat(5, 1fr);
-                gap: 15px;
+        @media (max-width: 768px) {
+            .container {
+                max-width: 98vw;
+                padding: 0;
+            }
+            .kpi-section {
+                padding: 14px 3vw 4px 3vw;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>診療科別パフォーマンスダッシュボード</h1>
-        
-        <div class="controls">
-            <div class="metric-selector">
-                <button class="metric-btn active" onclick="showMetric('daily_census')">日平均在院患者数</button>
-                <button class="metric-btn" onclick="showMetric('weekly_admissions')">週合計新入院患者数</button>
-                <button class="metric-btn" onclick="showMetric('avg_los')">平均在院日数</button>
-            </div>
-            <div class="period-info">期間: 直近4週間 (05/23～06/19)</div>
-        </div>
-        
-        <div id="grid-container" class="grid-container"></div>
-    </div>
-    
-    <script>
-        // 全ての指標データ
-        const metricsData = {"daily_census": [{"name": "眼科", "avg": 7.214285714285714, "recent": 9.142857142857142, "target": 5.3, "achievement": 136.11859838274933}, {"name": "循環器内科", "avg": 33.642857142857146, "recent": 32.857142857142854, "target": 30.0, "achievement": 112.14285714285714}, {"name": "一般消化器外科", "avg": 42.535714285714285, "recent": 38.142857142857146, "target": 40.0, "achievement": 106.33928571428571}, {"name": "脳神経外科", "avg": 15.714285714285714, "recent": 16.857142857142858, "target": 15.0, "achievement": 104.76190476190477}, {"name": "消化器内科", "avg": 42.107142857142854, "recent": 40.285714285714285, "target": 41.0, "achievement": 102.70034843205573}, {"name": "血液内科", "avg": 25.571428571428573, "recent": 28.714285714285715, "target": 25.0, "achievement": 102.28571428571429}, {"name": "リウマチ膠原病内科", "avg": 12.0, "recent": 9.285714285714286, "target": 12.0, "achievement": 100.0}, {"name": "心臓血管外科", "avg": 6.928571428571429, "recent": 5.285714285714286, "target": 7.0, "achievement": 98.9795918367347}, {"name": "産婦人科", "avg": 30.285714285714285, "recent": 29.571428571428573, "target": 32.0, "achievement": 94.64285714285714}, {"name": "呼吸器内科", "avg": 42.464285714285715, "recent": 44.285714285714285, "target": 45.0, "achievement": 94.36507936507937}, {"name": "整形外科", "avg": 54.0, "recent": 55.42857142857143, "target": 60.0, "achievement": 90.0}, {"name": "脳神経内科", "avg": 17.642857142857142, "recent": 19.142857142857142, "target": 20.0, "achievement": 88.21428571428571}, {"name": "泌尿器科", "avg": 26.142857142857142, "recent": 26.0, "target": 30.0, "achievement": 87.14285714285714}, {"name": "乳腺外科", "avg": 10.892857142857142, "recent": 11.571428571428571, "target": 12.5, "achievement": 87.14285714285714}, {"name": "内科救急", "avg": 6.607142857142857, "recent": 7.142857142857143, "target": 8.0, "achievement": 82.58928571428571}, {"name": "呼吸器外科", "avg": 4.857142857142857, "recent": 3.857142857142857, "target": 6.0, "achievement": 80.95238095238095}, {"name": "形成外科", "avg": 4.035714285714286, "recent": 5.0, "target": 5.0, "achievement": 80.71428571428572}, {"name": "皮膚科", "avg": 3.9642857142857144, "recent": 4.571428571428571, "target": 5.0, "achievement": 79.28571428571429}, {"name": "総合内科（内科除く）", "avg": 84.75, "recent": 80.28571428571429, "target": 110.0, "achievement": 77.04545454545455}, {"name": "小児科", "avg": 13.821428571428571, "recent": 15.857142857142858, "target": 18.0, "achievement": 76.78571428571428}, {"name": "救急科", "avg": 18.714285714285715, "recent": 16.285714285714285, "target": 25.0, "achievement": 74.85714285714286}, {"name": "腎内科", "avg": 10.571428571428571, "recent": 11.142857142857142, "target": 15.0, "achievement": 70.47619047619047}, {"name": "耳鼻咽喉科", "avg": 8.714285714285714, "recent": 9.285714285714286, "target": 15.0, "achievement": 58.09523809523809}, {"name": "歯科口腔外科", "avg": 1.7142857142857142, "recent": 1.1428571428571428, "target": 4.0, "achievement": 42.857142857142854}, {"name": "その他", "avg": 0.03571428571428571, "recent": 0.14285714285714285, "target": null, "achievement": 0}], "weekly_admissions": [{"name": "形成外科", "avg": 5.0, "recent": 7.0, "target": 3.0, "achievement": 166.66666666666669}, {"name": "血液内科", "avg": 11.25, "recent": 11.0, "target": 8.1, "achievement": 138.88888888888889}, {"name": "眼科", "avg": 23.5, "recent": 29.0, "target": 17.5, "achievement": 134.28571428571428}, {"name": "整形外科", "avg": 29.5, "recent": 33.0, "target": 24.2, "achievement": 121.900826446281}, {"name": "呼吸器内科", "avg": 17.75, "recent": 15.0, "target": 15.0, "achievement": 118.33333333333333}, {"name": "一般消化器外科", "avg": 24.5, "recent": 26.0, "target": 21.2, "achievement": 115.56603773584906}, {"name": "小児科", "avg": 24.25, "recent": 24.0, "target": 21.9, "achievement": 110.73059360730595}, {"name": "脳神経外科", "avg": 4.5, "recent": 4.0, "target": 4.2, "achievement": 107.14285714285714}, {"name": "産婦人科", "avg": 32.25, "recent": 37.0, "target": 30.5, "achievement": 105.73770491803278}, {"name": "泌尿器科", "avg": 31.0, "recent": 33.0, "target": 30.5, "achievement": 101.63934426229508}, {"name": "循環器内科", "avg": 25.0, "recent": 27.0, "target": 24.9, "achievement": 100.40160642570282}, {"name": "乳腺外科", "avg": 13.25, "recent": 13.0, "target": 14.3, "achievement": 92.65734265734265}, {"name": "腎内科", "avg": 7.75, "recent": 11.0, "target": 9.0, "achievement": 86.11111111111111}, {"name": "脳神経内科", "avg": 3.0, "recent": 1.0, "target": 3.7, "achievement": 81.08108108108108}, {"name": "呼吸器外科", "avg": 2.25, "recent": 2.0, "target": 2.8, "achievement": 80.35714285714286}, {"name": "耳鼻咽喉科", "avg": 10.25, "recent": 11.0, "target": 12.9, "achievement": 79.45736434108527}, {"name": "リウマチ膠原病内科", "avg": 2.75, "recent": 3.0, "target": 3.5, "achievement": 78.57142857142857}, {"name": "救急科", "avg": 25.25, "recent": 24.0, "target": 32.8, "achievement": 76.98170731707317}, {"name": "皮膚科", "avg": 2.5, "recent": 3.0, "target": 3.5, "achievement": 71.42857142857143}, {"name": "消化器内科", "avg": 19.75, "recent": 20.0, "target": 27.7, "achievement": 71.29963898916968}, {"name": "内科救急", "avg": 24.75, "recent": 33.0, "target": 40.0, "achievement": 61.875}, {"name": "心臓血管外科", "avg": 1.5, "recent": 1.0, "target": 2.8, "achievement": 53.57142857142857}, {"name": "歯科口腔外科", "avg": 2.25, "recent": 2.0, "target": 4.3, "achievement": 52.32558139534884}, {"name": "総合内科（内科除く）", "avg": 14.0, "recent": 14.0, "target": 50.8, "achievement": 27.559055118110237}, {"name": "その他", "avg": 1.25, "recent": 2.0, "target": null, "achievement": 0}], "avg_los": [{"name": "歯科口腔外科", "avg": 5.333333333333333, "recent": 2.6666666666666665, "target": null, "achievement": 0}, {"name": "泌尿器科", "avg": 5.809523809523809, "recent": 6.5, "target": null, "achievement": 0}, {"name": "整形外科", "avg": 12.6, "recent": 12.933333333333334, "target": null, "achievement": 0}, {"name": "眼科", "avg": 2.2444444444444445, "recent": 2.206896551724138, "target": null, "achievement": 0}, {"name": "総合内科（内科除く）", "avg": 21.572727272727274, "recent": 19.379310344827587, "target": null, "achievement": 0}, {"name": "皮膚科", "avg": 9.25, "recent": 6.4, "target": null, "achievement": 0}, {"name": "消化器内科", "avg": 10.43362831858407, "recent": 11.28, "target": null, "achievement": 0}, {"name": "循環器内科", "avg": 9.515151515151516, "recent": 9.583333333333334, "target": null, "achievement": 0}, {"name": "腎内科", "avg": 9.548387096774194, "recent": 7.090909090909091, "target": null, "achievement": 0}, {"name": "救急科", "avg": 14.162162162162161, "recent": 9.5, "target": null, "achievement": 0}, {"name": "その他", "avg": 0, "recent": 0, "target": null, "achievement": 0}, {"name": "脳神経外科", "avg": 25.88235294117647, "recent": 59.0, "target": null, "achievement": 0}, {"name": "呼吸器内科", "avg": 16.06756756756757, "recent": 20.666666666666668, "target": null, "achievement": 0}, {"name": "一般消化器外科", "avg": 11.130841121495328, "recent": 11.608695652173912, "target": null, "achievement": 0}, {"name": "耳鼻咽喉科", "avg": 5.674418604651163, "recent": 4.642857142857143, "target": null, "achievement": 0}, {"name": "脳神経内科", "avg": 23.523809523809526, "recent": 33.5, "target": null, "achievement": 0}, {"name": "内科救急", "avg": 23.125, "recent": 12.5, "target": null, "achievement": 0}, {"name": "乳腺外科", "avg": 5.865384615384615, "recent": 5.0625, "target": null, "achievement": 0}, {"name": "産婦人科", "avg": 6.73015873015873, "recent": 5.3076923076923075, "target": null, "achievement": 0}, {"name": "形成外科", "avg": 5.380952380952381, "recent": 5.0, "target": null, "achievement": 0}, {"name": "血液内科", "avg": 17.047619047619047, "recent": 22.333333333333332, "target": null, "achievement": 0}, {"name": "小児科", "avg": 3.7941176470588234, "recent": 4.111111111111111, "target": null, "achievement": 0}, {"name": "リウマチ膠原病内科", "avg": 19.764705882352942, "recent": 21.666666666666668, "target": null, "achievement": 0}, {"name": "呼吸器外科", "avg": 11.333333333333334, "recent": 13.5, "target": null, "achievement": 0}, {"name": "心臓血管外科", "avg": 24.25, "recent": 37.0, "target": null, "achievement": 0}]};
-        
-        // 指標の設定
-        const metricsConfig = {"daily_census": {"title": "日平均在院患者数", "unit": "人", "fields": {"avg": "daily_avg_census", "recent": "recent_week_daily_census", "target": "daily_census_target", "achievement": "daily_census_achievement"}}, "weekly_admissions": {"title": "週合計新入院患者数", "unit": "件", "fields": {"avg": "weekly_avg_admissions", "recent": "recent_week_admissions", "target": "weekly_admissions_target", "achievement": "weekly_admissions_achievement"}}, "avg_los": {"title": "平均在院日数", "unit": "日", "fields": {"avg": "avg_length_of_stay", "recent": "recent_week_avg_los", "target": "avg_los_target", "achievement": "avg_los_achievement"}}};
-        
-        // 現在表示中の指標
-        let currentMetric = 'daily_census';
-        
-        // 達成率による色クラスを取得
-        function getColorClass(achievement) {
-            if (achievement >= 100) return 'high';
-            if (achievement >= 80) return 'medium';
-            return 'low';
-        }
-        
-        // 数値のフォーマット
-        function formatValue(value, decimals = 1) {
-            if (value === null || value === undefined) return '--';
-            return value.toFixed(decimals);
-        }
-        
-        // カードのHTMLを生成
-        function createCard(item, metric) {
-            const colorClass = getColorClass(item.achievement);
-            const config = metricsConfig[metric];
-            const unit = config.unit;
-            
-            let bedInfoHtml = '';
-            if (metric === 'daily_census' && item.bed_count) {
-                const occupancyStr = item.bed_occupancy_rate !== null ? 
-                    formatValue(item.bed_occupancy_rate) + '%' : '--';
-                bedInfoHtml = `
-                    <div class="bed-info">
-                        <div class="bed-row">
-                            <span class="bed-label">病床数:</span>
-                            <span class="bed-value">${item.bed_count}床</span>
-                        </div>
-                        <div class="bed-row">
-                            <span class="bed-label">稼働率:</span>
-                            <span class="bed-value">${occupancyStr}</span>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            return `
-                <div class="metric-card border-${colorClass}">
-                    <div class="card-title">${item.name}</div>
-                    <div class="card-content">
-                        <div class="metric-row">
-                            <span class="metric-label">期間平均:</span>
-                            <span class="metric-value">${formatValue(item.avg)} ${unit}</span>
-                        </div>
-                        <div class="metric-row">
-                            <span class="metric-label">直近週実績:</span>
-                            <span class="metric-value">${formatValue(item.recent)} ${unit}</span>
-                        </div>
-                        <div class="metric-row">
-                            <span class="metric-label">目標:</span>
-                            <span class="metric-value">${item.target ? formatValue(item.target) : '--'} ${unit}</span>
-                        </div>
-                    </div>
-                    <div class="achievement-row">
-                        <span class="achievement-label achievement-${colorClass}">達成率:</span>
-                        <span class="achievement-value achievement-${colorClass}">${formatValue(item.achievement)}%</span>
-                    </div>
-                    ${bedInfoHtml}
-                </div>
-            `;
-        }
-        
-        // 指標を表示
-        function showMetric(metric) {
-            currentMetric = metric;
-            
-            // ボタンのアクティブ状態を更新
-            document.querySelectorAll('.metric-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-            
-            // グリッドをクリアして再描画
-            const container = document.getElementById('grid-container');
-            container.innerHTML = '';
-            
-            const data = metricsData[metric];
-            data.forEach(item => {
-                container.innerHTML += createCard(item, metric);
-            });
-        }
-        
-        // 初期表示
-        document.addEventListener('DOMContentLoaded', function() {
-            const container = document.getElementById('grid-container');
-            const data = metricsData[currentMetric];
-            data.forEach(item => {
-                container.innerHTML += createCard(item, currentMetric);
-            });
-        });
-    </script>
+<div class="container">
+    <h1>診療科別パフォーマンスダッシュボード <span style="font-size:0.8em;">直近4週間 (05/23～06/19)</span></h1>
+<div class="kpi-section">
+  <h2>歯科口腔外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>1.7142857142857142</td><td>4.0</td><td>42.857142857142854</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>泌尿器科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>26.142857142857142</td><td>30.0</td><td>87.14285714285714</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>整形外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>54.0</td><td>60.0</td><td>90.0</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>眼科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>7.214285714285714</td><td>5.3</td><td>136.11859838274933</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>総合内科（内科除く）</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>84.75</td><td>110.0</td><td>77.04545454545455</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>皮膚科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>3.9642857142857144</td><td>5.0</td><td>79.28571428571429</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>消化器内科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>42.107142857142854</td><td>41.0</td><td>102.70034843205573</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>循環器内科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>33.642857142857146</td><td>30.0</td><td>112.14285714285714</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>腎内科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>10.571428571428571</td><td>15.0</td><td>70.47619047619047</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>救急科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>18.714285714285715</td><td>25.0</td><td>74.85714285714286</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>その他</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>0.03571428571428571</td><td>None</td><td>0</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>脳神経外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>15.714285714285714</td><td>15.0</td><td>104.76190476190477</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>呼吸器内科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>42.464285714285715</td><td>45.0</td><td>94.36507936507937</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>一般消化器外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>42.535714285714285</td><td>40.0</td><td>106.33928571428571</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>耳鼻咽喉科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>8.714285714285714</td><td>15.0</td><td>58.09523809523809</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>脳神経内科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>17.642857142857142</td><td>20.0</td><td>88.21428571428571</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>内科救急</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>6.607142857142857</td><td>8.0</td><td>82.58928571428571</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>乳腺外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>10.892857142857142</td><td>12.5</td><td>87.14285714285714</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>産婦人科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>30.285714285714285</td><td>32.0</td><td>94.64285714285714</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>形成外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>4.035714285714286</td><td>5.0</td><td>80.71428571428572</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>血液内科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>25.571428571428573</td><td>25.0</td><td>102.28571428571429</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>小児科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>13.821428571428571</td><td>18.0</td><td>76.78571428571428</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>リウマチ膠原病内科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>12.0</td><td>12.0</td><td>100.0</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>呼吸器外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>4.857142857142857</td><td>6.0</td><td>80.95238095238095</td></tr></table>
+</div>
+<div class="kpi-section">
+  <h2>心臓血管外科</h2>
+<table class="kpi-table"><tr><th>指標</th><th>値</th><th>目標</th><th>達成率</th></tr><tr><td>日平均在院患者数</td><td>6.928571428571429</td><td>7.0</td><td>98.9795918367347</td></tr></table>
+</div>
+
+</div>
 </body>
 </html>
