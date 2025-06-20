@@ -34,26 +34,6 @@ except ImportError:
     get_unified_filter_summary = None
     get_unified_filter_config = None # ★★★ フォールバックを追加 ★★★
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def create_target_dict_cached(target_data):
-    """目標値辞書の生成（キャッシュ対応）"""
-    if target_data is None or target_data.empty:
-        return {}
-    
-    target_dict = {}
-    period_col_name = '区分' if '区分' in target_data.columns else '期間区分'
-    indicator_col_name = '指標タイプ'
-    
-    if all(col in target_data.columns for col in ['部門コード', '目標値', period_col_name, indicator_col_name]):
-        for _, row in target_data.iterrows():
-            dept_code = str(row['部門コード']).strip()
-            indicator = str(row[indicator_col_name]).strip()
-            period = str(row[period_col_name]).strip()
-            key = (dept_code, indicator, period)
-            target_dict[key] = row['目標値']
-    
-    return target_dict
-
 class GitHubPublisher:
     def __init__(self, repo_owner, repo_name, token, branch="main"):
         self.repo_owner = repo_owner
@@ -1202,7 +1182,7 @@ def create_external_dashboard_uploader():
 
 def generate_individual_analysis_html(df_filtered):
     """
-    現在の個別分析ビューから単体のHTMLレポートを生成する (★★ 最終確認テスト版 ★★)
+    現在の個別分析ビューから単体のHTMLレポートを生成する (★★ 構文エラー修正版 ★★)
     """
     if df_filtered is None or df_filtered.empty:
         return None, "分析対象のデータがありません。"
@@ -1211,38 +1191,46 @@ def generate_individual_analysis_html(df_filtered):
         return None, "グラフ生成モジュールが利用できません。"
 
     try:
+        # 現在のフィルター条件を取得
         filter_summary = get_unified_filter_summary()
         
-        # ★★★ ここからがテスト用の変更 ★★★
-        # 目標値の検索ロジックをすべてコメントアウトし、固定値を設定
-        
-        target_value = 400.0  # テスト用に目標値を400に固定します
-        
-        st.sidebar.warning("現在、目標値を400に固定するテストを実行中です。") # テスト中であることをUIに表示
-        
-        """
-        # 元のロジックは一時的に無効化します
+        # 目標値の取得処理 (individual_analysis_tab.py と同じロジック)
         target_value = None
         target_data = st.session_state.get('target_data')
         METRIC_FOR_CHART = '日平均在院患者数'
         
         if target_data is not None and not target_data.empty:
-            if '_target_dict_cached' not in st.session_state:
-                st.session_state._target_dict_cached = create_target_dict_cached(target_data)
-            target_dict = st.session_state._target_dict_cached
+            # 目標値辞書の作成
+            target_dict = {}
+            period_col_name = '区分' if '区分' in target_data.columns else '期間区分'
+            indicator_col_name = '指標タイプ'
             
+            if all(col in target_data.columns for col in ['部門コード', '目標値', period_col_name, indicator_col_name]):
+                for _, row in target_data.iterrows():
+                    dept_code = str(row['部門コード']).strip()
+                    indicator = str(row[indicator_col_name]).strip()
+                    period = str(row[period_col_name]).strip()
+                    key = (dept_code, indicator, period)
+                    target_dict[key] = row['目標値']
+            
+            # 現在のフィルター設定から対象を特定
             filter_code_for_target = "全体"
-            filter_config = get_unified_filter_config() or {}
+            filter_config = get_unified_filter_config() if get_unified_filter_config else {}
             
             if filter_config:
-                # ... (元のロジック) ...
-
+                selected_departments = (filter_config.get('selected_departments', []) or filter_config.get('selected_depts', []))
+                selected_wards = (filter_config.get('selected_wards', []) or filter_config.get('selected_ward', []))
+                
+                if selected_departments and len(selected_departments) == 1:
+                    filter_code_for_target = str(selected_departments[0]).strip()
+                elif selected_wards and len(selected_wards) == 1:
+                    filter_code_for_target = str(selected_wards[0]).strip()
+            
+            # 目標値の検索
             key = (filter_code_for_target, METRIC_FOR_CHART, '全日')
             if key in target_dict:
                 target_value = float(target_dict[key])
-        """
-        # ★★★ テスト用の変更ここまで ★★★
-
+        
         # 3つのグラフを生成
         with st.spinner("個別分析レポートのグラフを生成中..."):
             fig_alos = create_interactive_alos_chart(df_filtered, title="平均在院日数推移", days_to_show=90)
@@ -1251,16 +1239,18 @@ def generate_individual_analysis_html(df_filtered):
                 df_filtered, 
                 title="入院患者数推移", 
                 days=90,
-                target_value=target_value # ここに固定値 400.0 が渡されます
+                target_value=target_value
             )
             
             fig_dual_axis = create_interactive_dual_axis_chart(df_filtered, title="患者移動推移", days=90)
 
-        # (以降のHTMLテンプレート部分は変更ありません)
+        # グラフをHTMLコンポーネントに変換
         div_alos = fig_alos.to_html(full_html=False, include_plotlyjs='cdn') if fig_alos else "<div>平均在院日数グラフの生成に失敗しました。</div>"
         div_patient = fig_patient.to_html(full_html=False, include_plotlyjs=False) if fig_patient else "<div>入院患者数グラフの生成に失敗しました。</div>"
         div_dual_axis = fig_dual_axis.to_html(full_html=False, include_plotlyjs=False) if fig_dual_axis else "<div>患者移動グラフの生成に失敗しました。</div>"
 
+
+        # ★★★ 修正: f""" の前の不要なバックスラッシュを削除 ★★★
         html_template = f"""
 <!DOCTYPE html>
 <html lang="ja">
@@ -1382,55 +1372,6 @@ def create_github_publisher_interface(df_filtered=None):  # ★★★ 修正: �
         publish_options = st.sidebar.multiselect("公開ダッシュボード", publish_options_all, default=publish_options_all, key="github_publish_options")
         
         if st.sidebar.button("🚀 統合ダッシュボード公開", key="execute_integrated_publish", type="primary"):
-            
-            # ★★★ ここからデバッグコードを追加 ★★★
-            with st.sidebar.expander("🐛 公開処理デバッグ情報", expanded=True):
-                st.info("これは問題解決のための一時的な表示です。")
-                
-                # 1. フィルター済みデータの確認
-                if df_filtered is not None and not df_filtered.empty:
-                    st.success(f"✅ (1) フィルター済みデータ: {len(df_filtered)} 行受け取りました。")
-                else:
-                    st.error("❌ (1) フィルター済みデータが渡されていないか、空です。app.pyの修正が正しく反映されているか確認してください。")
-                    # データがなければここで処理を中断
-                    st.stop() 
-
-                # 2. 目標値データの確認
-                target_data = st.session_state.get('target_data')
-                if target_data is not None and not target_data.empty:
-                    st.success(f"✅ (2) 目標値データ(target_data): {len(target_data)} 行見つかりました。")
-                else:
-                    st.warning("⚠️ (2) 目標値データ(target_data)がセッションにありません。「データ入力」タブで目標値ファイルをアップロードしましたか？")
-
-                # 3. フィルター設定と目標値検索キーの確認
-                try:
-                    # この関数内で利用するためにインポート
-                    from unified_filters import get_unified_filter_config
-                    filter_config = get_unified_filter_config() or {}
-                    
-                    filter_mode = filter_config.get('filter_mode', '全体')
-                    st.info(f"🔍 (3) 現在のフィルターモード: `{filter_mode}`")
-
-                    filter_code_for_target = "全体"
-                    if filter_mode == '特定診療科':
-                        selected_depts = filter_config.get('selected_depts', [])
-                        if len(selected_depts) == 1:
-                            filter_code_for_target = str(selected_depts[0])
-                        elif len(selected_depts) > 1:
-                            filter_code_for_target = "複数診療科"
-                    elif filter_mode == '特定病棟':
-                        selected_wards = filter_config.get('selected_wards', [])
-                        if len(selected_wards) == 1:
-                            filter_code_for_target = str(selected_wards[0])
-                        elif len(selected_wards) > 1:
-                             filter_code_for_target = "複数病棟"
-                    
-                    st.info(f"🎯 (4) 目標値の検索に使われるキー: `{filter_code_for_target}`")
-                    st.caption("ここで「全体」や特定の診療科・病棟名が表示されていれば正常です。")
-
-                except Exception as e:
-                    st.error(f"デバッグ情報取得中にエラー: {e}")
-            # ★★★ デバッグコードここまで ★★★
             content_config = content_customizer.get_current_config()
             results = []
             progress_bar = st.sidebar.progress(0)
