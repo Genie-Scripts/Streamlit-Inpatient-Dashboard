@@ -3,171 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏥 [病院名] 統合ダッシュボード</title>
+    <title>🏥 統合ダッシュボード</title>
     <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Noto Sans JP', Meiryo, sans-serif;
-            background: #f5f7fa;
-            margin: 0;
+            font-family: 'Noto Sans JP', sans-serif;
+            background: #f8f9fa;
             padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
         }
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
+            max-width: 600px;
+            text-align: center;
         }
         h1 {
-            text-align: center;
-            color: #293a27;
-            margin-bottom: 10px;
-            font-size: 2em;
+            font-size: 2.5em;
+            color: #2c3e50;
+            margin-bottom: 20px;
         }
         .subtitle {
-            text-align: center;
-            color: #666;
+            color: #7f8c8d;
             margin-bottom: 40px;
             font-size: 1.1em;
         }
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-        .feature {
-            text-align: center;
-            color: #666;
-        }
-        .feature-icon {
-            font-size: 2em;
-            margin-bottom: 10px;
-        }
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 25px;
-            margin-top: 30px;
-        }
-        .dashboard-card {
+        .dashboard-button {
+            display: block;
             background: white;
+            margin: 20px 0;
+            padding: 30px;
             border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            text-decoration: none;
+            color: #2c3e50;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
         }
-        .dashboard-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        .dashboard-button:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+            border-color: #3498db;
         }
-        .dashboard-card h3 {
-            color: #293a27;
+        .dashboard-button h3 {
+            font-size: 1.4em;
             margin-bottom: 10px;
-            font-size: 1.3em;
+            color: #2c3e50;
         }
-        .dashboard-card p {
-            color: #666;
-            margin-bottom: 15px;
+        .dashboard-button p {
+            color: #7f8c8d;
             line-height: 1.5;
         }
-        .update-time {
+        .footer {
+            margin-top: 40px;
+            padding: 20px;
+            color: #7f8c8d;
             font-size: 0.9em;
-            color: #999;
-            margin-bottom: 20px !important;
         }
-        .dashboard-link {
-            display: inline-block;
-            background: #4CAF50;
-            color: white;
-            padding: 12px 24px;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 600;
-            transition: background 0.3s ease;
-        }
-        .dashboard-link:hover {
-            background: #45a049;
-        }
-        @media (max-width: 768px) {
-            .dashboard-grid {
-                grid-template-columns: 1fr;
-            }
-            h1 {
-                font-size: 1.5em;
-            }
+        @media (max-width: 600px) {
+            h1 { font-size: 2em; }
+            .dashboard-button { padding: 20px; }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🏥 [病院名] 統合ダッシュボード</h1>
-        <p class="subtitle">入院・手術分析で医療の質向上を目指して</p>
+        <h1>🏥 統合ダッシュボード</h1>
+        <p class="subtitle">入院管理・手術分析・スマートフォン対応</p>
         
         
-            <div class="features">
-                
-                <div class="feature">
-                    <div class="feature-icon">📊</div>
-                    <h4>入院パフォーマンス</h4>
-                    <p>病棟・診療科別の入院指標</p>
-                </div>
-                
-                <div class="feature">
-                    <div class="feature-icon">🏥</div>
-                    <h4>手術分析</h4>
-                    <p>手術実績と効率性の分析</p>
-                </div>
-                
-                <div class="feature">
-                    <div class="feature-icon">📱</div>
-                    <h4>モバイル最適化</h4>
-                    <p>スマートフォンで快適に閲覧</p>
-                </div>
-                
-                <div class="feature">
-                    <div class="feature-icon">🔄</div>
-                    <h4>自動更新</h4>
-                    <p>データは定期的に自動更新</p>
-                </div>
-                
-            </div>
-            
-        
-        <div class="dashboard-grid">
-            
-            <div class="dashboard-card">
+            <a href="dept_performance.html" class="dashboard-button">
                 <h3>診療科別パフォーマンス</h3>
                 <p>各診療科の入院患者数、新入院患者数、平均在院日数の実績と目標達成率</p>
-                <p class="update-time">最終更新: 2025/06/20 01:54</p>
-                <a href="dept_performance.html" class="dashboard-link">ダッシュボードを開く</a>
-            </div>
+            </a>
             
-            <div class="dashboard-card">
+            <a href="ward_performance.html" class="dashboard-button">
                 <h3>病棟別パフォーマンス</h3>
                 <p>各病棟の入院患者数、新入院患者数、平均在院日数の実績と目標達成率</p>
-                <p class="update-time">最終更新: 2025/06/20 01:54</p>
-                <a href="ward_performance.html" class="dashboard-link">ダッシュボードを開く</a>
-            </div>
+            </a>
             
-            <div class="dashboard-card">
-                <h3>🔗 手術分析ダッシュボード</h3>
-                <p>手術実績、手術時間、効率性指標の分析結果</p>
-                <p class="update-time">最終更新: 2025/06/20 01:53</p>
-                <a href="診療科別パフォーマンス_20250618.html" class="dashboard-link">ダッシュボードを開く</a>
-            </div>
+            <a href="診療科別パフォーマンス_20250618.html" class="dashboard-button">
+                <h3>🔗 手術ダッシュボード</h3>
+                <p>全身麻酔手術の手術実績、手術時間、効率性指標の分析結果</p>
+            </a>
             
-            <div class="dashboard-card">
+            <a href="comprehensive_report_90days.html" class="dashboard-button">
                 <h3>🔗 90日間総合レポート</h3>
                 <p>全体・診療科別・病棟別の詳細分析（グラフ・テーブル含む）</p>
-                <p class="update-time">最終更新: 2025/06/20 01:53</p>
-                <a href="comprehensive_report_90days.html" class="dashboard-link">ダッシュボードを開く</a>
-            </div>
+            </a>
             
-        </div>
         
-        <footer style="text-align: center; margin-top: 50px; color: #999; border-top: 1px solid #eee; padding-top: 30px;">
-            <p>最終更新: 2025年06月20日 01:54</p>
-            <p>🏥 [病院名] 医療情報統合システム</p>
-            <p>お問い合わせ：情報システム部門（内線xxxx）</p>
-        </footer>
+        <div class="footer">
+            <p>🏥 経営企画室</p>
+            
+            <p>最終更新: 2025年06月20日 02:07</p>
+        </div>
     </div>
 </body>
 </html>
